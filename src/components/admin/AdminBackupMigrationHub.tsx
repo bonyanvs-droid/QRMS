@@ -663,6 +663,23 @@ export const AdminBackupMigrationHub: React.FC = () => {
                   {validationResult?.duplicateIds.length || 0}
                 </span>
               </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between col-span-1 md:col-span-2">
+                <div className="flex items-center gap-2">
+                  <Building className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="text-slate-700 font-medium">فحص سلامة مراجع المستأجرين (Tenants FK Resolution):</span>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-xs">
+                  {preflightResult?.tenantDetails?.primaryTenantId ? (
+                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-200 font-bold">
+                      Tenant: {preflightResult.tenantDetails.primaryTenantId}
+                    </span>
+                  ) : null}
+                  <span className={`font-bold ${preflightResult?.missingTenantReferencesCount ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {preflightResult?.missingTenantReferencesCount ? `${preflightResult.missingTenantReferencesCount} مراجع مفقودة` : 'مطابق وديناميكي (0 FK Errors)'}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -20,6 +20,7 @@ import { transformDocument } from '../transformers/typeTransformers';
 import { MigrationValidator } from '../validators/migrationValidator';
 import { generate527ReconciliationReport, FullReconciliationReport } from './reconciliationEngine';
 import { INITIAL_STAGES, INITIAL_USERS, INITIAL_SPELLING_LESSONS } from '../../src/data/initialData';
+import { TenantResolverEngine } from './tenantResolverEngine';
 
 export type MigrationRunStatus = 
   | 'PENDING'
@@ -73,10 +74,16 @@ export interface PreflightCheckResult {
   skippedCount: number;
   warningsCount: number;
   fatalErrorsCount: number;
+  missingTenantReferencesCount: number;
   warnings: string[];
   errors: string[];
   safetyCheckPassed: boolean;
   explanation: string;
+  tenantDetails?: {
+    totalTenantsFound: number;
+    primaryTenantId: string | null;
+    tenants: Array<{ id: string; slug?: string; name?: string }>;
+  };
 }
 
 export interface PostMigrationVerificationResult {
@@ -163,7 +170,13 @@ export function executeMigrationPreflight(
   const collectionsObj = backupData?.collections || {};
   const reconciliation = generate527ReconciliationReport(collectionsObj);
 
-  const validator = new MigrationValidator();
+  // Initialize Dynamic Tenant Foreign Key Resolver
+  const rawTenants = collectionsObj['tenants'] || [];
+  const tenantResolver = new TenantResolverEngine(rawTenants);
+  const foundTenants = tenantResolver.getTenants();
+  const primaryTenant = tenantResolver.getPrimaryTenant();
+
+  const validator = new MigrationValidator(tenantResolver);
 
   // Register Canonical Master Seeds (Stages, Spelling Lessons, Master Admin)
   for (const stg of INITIAL_STAGES) {
@@ -175,6 +188,30 @@ export function executeMigrationPreflight(
   }
   for (const u of INITIAL_USERS) {
     validator.registerId('users', u.id, 'platform_users');
+  }
+
+  // Register all tenant IDs into validator
+  for (const t of foundTenants) {
+    validator.registerId('tenants', t.id, 'tenants');
+  }
+
+  // Preflight Check: Verify all tenant-dependent collections
+  const tenantDependentCols = Object.keys(COLLECTION_MAPPINGS)
+    .filter((k) => COLLECTION_MAPPINGS[k].tenantKey || (COLLECTION_MAPPINGS[k].dependencies || []).includes('tenants'))
+    .concat(['teachers']);
+
+  const tenantCheckReport = tenantResolver.validateAllTenantReferences(collectionsObj, tenantDependentCols);
+
+  if (tenantCheckReport.missingTenantReferences > 0) {
+    for (const detail of tenantCheckReport.invalidReferenceDetails) {
+      errors.push(`خطأ مرجع المستأجر: في المجموعة '${detail.collection}' المستند '${detail.docId}' - ${detail.reason}`);
+    }
+  }
+
+  if (tenantCheckReport.inferredTenantReferences > 0) {
+    warnings.push(
+      `تم استنتاج وربط ${tenantCheckReport.inferredTenantReferences} مرجع مستأجر حتمياً بالمستأجر الرئيسي '${primaryTenant?.id || 'default'}'`
+    );
   }
 
   // Register teachers dynamically into validator to resolve halaqahs.teacher_id cleanly
@@ -230,11 +267,18 @@ export function executeMigrationPreflight(
     skippedCount,
     warningsCount: warnings.length,
     fatalErrorsCount: errors.length,
+    missingTenantReferencesCount: tenantCheckReport.missingTenantReferences,
     warnings,
     errors,
     safetyCheckPassed,
-    explanation:
-      'تم إجراء الفحص القبلي الشامل بنجاح. كافة الحسابات والوثائق مطابقة للـ PostgreSQL Schema بنسبة 100% وبدون أي تعارض في المفاتيح.'
+    explanation: safetyCheckPassed
+      ? 'تم إجراء الفحص القبلي الشامل بنجاح. كافة الحسابات والوثائق ومراجع المستأجرين (Tenants FKs) مطابقة للـ PostgreSQL Schema بنسبة 100% وبدون أي تعارض.'
+      : `فشل الفحص القبلي: تم العثور على ${errors.length} أخطاء حرجة أو مراجع مفقودة للمستأجرين.`,
+    tenantDetails: {
+      totalTenantsFound: foundTenants.length,
+      primaryTenantId: primaryTenant?.id || null,
+      tenants: foundTenants.map((t) => ({ id: t.id, slug: t.slug, name: t.name })),
+    },
   };
 }
 
@@ -407,7 +451,8 @@ export async function mergeTeachersIntoUsers(
   client: MigrationDbClient,
   rawTeachers: any[],
   runId: string,
-  logs: MigrationLogItem[]
+  logs: MigrationLogItem[],
+  tenantResolver?: TenantResolverEngine
 ): Promise<{ attempted: number; successful: number; teacherMapping: Map<string, string> }> {
   let attempted = 0;
   let successful = 0;
@@ -427,9 +472,17 @@ export async function mergeTeachersIntoUsers(
     teacherMapping.set(rawId, targetUserId);
     teacherMapping.set(targetUserId, targetUserId);
 
+    let resolvedTenantId: string | null = null;
+    if (tenantResolver) {
+      const res = tenantResolver.resolveTenantId(t.tenantId || t.tenant_id);
+      resolvedTenantId = res.resolvedTenantId;
+    } else {
+      resolvedTenantId = t.tenantId || t.tenant_id || null;
+    }
+
     const userRow = {
       id: targetUserId,
-      tenant_id: t.tenantId || 'ghazzawi',
+      tenant_id: resolvedTenantId,
       organization_id: t.organizationId || null,
       name: t.name || t.fullName || 'معلم القرآن',
       full_name: t.fullName || t.name || 'معلم القرآن',
@@ -460,6 +513,7 @@ export async function mergeTeachersIntoUsers(
         mergedIntoUser: targetUserId,
         preservedStaffId: rawId,
         teacherName: userRow.name,
+        resolvedTenantId,
       },
       timestamp: new Date().toISOString(),
     });
@@ -529,6 +583,46 @@ export async function executePostMigrationVerification(
     // Fallback
   }
 
+  try {
+    // Check users.tenant_id -> tenants.id
+    const resUsersTenantFk = await client.query(
+      `SELECT COUNT(*)::int AS count FROM users u WHERE u.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = u.tenant_id)`
+    );
+    fkViolationsCount += resUsersTenantFk?.rows?.[0]?.count || 0;
+  } catch {
+    // Fallback
+  }
+
+  try {
+    // Check halaqahs.tenant_id -> tenants.id
+    const resHalaqahTenantFk = await client.query(
+      `SELECT COUNT(*)::int AS count FROM halaqahs h WHERE h.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = h.tenant_id)`
+    );
+    fkViolationsCount += resHalaqahTenantFk?.rows?.[0]?.count || 0;
+  } catch {
+    // Fallback
+  }
+
+  try {
+    // Check students.tenant_id -> tenants.id
+    const resStudentsTenantFk = await client.query(
+      `SELECT COUNT(*)::int AS count FROM students s WHERE s.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = s.tenant_id)`
+    );
+    fkViolationsCount += resStudentsTenantFk?.rows?.[0]?.count || 0;
+  } catch {
+    // Fallback
+  }
+
+  try {
+    // Check track_definitions.tenant_id -> tenants.id
+    const resTrackTenantFk = await client.query(
+      `SELECT COUNT(*)::int AS count FROM track_definitions td WHERE td.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = td.tenant_id)`
+    );
+    fkViolationsCount += resTrackTenantFk?.rows?.[0]?.count || 0;
+  } catch {
+    // Fallback
+  }
+
   const isVerified = failedCollections.length === 0 && fkViolationsCount === 0;
 
   return {
@@ -592,6 +686,25 @@ export async function executeControlledMigration(
   const reconciliation = generate527ReconciliationReport(collectionsObj);
   const totalSourceDocs = reconciliation.totalSourceDocuments;
 
+  // Initialize Dynamic Tenant Foreign Key Resolver
+  const rawTenants = collectionsObj['tenants'] || [];
+  const tenantResolver = new TenantResolverEngine(rawTenants);
+
+  // Pre-Execution Safety Verification: Verify all tenant foreign key references
+  const tenantDependentCols = Object.keys(COLLECTION_MAPPINGS)
+    .filter((k) => COLLECTION_MAPPINGS[k].tenantKey || (COLLECTION_MAPPINGS[k].dependencies || []).includes('tenants'))
+    .concat(['teachers']);
+
+  const tenantCheckReport = tenantResolver.validateAllTenantReferences(collectionsObj, tenantDependentCols);
+
+  if (tenantCheckReport.missingTenantReferences > 0) {
+    activeRunningMigrationId = null;
+    const firstErr = tenantCheckReport.invalidReferenceDetails[0];
+    throw new Error(
+      `تم إيقاف الترحيل بسبب مراجع مستأجرين غير صالحة (Tenant FK Violations): تم اكتشاف ${tenantCheckReport.missingTenantReferences} مرجع غير مطابق. مثال: ${firstErr?.collection} - ${firstErr?.reason}`
+    );
+  }
+
   const runRecord: MigrationRunRecord = {
     id: runId,
     startedAt: new Date().toISOString(),
@@ -610,6 +723,8 @@ export async function executeControlledMigration(
     details: {
       adminEmail: params.adminEmail,
       reconciliationProof: '527_DOCUMENT_RECONCILIATION_MATCHED',
+      tenantsFoundCount: tenantResolver.getTenants().length,
+      primaryTenantId: tenantResolver.getPrimaryTenant()?.id || null,
     },
   };
 
@@ -642,21 +757,16 @@ export async function executeControlledMigration(
       timestamp: new Date().toISOString(),
     });
 
-    // 3. Seed Canonical Master Data
+    // 3. Seed Canonical Master Data (Stages, Spelling Lessons, Root System Admin)
     const seedResult = await seedMasterCanonicalData(client, runId, logs);
     runRecord.attemptedInserts += seedResult.attempted;
     runRecord.successfulInserts += seedResult.successful;
 
-    // 4. Dynamic Teachers Merge
-    const rawTeachers = collectionsObj['teachers'] || [];
-    const mergeResult = await mergeTeachersIntoUsers(client, rawTeachers, runId, logs);
-    runRecord.attemptedInserts += mergeResult.attempted;
-    runRecord.successfulInserts += mergeResult.successful;
-    runRecord.mergedRecords += mergeResult.successful;
-
-    // 5. Migrate Collections in Topological Order
+    // 4. Track teacher mapping for halaqahs foreign keys
+    let teacherMapping = new Map<string, string>();
     const expectedCounts: Record<string, number> = {};
 
+    // 5. Migrate Collections in Strict Topological Order
     for (const step of MIGRATION_ORDER) {
       const colName = step.collection;
       const config = COLLECTION_MAPPINGS[colName];
@@ -687,10 +797,24 @@ export async function executeControlledMigration(
             config.organizationKey
           );
 
-          // Apply entity-specific fixes
+          // Resolve tenant_id dynamically to the real target tenants.id
+          if (config.tenantKey) {
+            const rawTenantVal = rawDoc[config.tenantKey] || rawDoc.tenantId || rawDoc.tenant_id;
+            const res = tenantResolver.resolveTenantId(rawTenantVal);
+            if (res.isResolved && res.resolvedTenantId) {
+              transformed.data[config.tenantKey] = res.resolvedTenantId;
+            } else if (colName === 'platform_users' && (rawDoc.role === 'system_admin' || rawDoc.role === 'admin')) {
+              transformed.data[config.tenantKey] = null;
+            }
+          }
+
+          // Apply entity-specific relational mappings
           if (colName === 'students') {
             transformed.data.full_name = rawDoc.fullName || rawDoc.name || transformed.data.full_name || 'طالب';
-            transformed.data.tenant_id = transformed.data.tenant_id || 'ghazzawi';
+            const studentTenantRes = tenantResolver.resolveTenantId(rawDoc.tenantId || rawDoc.tenant_id);
+            if (studentTenantRes.isResolved && studentTenantRes.resolvedTenantId) {
+              transformed.data.tenant_id = studentTenantRes.resolvedTenantId;
+            }
             // Resolve current_spelling_lesson_id
             if (rawDoc.currentSpellingLessonId) {
               const splId = String(rawDoc.currentSpellingLessonId).trim();
@@ -698,9 +822,15 @@ export async function executeControlledMigration(
             }
           }
 
-          if (colName === 'halaqahs' && rawDoc.teacherId) {
-            const mappedTeacherId = mergeResult.teacherMapping.get(rawDoc.teacherId) || rawDoc.teacherId;
-            transformed.data.teacher_id = mappedTeacherId;
+          if (colName === 'halaqahs') {
+            if (rawDoc.teacherId) {
+              const mappedTeacherId = teacherMapping.get(rawDoc.teacherId) || rawDoc.teacherId;
+              transformed.data.teacher_id = mappedTeacherId;
+            }
+            const halaqahTenantRes = tenantResolver.resolveTenantId(rawDoc.tenantId || rawDoc.tenant_id);
+            if (halaqahTenantRes.isResolved && halaqahTenantRes.resolvedTenantId) {
+              transformed.data.tenant_id = halaqahTenantRes.resolvedTenantId;
+            }
           }
 
           const q = buildParameterizedInsertQuery(config.postgresTable, transformed.data, config.primaryKey);
@@ -721,6 +851,17 @@ export async function executeControlledMigration(
             timestamp: new Date().toISOString(),
           });
         }
+      }
+
+      // If we just finished platform_users (Tier 3), now merge teachers into users table!
+      // This ensures tenants table is already seeded (at Step 9), so users_tenant_id_fkey will succeed.
+      if (colName === 'platform_users') {
+        const rawTeachers = collectionsObj['teachers'] || [];
+        const mergeResult = await mergeTeachersIntoUsers(client, rawTeachers, runId, logs, tenantResolver);
+        teacherMapping = mergeResult.teacherMapping;
+        runRecord.attemptedInserts += mergeResult.attempted;
+        runRecord.successfulInserts += mergeResult.successful;
+        runRecord.mergedRecords += mergeResult.successful;
       }
 
       logs.push({

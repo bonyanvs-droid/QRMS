@@ -17,6 +17,7 @@ import {
   ValidationWarningItem,
   CollectionValidationReport,
 } from '../core/migrationTypes';
+import { TenantResolverEngine } from '../core/tenantResolverEngine';
 
 export interface ExtendedValidationReport extends CollectionValidationReport {
   resolvableFkCount: number;
@@ -30,14 +31,21 @@ export interface ExtendedValidationReport extends CollectionValidationReport {
 export class MigrationValidator {
   private knownIdsByTable: Map<string, Set<string>> = new Map();
   private knownIdsByCollection: Map<string, Set<string>> = new Map();
-  private defaultTenantId: string = 'ghazzawi';
+  private tenantResolver: TenantResolverEngine | null = null;
 
-  constructor() {
+  constructor(tenantResolver?: TenantResolverEngine) {
+    if (tenantResolver) {
+      this.tenantResolver = tenantResolver;
+    }
     // Pre-register canonical educational stage master seeds (including 'baraem', 'ashbal', etc.)
     const canonicalStages = ['baraem', 'ashbal', 'fityan', 'motawassit', 'thanawi', 'jamiyeen'];
     for (const stg of canonicalStages) {
       this.registerId('stages', stg, 'educational_stages');
     }
+  }
+
+  public setTenantResolver(resolver: TenantResolverEngine): void {
+    this.tenantResolver = resolver;
   }
 
   /**
@@ -123,23 +131,38 @@ export class MigrationValidator {
         this.registerId(config.postgresTable, record.id, config.firestoreCollection);
       }
 
-      // 2. Tenant Context & Deterministic Resolution
+      // 2. Tenant Context & Dynamic FK Resolution
       if (config.tenantKey) {
-        const tenantVal = record.data[config.tenantKey];
-        if (tenantVal && typeof tenantVal === 'string' && tenantVal.trim() !== '') {
+        const rawTenantVal = record.data[config.tenantKey] || record.tenantId;
+        if (this.tenantResolver) {
+          const res = this.tenantResolver.resolveTenantId(rawTenantVal);
+          if (res.isResolved && res.resolvedTenantId) {
+            record.data[config.tenantKey] = res.resolvedTenantId;
+            record.tenantId = res.resolvedTenantId;
+            if (res.isDefaultInferred) {
+              hasDefaultedTenant = true;
+              tenantResolvedCount++;
+              warnings.push({
+                type: 'DEFAULT_APPLIED',
+                field: config.tenantKey,
+                message: `حقل tenant_id تم ربطه ديناميكياً بالمستأجر الفعلي: ${res.resolvedTenantId} (النوع: ${res.matchType})`,
+                documentId: record.id,
+              });
+            } else {
+              hasExplicitTenant = true;
+            }
+          } else {
+            // Unresolvable tenant
+            errors.push({
+              type: 'REQUIRED_FIELD_MISSING',
+              field: config.tenantKey,
+              message: `مرجع المستأجر '${rawTenantVal}' غير موجود في بيانات tenants بالنسخة الاحتياطية.`,
+              documentId: record.id,
+            });
+            recordHasFatalError = true;
+          }
+        } else if (rawTenantVal && typeof rawTenantVal === 'string' && rawTenantVal.trim() !== '') {
           hasExplicitTenant = true;
-        } else {
-          // Deterministic resolution: Al-Ghazzawi is the only active tenant in the current dataset
-          hasDefaultedTenant = true;
-          tenantResolvedCount++;
-          record.data[config.tenantKey] = this.defaultTenantId;
-          record.tenantId = this.defaultTenantId;
-          warnings.push({
-            type: 'DEFAULT_APPLIED',
-            field: config.tenantKey,
-            message: `حقل tenant_id مفقود أصلاً في المستند، تم استنتاجه وتحديده حتمياً: ${this.defaultTenantId} (السبب: مجمع الغزاوي هو الـ Tenant الوحيد النشط حالياً)`,
-            documentId: record.id,
-          });
         }
       }
 
@@ -179,7 +202,7 @@ export class MigrationValidator {
             resolvableFkCount++;
           } else if (
             (rule.foreignKeyTable === 'users' && this.hasIdInCollection('teachers', fkVal)) ||
-            (rule.foreignKeyTable === 'tenants' && fkVal === 'ghazzawi') ||
+            (rule.foreignKeyTable === 'tenants' && this.tenantResolver?.resolveTenantId(fkVal)?.isResolved) ||
             (rule.foreignKeyTable === 'stages' && this.hasIdInCollection('educational_stages', fkVal))
           ) {
             // Tier 2: Deferred internal FK (exists in source collections/unmapped entities in the backup)
