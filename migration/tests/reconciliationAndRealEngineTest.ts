@@ -15,6 +15,7 @@ import {
   executeControlledMigration,
   isMigrationRunning 
 } from '../core/realMigrationEngine';
+import { MockPostgresTransactionalClient } from './realMigrationIntegrationTest';
 
 async function runTestSuite() {
   console.log('===============================================================');
@@ -51,9 +52,10 @@ async function runTestSuite() {
 
   // TEST 3: Unauthorized Execution Rejection (Safety Lock)
   console.log('\n[TEST 3] Testing Safety Lock on Unauthorized Migration:');
+  const mockClient = new MockPostgresTransactionalClient();
   let rejected = false;
   try {
-    await executeControlledMigration({}, {
+    await executeControlledMigration(mockClient, {}, {
       confirmedByAdmin: false,
       confirmationText: 'INVALID_CODE',
       adminEmail: 'admin@qrms.system',
@@ -69,13 +71,17 @@ async function runTestSuite() {
   }
   console.log('✓ TEST 3 PASSED: Safety lock strictly blocks unauthorized execution.');
 
-  // TEST 4: Controlled Transactional Simulation & Rollback Capability
-  console.log('\n[TEST 4] Testing Controlled Transaction Simulation:');
-  const result = await executeControlledMigration({}, {
+  // TEST 4: Controlled Transactional Execution
+  console.log('\n[TEST 4] Testing Controlled Transaction Execution:');
+  const testClient = new MockPostgresTransactionalClient();
+  const result = await executeControlledMigration(testClient, {
+    collections: {
+      platform_users: [{ id: 'usr_admin', name: 'المدير', phone: '0500000000', role: 'system_admin' }],
+    }
+  }, {
     confirmedByAdmin: true,
     confirmationText: 'START_CONTROLLED_MIGRATION',
     adminEmail: 'admin@qrms.system',
-    isSimulation: true,
   });
 
   console.log(`- Execution Success: ${result.success}`);

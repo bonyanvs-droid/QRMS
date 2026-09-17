@@ -94,6 +94,23 @@ export const AdminBackupMigrationHub: React.FC = () => {
     );
   }
 
+  const fetchMigrationRunsAndLogs = async () => {
+    try {
+      const resp = await fetch('/api/admin/migration/runs');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.history) setRunsHistory(data.history);
+        if (data.logs) setLogsList(data.logs);
+      }
+    } catch {
+      // Ignore network errors in local preview
+    }
+  };
+
+  useEffect(() => {
+    fetchMigrationRunsAndLogs();
+  }, []);
+
   const handleRunPreflightCheck = () => {
     setIsRunningPreflight(true);
     setTimeout(() => {
@@ -101,7 +118,7 @@ export const AdminBackupMigrationHub: React.FC = () => {
       setPreflightResult(res);
       setReconciliationReport(generate527ReconciliationReport());
       setIsRunningPreflight(false);
-    }, 600);
+    }, 300);
   };
 
   const handleOpenMigrationModal = () => {
@@ -113,7 +130,7 @@ export const AdminBackupMigrationHub: React.FC = () => {
     setIsMigrationModalOpen(true);
   };
 
-  const handleExecuteSimulation = async () => {
+  const handleExecuteMigration = async () => {
     if (confirmationCode !== 'START_CONTROLLED_MIGRATION') {
       setErrorMessage('يرجى إدخال رمز التأكيد الصحيح (START_CONTROLLED_MIGRATION).');
       return;
@@ -122,101 +139,40 @@ export const AdminBackupMigrationHub: React.FC = () => {
     setIsExecutingMigration(true);
     setErrorMessage(null);
 
-    // Controlled simulation execution simulating transactional BEGIN -> INSERT -> VERIFY -> COMMIT
-    setTimeout(() => {
-      const simulatedRun: MigrationRunRecord = {
-        id: currentRunId,
-        startedAt: new Date(Date.now() - 3200).toISOString(),
-        completedAt: new Date().toISOString(),
-        source: 'Firestore Backup Snapshot (527 Documents)',
-        target: 'PostgreSQL Database (Transactional Session)',
-        sourceDocCount: 527,
-        attemptedInserts: 529, // 523 doc inserts + 6 master stage seeds
-        successfulInserts: 529,
-        skippedRecords: 0,
-        mergedRecords: 4, // teachers staff merged into users
-        failedRecords: 0,
-        warningsCount: 0,
-        errorsCount: 0,
-        verificationStatus: 'VERIFIED',
-        status: 'COMPLETED',
-        details: {
-          transactionStatus: 'SIMULATED_TRANSACTION_COMMITTED_CLEANLY',
-          reconciliationAudit: '527_OUT_OF_527_DOCUMENTS_VERIFIED',
-          safetyGuard: 'NO_PRODUCTION_VPS_WRITE_EXECUTED',
-          zeroDataLoss: true,
-        }
-      };
+    try {
+      const resp = await fetch('/api/admin/migration/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || 'admin@qrms.system',
+          'x-user-role': currentUser?.role || 'system_admin',
+        },
+        body: JSON.stringify({
+          confirmationCode,
+          migrationRunId: currentRunId,
+          backupData: { collections: {} },
+        }),
+      });
 
-      const simulatedLogs: MigrationLogItem[] = [
-        {
-          id: `${currentRunId}_log_1`,
-          migrationRunId: currentRunId,
-          collection: 'SYSTEM',
-          documentId: 'BEGIN_TRANSACTION',
-          operation: 'SEED_ATTACH',
-          status: 'SUCCESS',
-          details: { message: 'فتح معاملة قاعدة البيانات المعزولة (BEGIN TRANSACTION).' },
-          timestamp: new Date().toISOString(),
-        },
-        {
-          id: `${currentRunId}_log_2`,
-          migrationRunId: currentRunId,
-          collection: 'educational_stages',
-          documentId: 'stg_6_canonical_seeds',
-          operation: 'SEED_ATTACH',
-          status: 'SUCCESS',
-          details: { message: 'تثبيت المراحل التعليمية الست الأساسية (المرحلة التمهيدية، الأولية، المتوسطة، العليا، التخصصية، التأهيلية).' },
-          timestamp: new Date().toISOString(),
-        },
-        {
-          id: `${currentRunId}_log_3`,
-          migrationRunId: currentRunId,
-          collection: 'teachers',
-          documentId: '4_staff_records',
-          operation: 'MERGE',
-          status: 'MERGED',
-          details: { message: 'دمج كوادر المعلمين الأربعة في جدول users مع ربط halaqahs.teacher_id دون تكرار المفاتيح.' },
-          timestamp: new Date().toISOString(),
-        },
-        {
-          id: `${currentRunId}_log_4`,
-          migrationRunId: currentRunId,
-          collection: 'students',
-          documentId: '31_students_records',
-          operation: 'INSERT',
-          status: 'SUCCESS',
-          details: { message: 'ترحيل 31 طالباً مع تعيين full_name ومطابقة المفاتيح الأجنبية بنسبة 100%.' },
-          timestamp: new Date().toISOString(),
-        },
-        {
-          id: `${currentRunId}_log_5`,
-          migrationRunId: currentRunId,
-          collection: 'audit_logs',
-          documentId: '383_audit_records',
-          operation: 'INSERT',
-          status: 'SUCCESS',
-          details: { message: 'ترحيل 383 سجلاً أمنياً ورقابياً إلى جدول audit_logs.' },
-          timestamp: new Date().toISOString(),
-        },
-        {
-          id: `${currentRunId}_log_6`,
-          migrationRunId: currentRunId,
-          collection: 'SYSTEM',
-          documentId: 'COMMIT_TRANSACTION',
-          operation: 'INSERT',
-          status: 'SUCCESS',
-          details: { message: 'اجتياز الفحص التكاملي والاعتماد التام بنجاح (COMMIT).' },
-          timestamp: new Date().toISOString(),
-        },
-      ];
+      const data = await resp.json();
 
-      setRunsHistory(prev => [simulatedRun, ...prev]);
-      setLogsList(prev => [...simulatedLogs, ...prev]);
-      setMigrationExecutionResult(simulatedRun);
-      setIsExecutingMigration(false);
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'فشلت عملية الترحيل من قبل الخادم.');
+      }
+
+      if (data.migrationRun) {
+        setRunsHistory(prev => [data.migrationRun, ...prev]);
+        setMigrationExecutionResult(data.migrationRun);
+      }
+      if (data.logs) {
+        setLogsList(prev => [...data.logs, ...prev]);
+      }
       setMigrationStep(3);
-    }, 1800);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'حدث خطأ غير متوقع أثناء تشغيل الترحيل.');
+    } finally {
+      setIsExecutingMigration(false);
+    }
   };
 
   const filteredReconcileRows = reconciliationReport.rows.filter(
@@ -690,7 +646,7 @@ export const AdminBackupMigrationHub: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={handleExecuteSimulation}
+                    onClick={handleExecuteMigration}
                     disabled={isExecutingMigration || confirmationCode !== 'START_CONTROLLED_MIGRATION'}
                     className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"
                   >
@@ -710,10 +666,10 @@ export const AdminBackupMigrationHub: React.FC = () => {
                     <span>تم الترحيل المعاملاتي والتحقق التكاملي بنجاح تام!</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                    <div>حالة الترحيل: <strong>COMPLETED (COMMIT)</strong></div>
-                    <div>حالة التحقق: <strong>VERIFIED (100%)</strong></div>
-                    <div>سجلات المصدر المعالجة: <strong>527 / 527</strong></div>
-                    <div>سجلات مدخلة ومدمجة: <strong>529</strong></div>
+                    <div>حالة الترحيل: <strong>{migrationExecutionResult?.status || 'COMPLETED'}</strong></div>
+                    <div>حالة التحقق: <strong>{migrationExecutionResult?.verificationStatus || 'VERIFIED'}</strong></div>
+                    <div>سجلات المصدر: <strong>{migrationExecutionResult?.sourceDocCount ?? reconciliationReport.totalSourceDocuments}</strong></div>
+                    <div>سجلات ناجحة: <strong>{migrationExecutionResult?.successfulInserts ?? migrationExecutionResult?.attemptedInserts ?? 0}</strong></div>
                   </div>
                 </div>
 

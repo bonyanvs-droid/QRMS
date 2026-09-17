@@ -9,6 +9,7 @@ import {
   executeControlledMigration
 } from '../../migration/core/realMigrationEngine';
 import { generate527ReconciliationReport } from '../../migration/core/reconciliationEngine';
+import { getDbPool } from '../config/db';
 
 export const backupRestoreRouter = Router();
 
@@ -125,3 +126,63 @@ backupRestoreRouter.post('/reconciliation', (req: Request, res: Response) => {
   });
 });
 
+/**
+ * POST /api/admin/migration/execute
+ * 
+ * Executes the real PostgreSQL Transactional Migration.
+ * Strictly requires confirmationCode === 'START_CONTROLLED_MIGRATION'.
+ */
+backupRestoreRouter.post('/execute', async (req: Request, res: Response) => {
+  const { backupData, confirmationCode, migrationRunId } = req.body;
+  const adminEmail = (req.headers['x-user-email'] as string) || 'admin@qrms.system';
+
+  if (!backupData) {
+    return res.status(400).json({
+      success: false,
+      error: 'بيانات النسخة الاحتياطية مفقودة (backupData is required).',
+    });
+  }
+
+  if (confirmationCode !== 'START_CONTROLLED_MIGRATION') {
+    return res.status(400).json({
+      success: false,
+      error: 'رمز التأكيد غير صحيح. يجب إدخال START_CONTROLLED_MIGRATION لتنفيذ الترحيل.',
+    });
+  }
+
+  const pool = getDbPool();
+  if (!pool) {
+    return res.status(503).json({
+      success: false,
+      error: 'قاعدة بيانات PostgreSQL غير مهيأة (DATABASE_URL is not set). يرجى تكوين الاتصال بقاعدة البيانات لتشغيل الترحيل الحقيقي.',
+    });
+  }
+
+  let client: any = null;
+  try {
+    client = await pool.connect();
+    const result = await executeControlledMigration(client, backupData, {
+      migrationRunId,
+      confirmedByAdmin: true,
+      confirmationText: confirmationCode,
+      adminEmail,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      migrationRun: result.migrationRun,
+      logs: result.logs,
+      verification: result.verification,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'حدث خطأ أثناء تنفيذ عملية الترحيل المعاملاتية.',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
