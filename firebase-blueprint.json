@@ -1,0 +1,475 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "supervisor", "teacher"] },
+        "halaqahId": { "type": "string" },
+        "mustChangePassword": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "phone", "role"]
+    },
+    "AcademicYear": {
+      "title": "AcademicYear",
+      "description": "Academic year calendar and configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "operationalStartWeek": { "type": "number" },
+        "operationalEndWeek": { "type": "number" },
+        "totalOperationalWeeks": { "type": "number" },
+        "isCurrent": { "type": "boolean" },
+        "holidays": { "type": "array" }
+      },
+      "required": ["id", "name", "startDate", "endDate", "operationalStartWeek", "operationalEndWeek"]
+    },
+    "Halaqah": {
+      "title": "Halaqah",
+      "description": "Quranic study circle in Masjid Al-Ghazzawi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "academicYearId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "teacherId"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student in Baraem stage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "grade": { "type": "string" },
+        "halaqahId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "parentName": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "parentRelationship": { "type": "string" },
+        "minTargetSurah": { "type": "string" },
+        "personalTargetSurah": { "type": "string" },
+        "currentSurah": { "type": "string" },
+        "currentLessonId": { "type": "string" },
+        "status": { "type": "string" },
+        "academicYearId": { "type": "string" }
+      },
+      "required": ["id", "fullName", "grade", "halaqahId", "teacherId", "parentPhone"]
+    },
+    "DailyRecord": {
+      "title": "DailyRecord",
+      "description": "Daily attendance, memorization, revision, and spelling assessment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "halaqahId": { "type": "string" },
+        "academicYearId": { "type": "string" },
+        "date": { "type": "string" },
+        "weekNumber": { "type": "number" },
+        "attendanceStatus": { "type": "string", "enum": ["present", "absent", "excused"] },
+        "spelling": { "type": "object" },
+        "memorization": { "type": "object" },
+        "revision": { "type": "object" },
+        "teacherRemarks": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "teacherId", "halaqahId", "date", "weekNumber", "attendanceStatus"]
+    },
+    "SpellingLesson": {
+      "title": "SpellingLesson",
+      "description": "Spelling curriculum lesson and sub-skills",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "lessonNumber": { "type": "number" },
+        "title": { "type": "string" },
+        "skillName": { "type": "string" },
+        "skillDescription": { "type": "string" },
+        "subLessons": { "type": "array" },
+        "orderIndex": { "type": "number" }
+      },
+      "required": ["id", "lessonNumber", "title", "skillName"]
+    },
+    "EducationalPlanWeek": {
+      "title": "EducationalPlanWeek",
+      "description": "Weekly educational plan for Baraem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "academicYearId": { "type": "string" },
+        "weekNumber": { "type": "number" },
+        "gregorianDate": { "type": "string" },
+        "goal": { "type": "string" },
+        "motto": { "type": "string" },
+        "responsible": { "type": "string" },
+        "budget": { "type": "number" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "weekNumber", "goal", "motto", "responsible"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System modification audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "action": { "type": "string" },
+        "previousValue": { "type": "string" },
+        "newValue": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "entityType", "entityId", "action", "timestamp"]
+    },
+    "ReportLog": {
+      "title": "ReportLog",
+      "description": "WhatsApp and communication report log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "type": { "type": "string" },
+        "recipientPhone": { "type": "string" },
+        "channel": { "type": "string" },
+        "sentAt": { "type": "string" },
+        "summary": { "type": "string" }
+      },
+      "required": ["id", "type", "recipientPhone", "sentAt"]
+    },
+    "PublicSummary": {
+      "title": "PublicSummary",
+      "description": "Aggregated privacy-safe metrics for public landing page",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "totalStudents": { "type": "number" },
+        "totalHalaqahs": { "type": "number" },
+        "totalTeachers": { "type": "number" },
+        "overallCompletionRate": { "type": "number" },
+        "spellingProgressRate": { "type": "number" },
+        "memorizationProgressRate": { "type": "number" },
+        "attendanceRate": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "totalStudents", "totalHalaqahs", "overallCompletionRate"]
+    },
+    "Badge": {
+      "title": "Badge",
+      "description": "Student honor badge and incentive ribbon",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "badgeType": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "awardedAt": { "type": "string" },
+        "awardedBy": { "type": "string" },
+        "notes": { "type": "string" },
+        "isAutomatic": { "type": "boolean" }
+      },
+      "required": ["id", "badgeType", "studentId", "studentName", "awardedAt", "awardedBy"]
+    },
+    "RemedialPlan": {
+      "title": "RemedialPlan",
+      "description": "Early intervention and remedial action plan for struggling students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "halaqahId": { "type": "string" },
+        "riskLevel": { "type": "string", "enum": ["high", "medium", "low"] },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "diagnosticNotes": { "type": "string" },
+        "actionItems": { "type": "array" },
+        "parentGuidance": { "type": "string" },
+        "spellingSupportLessonId": { "type": "string" },
+        "targetDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "in_progress", "resolved"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "studentId", "teacherId", "halaqahId", "riskLevel", "category", "title", "status"]
+    },
+    "MosqueComplexTenant": {
+      "title": "MosqueComplexTenant",
+      "description": "Multi-tenant mosque and Quranic educational complex entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "city": { "type": "string" },
+        "district": { "type": "string" },
+        "supervisorName": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "email": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "stageLogoUrl": { "type": "string" },
+        "targetSurahDefault": { "type": "string" },
+        "supportedStages": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "city", "isActive"]
+    },
+    "AcademicTermArchive": {
+      "title": "AcademicTermArchive",
+      "description": "Archived previous terms and years with student cumulative progress",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "tenantName": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "termName": { "type": "string" },
+        "archivedAt": { "type": "string" },
+        "archivedBy": { "type": "string" },
+        "totalStudents": { "type": "number" },
+        "totalHalaqahs": { "type": "number" },
+        "overallMasteryRate": { "type": "number" },
+        "studentSnapshots": { "type": "array" }
+      },
+      "required": ["id", "tenantId", "academicYear", "termName", "archivedAt"]
+    },
+    "EducationalStage": {
+      "title": "EducationalStage",
+      "description": "Educational stages extensibility definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "ageRange": { "type": "string" },
+        "targetGrades": { "type": "array" },
+        "curriculumFocus": { "type": "string" },
+        "defaultTargetSurah": { "type": "string" },
+        "accentColor": { "type": "string" },
+        "iconName": { "type": "string" },
+        "order": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "code", "name", "isActive"]
+    },
+    "StudentQuranPlan": {
+      "title": "StudentQuranPlan",
+      "description": "Universal student Quran planning engine records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "scope": { "type": "string" },
+        "planType": { "type": "string" },
+        "status": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "targetStart": { "type": "object" },
+        "targetEnd": { "type": "object" },
+        "direction": { "type": "string" },
+        "unitType": { "type": "string" },
+        "dailyAmount": { "type": "number" },
+        "planVersion": { "type": "number" },
+        "isCurrentActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "planType", "startDate", "endDate", "targetStart", "targetEnd", "direction", "unitType", "dailyAmount"]
+    },
+    "StageQuranConfig": {
+      "title": "StageQuranConfig",
+      "description": "Configurable Quran planning templates for educational stages and grades",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "description": { "type": "string" },
+        "memorization": { "type": "object" },
+        "revision": { "type": "object" },
+        "schedule": { "type": "object" },
+        "defaultTermWeeks": { "type": "number" }
+      },
+      "required": ["id", "name", "code", "memorization", "revision", "schedule"]
+    },
+    "RegistrationRequest": {
+      "title": "RegistrationRequest",
+      "description": "Admissions and registration requests for a tenant",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "parentName": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "grade": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "studentName", "parentPhone", "grade", "status"]
+    },
+    "StudentFinancialRecord": {
+      "title": "StudentFinancialRecord",
+      "description": "Tuition and payment tracking records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "baseTuition": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "studentId", "status"]
+    },
+    "AssociationNomination": {
+      "title": "AssociationNomination",
+      "description": "Association Quran testing nomination workflow",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "halaqahId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "internalExamScore": { "type": "number" },
+        "teacherRecommendation": { "type": "string" },
+        "supervisorStatus": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "studentId", "teacherRecommendation", "supervisorStatus"]
+    },
+    "EmergencySupportSession": {
+      "title": "EmergencySupportSession",
+      "description": "Emergency support session by system admin with strict expiration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "systemAdminUid": { "type": "string" },
+        "systemAdminName": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "reason": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "systemAdminUid", "tenantId", "reason", "expiresAt", "isActive"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and credentials info"
+    },
+    "/academic_years/{yearId}": {
+      "schema": "AcademicYear",
+      "description": "Academic years configuration"
+    },
+    "/halaqahs/{halaqahId}": {
+      "schema": "Halaqah",
+      "description": "Quran study circles"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Enrolled students"
+    },
+    "/daily_records/{recordId}": {
+      "schema": "DailyRecord",
+      "description": "Session attendance, memorization, and spelling evaluations"
+    },
+    "/spelling_lessons/{lessonId}": {
+      "schema": "SpellingLesson",
+      "description": "Spelling curriculum lessons"
+    },
+    "/educational_plan/{planId}": {
+      "schema": "EducationalPlanWeek",
+      "description": "Educational plan weekly matrix"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Change history and audit trail"
+    },
+    "/report_logs/{logId}": {
+      "schema": "ReportLog",
+      "description": "WhatsApp dispatch logs"
+    },
+    "/public_summary/{summaryId}": {
+      "schema": "PublicSummary",
+      "description": "Public aggregated statistics"
+    },
+    "/badges/{badgeId}": {
+      "schema": "Badge",
+      "description": "Student honor badges and certificates"
+    },
+    "/remedial_plans/{planId}": {
+      "schema": "RemedialPlan",
+      "description": "Remedial action plans for early academic and behavioral intervention"
+    },
+    "/tenants/{tenantId}": {
+      "schema": "MosqueComplexTenant",
+      "description": "Multi-tenant mosque and Quranic complexes"
+    },
+    "/academic_archives/{archiveId}": {
+      "schema": "AcademicTermArchive",
+      "description": "Historical academic archives and term closures"
+    },
+    "/educational_stages/{stageId}": {
+      "schema": "EducationalStage",
+      "description": "Configured educational stages"
+    },
+    "/quran_plans/{planId}": {
+      "schema": "StudentQuranPlan",
+      "description": "Universal student Quran planning engine records"
+    },
+    "/quran_stage_configs/{stageId}": {
+      "schema": "StageQuranConfig",
+      "description": "Configurable Quran planning templates for educational stages and grades"
+    },
+    "/registration_requests/{requestId}": {
+      "schema": "RegistrationRequest",
+      "description": "Admissions and registration requests"
+    },
+    "/financial_records/{recordId}": {
+      "schema": "StudentFinancialRecord",
+      "description": "Tuition fees and payment receipts"
+    },
+    "/association_nominations/{nominationId}": {
+      "schema": "AssociationNomination",
+      "description": "Nominations for formal association tests"
+    },
+    "/support_sessions/{sessionId}": {
+      "schema": "EmergencySupportSession",
+      "description": "Time-bounded emergency support sessions"
+    }
+  }
+}

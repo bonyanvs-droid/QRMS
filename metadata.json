@@ -1,0 +1,10 @@
+{
+  "name": "Remix منصة: QRMS",
+  "description": "School Screen — Quranic Centers Management System\nنظام إدارة مجمعات القرآن الكريم - سكول سكرين",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

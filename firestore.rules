@@ -1,0 +1,165 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global document access: Permit read and write for the operational database
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // Explicit collection matches
+    match /_health/{docId} {
+      allow read, write: if true;
+    }
+
+    match /public_summary/{summaryId} {
+      allow read, write: if true;
+    }
+
+    match /spelling_lessons/{lessonId} {
+      allow read, write: if true;
+    }
+
+    match /academic_years/{yearId} {
+      allow read, write: if true;
+    }
+
+    match /stages/{stageId} {
+      allow read, write: if true;
+    }
+
+    match /educational_stages/{stageId} {
+      allow read, write: if true;
+    }
+
+    match /archives/{archiveId} {
+      allow read, write: if true;
+    }
+
+    match /academic_archives/{archiveId} {
+      allow read, write: if true;
+    }
+
+    match /quran_stage_configs/{configId} {
+      allow read, write: if true;
+    }
+
+    match /quran_plans/{planId} {
+      allow read, write: if true;
+    }
+
+    match /platform_users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /tenants/{tenantId} {
+      allow read, write: if true;
+    }
+
+    match /organizations/{orgId} {
+      allow read, write: if true;
+    }
+
+    match /platform_tenants/{tenantId} {
+      allow read, write: if true;
+
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /students/{studentId} {
+      allow read, write: if true;
+    }
+
+    match /halaqahs/{halaqahId} {
+      allow read, write: if true;
+    }
+
+    match /archived_halaqahs/{halaqahId} {
+      allow read, write: if true;
+    }
+
+    match /archived_teachers/{teacherId} {
+      allow read, write: if true;
+    }
+
+    match /archived_supervisors/{supervisorId} {
+      allow read, write: if true;
+    }
+
+    match /archived_users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /daily_records/{recordId} {
+      allow read, write: if true;
+    }
+
+    match /badges/{badgeId} {
+      allow read, write: if true;
+    }
+
+    match /remedial_plans/{planId} {
+      allow read, write: if true;
+    }
+
+    match /financial_records/{recordId} {
+      allow read, write: if true;
+    }
+
+    match /registration_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    match /association_nominations/{nominationId} {
+      allow read, write: if true;
+    }
+
+    match /educational_plan/{planId} {
+      allow read, write: if true;
+    }
+
+    match /report_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /audit_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /support_sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    match /meetings/{meetingId} {
+      allow read, write: if true;
+    }
+
+    match /track_definitions/{trackId} {
+      allow read, write: if true;
+    }
+
+    match /track_nominations/{nominationId} {
+      allow read, write: if true;
+    }
+
+    match /frontendConfigs/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /staff_attendance/{attId} {
+      allow read, write: if true;
+    }
+
+    match /prayer_times/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
+

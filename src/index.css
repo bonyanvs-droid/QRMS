@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-color: #f8fafc;
+    color: #0f172a;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+  .dark body, html.dark body {
+    background-color: #0b0f19;
+    color: #f1f5f9;
+  }
+}
+
+.dark .bg-white {
+  background-color: #111827 !important;
+  color: #f3f4f6 !important;
+  border-color: #1f2937 !important;
+}
+
+.dark .bg-slate-550,
+.dark .bg-slate-50,
+.dark .bg-slate-100 {
+  background-color: #161e2e !important;
+  color: #e2e8f0 !important;
+  border-color: #273449 !important;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-700,
+.dark .text-slate-800,
+.dark .text-slate-900 {
+  color: #e2e8f0 !important;
+}
+
+.dark .border-slate-200,
+.dark .border-slate-300 {
+  border-color: #273449 !important;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Quranic font style */
+.font-quran {
+  font-family: 'Amiri', serif;
+}
+
+.font-tajawal {
+  font-family: 'Tajawal', sans-serif;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+  display: inline-block;
+}
+
+/* Print Stylesheet */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+  
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide UI elements during print */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+
+  .print\:static {
+    position: static !important;
+  }
+
+  .print\:p-0 {
+    padding: 0 !important;
+  }
+
+  .print\:m-0 {
+    margin: 0 !important;
+  }
+
+  .print\:shadow-none {
+    box-shadow: none !important;
+  }
+
+  .print\:rounded-none {
+    border-radius: 0 !important;
+  }
+
+  .print\:max-h-none {
+    max-height: none !important;
+  }
+
+  .print\:overflow-visible {
+    overflow: visible !important;
+  }
+
+  #official-printable-report {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  #official-printable-report table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+
+  #official-printable-report tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+    break-inside: avoid !important;
+  }
+
+  #official-printable-report thead {
+    display: table-header-group !important;
+    break-inside: avoid !important;
+  }
+
+  #official-printable-report tfoot {
+    display: table-footer-group !important;
+  }
+}
