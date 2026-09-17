@@ -183,8 +183,8 @@ const MainLayout: React.FC = () => {
       !activeTenant;
 
     const baseTitle = isPlatformView || !activeTenant
-      ? 'منصة إدارة المجمعات القرآنية – SCHOOLSCREEN'
-      : `${activeTenant.name} – منصة المجمعات القرآنية`;
+      ? 'نظام إدارة المجمعات القرآنية – Quranic Centers Management System'
+      : `${activeTenant.name} – نظام إدارة المجمعات القرآنية`;
 
     document.title = baseTitle;
 

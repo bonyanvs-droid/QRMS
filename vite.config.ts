@@ -13,9 +13,9 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['baraem-logo.png', 'mosque-logo.jpeg', 'pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png'],
         manifest: {
-          name: 'منصة مرحلة البراعم – مسجد الغزاوي',
-          short_name: 'براعم الغزاوي',
-          description: 'نظام إدارة ومتابعة المخرجات التربوية والقرآنية لمرحلة البراعم في مسجد الغزاوي بمدينة جدة',
+          name: 'نظام إدارة المجمعات القرآنية',
+          short_name: 'المجمعات القرآنية',
+          description: 'نظام إدارة المجمعات القرآنية وحلقات التحفيظ والمخرجات التعليمية والتربوية (Quranic Centers Management System)',
           theme_color: '#065f46',
           background_color: '#f8fafc',
           display: 'standalone',
