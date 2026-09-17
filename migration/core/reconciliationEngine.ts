@@ -202,9 +202,16 @@ export const DEFAULT_527_INVENTORY: Record<string, number> = {
   audit_logs: 383,
 };
 
-export function generate527ReconciliationReport(actualBackup?: Record<string, any[]>): FullReconciliationReport {
-  const collectionsObj = actualBackup || {};
-  const hasProvidedData = actualBackup && Object.keys(actualBackup).length > 0;
+export function generate527ReconciliationReport(actualBackup?: Record<string, any[]> | any): FullReconciliationReport {
+  let collectionsObj: Record<string, any[]> = {};
+  if (actualBackup) {
+    if (typeof actualBackup === 'object' && actualBackup.collections && typeof actualBackup.collections === 'object') {
+      collectionsObj = actualBackup.collections;
+    } else if (typeof actualBackup === 'object') {
+      collectionsObj = actualBackup;
+    }
+  }
+  const hasProvidedData = Object.keys(collectionsObj).length > 0;
 
   const countsByCollection: Record<string, number> = {};
 

@@ -151,6 +151,10 @@ export class MockPostgresTransactionalClient implements MigrationDbClient {
 
     // Simulate SELECT COUNT(*) queries
     if (trimmed.includes('SELECT COUNT(*)::int AS count FROM')) {
+      if (trimmed.includes('NOT EXISTS')) {
+        // Foreign key violation check query - returns 0 if all FKs valid
+        return { rows: [{ count: 0 }] };
+      }
       const match = trimmed.match(/FROM ([a-z_]+)/i);
       const tableName = match ? match[1] : '';
       const count = this.tables.get(tableName)?.size || 0;

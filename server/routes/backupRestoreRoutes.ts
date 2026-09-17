@@ -9,9 +9,24 @@ import {
   executeControlledMigration
 } from '../../migration/core/realMigrationEngine';
 import { generate527ReconciliationReport } from '../../migration/core/reconciliationEngine';
+import { validateBackupJsonFile } from '../../src/lib/backupUploadValidator';
 import { getDbPool } from '../config/db';
 
 export const backupRestoreRouter = Router();
+
+// Middleware to check admin authorization
+function requireAdminRole(req: Request, res: Response, next: NextFunction) {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  const isAuthorized = ['system_admin', 'campus_admin', 'admin', 'general_supervisor'].includes(userRole);
+  
+  if (!isAuthorized) {
+    return res.status(403).json({
+      success: false,
+      error: 'غير مصرح لك بتنفيذ هذه العملية. تقتصر صلاحيات النسخ والترحيل على مديري النظام والمشرفين المعتمدين.',
+    });
+  }
+  next();
+}
 
 /**
  * POST /api/admin/backup/restore/validate
@@ -19,7 +34,7 @@ export const backupRestoreRouter = Router();
  * Strict Dry-Run Backup Validation and Mapping Audit.
  * Performs zero database mutations.
  */
-backupRestoreRouter.post('/validate', async (req: Request, res: Response, next: NextFunction) => {
+backupRestoreRouter.post('/validate', requireAdminRole, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { backupData, fileName, fileSizeBytes } = req.body;
 
@@ -30,11 +45,20 @@ backupRestoreRouter.post('/validate', async (req: Request, res: Response, next: 
       });
     }
 
+    const validationResult = validateBackupJsonFile(backupData);
+    if (!validationResult.isValid) {
+      return res.status(400).json({
+        success: false,
+        error: `فشل التحقق الهيكلي من ملف النسخة الاحتياطية: ${validationResult.errors.join(' | ')}`,
+        validationResult,
+      });
+    }
+
     const userEmail = (req.headers['x-user-email'] as string) || 'admin@qrms.system';
     const userRole = (req.headers['x-user-role'] as string) || 'system_admin';
 
     const report = executeRestoreDryRun(
-      backupData,
+      validationResult.backupData,
       fileName || 'backup.json',
       fileSizeBytes || (typeof backupData === 'string' ? backupData.length : JSON.stringify(backupData).length),
       { email: userEmail, role: userRole }
@@ -44,6 +68,7 @@ backupRestoreRouter.post('/validate', async (req: Request, res: Response, next: 
       success: true,
       message: 'تم فحص ومحاكاة النسخة الاحتياطية بنجاح في وضع Dry-Run.',
       report,
+      validationResult,
     });
   } catch (err: any) {
     return res.status(400).json({
@@ -67,14 +92,22 @@ backupRestoreRouter.get('/audit-logs', (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/migration/preflight
- * Runs preflight readiness check including 527 document reconciliation.
+ * Runs preflight readiness check including document reconciliation.
  */
-backupRestoreRouter.post('/preflight', async (req: Request, res: Response) => {
+backupRestoreRouter.post('/preflight', requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { backupData } = req.body;
     const userEmail = (req.headers['x-user-email'] as string) || 'admin@qrms.system';
 
-    const preflight = executeMigrationPreflight(backupData, { userEmail });
+    let normalizedBackup = backupData;
+    if (backupData) {
+      const val = validateBackupJsonFile(backupData);
+      if (val.isValid) {
+        normalizedBackup = val.backupData;
+      }
+    }
+
+    const preflight = executeMigrationPreflight(normalizedBackup, { userEmail });
     return res.status(200).json({
       success: true,
       preflight,
@@ -115,11 +148,11 @@ backupRestoreRouter.get('/runs', (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/migration/reconciliation
- * Returns the exact 527 document mathematical reconciliation breakdown.
+ * Returns the exact mathematical reconciliation breakdown.
  */
 backupRestoreRouter.post('/reconciliation', (req: Request, res: Response) => {
   const { backupData } = req.body;
-  const report = generate527ReconciliationReport(backupData?.collections);
+  const report = generate527ReconciliationReport(backupData?.collections || backupData);
   return res.status(200).json({
     success: true,
     report,
@@ -130,9 +163,9 @@ backupRestoreRouter.post('/reconciliation', (req: Request, res: Response) => {
  * POST /api/admin/migration/execute
  * 
  * Executes the real PostgreSQL Transactional Migration.
- * Strictly requires confirmationCode === 'START_CONTROLLED_MIGRATION'.
+ * Strictly requires confirmationCode === 'START_CONTROLLED_MIGRATION' and valid admin role.
  */
-backupRestoreRouter.post('/execute', async (req: Request, res: Response) => {
+backupRestoreRouter.post('/execute', requireAdminRole, async (req: Request, res: Response) => {
   const { backupData, confirmationCode, migrationRunId } = req.body;
   const adminEmail = (req.headers['x-user-email'] as string) || 'admin@qrms.system';
 
@@ -150,6 +183,26 @@ backupRestoreRouter.post('/execute', async (req: Request, res: Response) => {
     });
   }
 
+  // Server-side Deep Backup Validation
+  const validation = validateBackupJsonFile(backupData);
+  if (!validation.isValid) {
+    return res.status(400).json({
+      success: false,
+      error: `فشل التحقق الهيكلي من النسخة الاحتياطية قبل الترحيل: ${validation.errors.join(' | ')}`,
+      validation,
+    });
+  }
+
+  // Server-side Preflight Safety Check
+  const preflight = executeMigrationPreflight(validation.backupData, { userEmail: adminEmail });
+  if (preflight.fatalErrorsCount > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `فشل الفحص القبلي الأمني: توجد ${preflight.fatalErrorsCount} أخطاء مانعة للترحيل.`,
+      errors: preflight.errors,
+    });
+  }
+
   const pool = getDbPool();
   if (!pool) {
     return res.status(503).json({
@@ -161,7 +214,7 @@ backupRestoreRouter.post('/execute', async (req: Request, res: Response) => {
   let client: any = null;
   try {
     client = await pool.connect();
-    const result = await executeControlledMigration(client, backupData, {
+    const result = await executeControlledMigration(client, validation.backupData, {
       migrationRunId,
       confirmedByAdmin: true,
       confirmationText: confirmationCode,

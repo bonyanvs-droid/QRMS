@@ -24,6 +24,7 @@ export function createApp() {
   app.use('/api/stages', stageRouter);
   app.use('/api/users', userRouter);
   app.use('/api/admin/backup/restore', backupRestoreRouter);
+  app.use('/api/admin/migration', backupRestoreRouter);
 
   // Global Error Handler for API routes
   app.use('/api', errorHandler);
