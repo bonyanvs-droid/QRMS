@@ -343,7 +343,7 @@ export const COLLECTION_MAPPINGS: Record<string, CollectionMigrationConfig> = {
       { firestoreField: 'teacherName', postgresColumn: 'teacher_name', type: 'string' },
       { firestoreField: 'teacherPhone', postgresColumn: 'teacher_phone', type: 'string' },
       { firestoreField: 'parentName', postgresColumn: 'parent_name', type: 'string' },
-      { firestoreField: 'parentPhone', postgresColumn: 'parent_phone', type: 'string', required: true },
+      { firestoreField: 'parentPhone', postgresColumn: 'parent_phone', type: 'string' },
       { firestoreField: 'phone', postgresColumn: 'phone', type: 'string' },
       { firestoreField: 'motherPhone', postgresColumn: 'mother_phone', type: 'string' },
       { firestoreField: 'guardianRelationship', postgresColumn: 'guardian_relationship', type: 'string' },

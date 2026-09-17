@@ -15,14 +15,24 @@ export function transformTimestamp(val: any): string | null {
     return null;
   }
   
-  // Firestore Timestamp with toDate() or seconds/nanoseconds
-  if (typeof val === 'object' && typeof val.toDate === 'function') {
-    return val.toDate().toISOString();
-  }
-  
-  if (typeof val === 'object' && typeof val.seconds === 'number') {
-    const ms = val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1000000);
-    return new Date(ms).toISOString();
+  // Firestore serialized Timestamp or object with seconds/nanoseconds
+  if (typeof val === 'object') {
+    if (val._type === 'timestamp') {
+      if (val.iso && typeof val.iso === 'string') {
+        return val.iso;
+      }
+      if (typeof val.seconds === 'number') {
+        const ms = val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1000000);
+        return new Date(ms).toISOString();
+      }
+    }
+    if (typeof val.toDate === 'function') {
+      return val.toDate().toISOString();
+    }
+    if (typeof val.seconds === 'number') {
+      const ms = val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1000000);
+      return new Date(ms).toISOString();
+    }
   }
   
   if (val instanceof Date) {
@@ -94,13 +104,21 @@ export function transformJsonb(val: any, fallback: any = {}): any {
 export function deepSanitize(val: any): any {
   if (val === null || val === undefined) return val;
   
-  if (typeof val === 'object' && typeof val.toDate === 'function') {
-    return val.toDate().toISOString();
-  }
-  
-  if (typeof val === 'object' && typeof val.seconds === 'number' && typeof val.nanoseconds === 'number') {
-    const ms = val.seconds * 1000 + Math.floor(val.nanoseconds / 1000000);
-    return new Date(ms).toISOString();
+  if (typeof val === 'object') {
+    if (val._type === 'timestamp') {
+      if (val.iso && typeof val.iso === 'string') return val.iso;
+      if (typeof val.seconds === 'number') {
+        const ms = val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1000000);
+        return new Date(ms).toISOString();
+      }
+    }
+    if (typeof val.toDate === 'function') {
+      return val.toDate().toISOString();
+    }
+    if (typeof val.seconds === 'number' && typeof val.nanoseconds === 'number') {
+      const ms = val.seconds * 1000 + Math.floor(val.nanoseconds / 1000000);
+      return new Date(ms).toISOString();
+    }
   }
   
   if (Array.isArray(val)) {
@@ -142,7 +160,10 @@ export function transformDocument(
   // Apply explicit field mapping rules
   for (const rule of fieldMappings) {
     mappedFirestoreFields.add(rule.firestoreField);
-    const rawValue = rawDoc[rule.firestoreField];
+    let rawValue = rawDoc[rule.firestoreField];
+    if ((rawValue === undefined || rawValue === null) && (rule.firestoreField === 'id' || rule.postgresColumn === primaryKeyCol)) {
+      rawValue = docId;
+    }
     
     if (rule.transform) {
       resultData[rule.postgresColumn] = rule.transform(rawValue, rawDoc);

@@ -107,6 +107,51 @@ export async function runSelfTests(): Promise<{ passed: boolean; results: string
   assert(COLLECTION_MAPPINGS.organizations.postgresTable === 'organizations', 'Organizations table preserved 1:1');
   assert(COLLECTION_MAPPINGS.tenants.fieldMappings.some(f => f.postgresColumn === 'organization_id'), 'Tenants link to organizations preserved');
 
+  // Test 9: Phone requirement logic (Optional for students, Required for teachers/staff)
+  const validatorInstance = new (await import('../validators/migrationValidator')).MigrationValidator();
+  
+  const studentDocNoPhone = {
+    id: 'usr_std_qusay_123',
+    name: 'قصي بن محمد',
+    role: 'student',
+    student_id: 'std_qusay',
+    tenant_id: 'ghazzawi',
+    stage_id: 'baraem',
+    login_identifier: 'std_qusay',
+  };
+  const transformedStudent = transformDocument(
+    studentDocNoPhone.id,
+    studentDocNoPhone,
+    COLLECTION_MAPPINGS.platform_users.fieldMappings,
+    COLLECTION_MAPPINGS.platform_users.primaryKey
+  );
+  const studentReport = validatorInstance.validateBatch(COLLECTION_MAPPINGS.platform_users, [transformedStudent], 1);
+  assert(studentReport.validCount === 1 && studentReport.invalidCount === 0, 'Student account without phone is valid (0 fatal errors)');
+
+  const teacherDocNoPhone = {
+    id: 'usr_teacher_no_phone',
+    name: 'معلم بدون هاتف',
+    role: 'teacher',
+    tenant_id: 'ghazzawi',
+    login_identifier: 'teacher_01',
+  };
+  const transformedTeacher = transformDocument(
+    teacherDocNoPhone.id,
+    teacherDocNoPhone,
+    COLLECTION_MAPPINGS.platform_users.fieldMappings,
+    COLLECTION_MAPPINGS.platform_users.primaryKey
+  );
+  const teacherReport = validatorInstance.validateBatch(COLLECTION_MAPPINGS.platform_users, [transformedTeacher], 1);
+  assert(teacherReport.invalidCount === 1, 'Teacher account without phone correctly triggers required field validation');
+
+  // Test 10: Canonical stage 'baraem' is pre-registered and resolves FK checks
+  assert(validatorInstance.hasIdInTable('stages', 'baraem'), "Stage 'baraem' pre-seeded and exists in known stages table");
+  assert(validatorInstance.hasIdInTable('stages', 'ashbal'), "Stage 'ashbal' pre-seeded and exists in known stages table");
+
+  // Test 11: Teacher ID mapping from teachers collection resolves halaqah foreign key
+  validatorInstance.registerId('users', '1111111111', 'teachers');
+  assert(validatorInstance.hasIdInTable('users', '1111111111'), 'Teacher 1111111111 mapped into users table and resolves halaqahs.teacher_id FK');
+
   return { passed: allPassed, results };
 }
 

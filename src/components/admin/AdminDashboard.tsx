@@ -51,6 +51,9 @@ import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule } from '
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
+import { FirestoreBackupExporterTab } from './FirestoreBackupExporterTab';
+import { FirestoreRestoreTab } from './FirestoreRestoreTab';
+import { AdminBackupMigrationHub } from './AdminBackupMigrationHub';
 
 const ALL_WEEK_DAYS: { dayOfWeek: number; dayName: string }[] = [
   { dayOfWeek: 0, dayName: 'الأحد' },
@@ -501,6 +504,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   // Audit Log Filters
   const [auditSearch, setAuditSearch] = useState('');
   const [auditActionFilter, setAuditActionFilter] = useState('all');
+  const [backupSubMode, setBackupSubMode] = useState<'restore' | 'export' | 'local'>('restore');
 
   // Academic Config Form State
   const [academicForm, setAcademicForm] = useState(academicConfig);
@@ -2514,91 +2518,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
         </div>
       )}
 
-      {/* TAB 5: DATABASE BACKUP & RESTORE */}
+      {/* TAB 5: DATABASE BACKUP & RESTORE & MIGRATION HUB */}
       {activeTab === 'backup' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-            <h3 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100 flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-600" />
-              <span>تصدير واسترجاع قاعدة البيانات الشاملة (JSON Backup)</span>
-            </h3>
-
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
-              {/* Export Box */}
-              <div className="p-5 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-bold text-emerald-950 text-sm mb-1">تصدير نسخة احتياطية كاملة</h4>
-                  <p className="text-slate-700 leading-relaxed">
-                    تحميل ملف JSON يحتوي على كافة الدروس الهجائية، سجلات الطلاب، الحضور والغياب، التقييمات وسجلات
-                    التقارير.
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleExportJson}
-                  className="mt-4 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-xs transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>تصدير وتحميل ملف JSON</span>
-                </button>
-              </div>
-
-              {/* Import Box */}
-              <div className="p-5 rounded-2xl bg-blue-50/60 border border-blue-200 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-bold text-blue-950 text-sm mb-1">استرجاع قاعدة بيانات من JSON</h4>
-                  <p className="text-slate-700 leading-relaxed mb-3">
-                    الصق محتوى ملف النسخة الاحتياطية لاسترجاع كافة البيانات فورياً:
-                  </p>
-                  <textarea
-                    rows={3}
-                    value={importJsonText}
-                    onChange={(e) => setImportJsonText(e.target.value)}
-                    placeholder="الصق نص JSON هنا..."
-                    className="w-full p-2 bg-white rounded-xl border border-slate-300 font-mono text-[11px]"
-                  />
-                </div>
-
-                {importSuccess === true && (
-                  <div className="mt-2 text-emerald-700 font-bold">تم استرجاع البيانات بنجاح!</div>
-                )}
-                {importSuccess === false && (
-                  <div className="mt-2 text-rose-600 font-bold">الملف غير صالح أو التنسيق غير متطابق.</div>
-                )}
-
-                <button
-                  onClick={handleImportJson}
-                  disabled={!importJsonText}
-                  className="mt-4 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>استرجاع وتحديث البيانات</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Factory Reset */}
-            <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-between">
-              <div>
-                <h4 className="font-bold text-rose-900 text-xs">إعادة التعيين للبيانات الافتراضية الأولية</h4>
-                <p className="text-[11px] text-slate-700">
-                  إعادة ضبط النظام إلى حالته الأصلية مع 22 طالباً و12 درساً هجائياً.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  if (confirm('هل أنت متأكد من رغبتك في إعادة ضبط النظام وحذف التعديلات المحلية؟')) {
-                    resetToDefaultData();
-                    alert('تمت استعادة البيانات الافتراضية بنجاح.');
-                  }
-                }}
-                className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold transition-colors"
-              >
-                إعادة ضبط المصنع
-              </button>
-            </div>
-          </div>
-        </div>
+        <AdminBackupMigrationHub />
       )}
 
       {/* TAB 6: LOGOS & BRAND IDENTITY */}

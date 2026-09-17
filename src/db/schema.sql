@@ -919,6 +919,49 @@ CREATE TABLE IF NOT EXISTS support_sessions (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+-- -------------------------------------------------------------
+-- 23. MIGRATION RUNS & LOGS (سجلات ترحيل البيانات والتدقيق التكاملي)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS migration_runs (
+    id VARCHAR(255) PRIMARY KEY, -- e.g. QRMS-MIG-YYYYMMDD-XXXXXXXX
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ,
+    source VARCHAR(100) NOT NULL DEFAULT 'firestore_backup_snapshot',
+    target VARCHAR(100) NOT NULL DEFAULT 'postgresql_vps',
+    source_doc_count INT DEFAULT 0,
+    attempted_inserts INT DEFAULT 0,
+    successful_inserts INT DEFAULT 0,
+    skipped_records INT DEFAULT 0,
+    merged_records INT DEFAULT 0,
+    failed_records INT DEFAULT 0,
+    warnings_count INT DEFAULT 0,
+    errors_count INT DEFAULT 0,
+    verification_status VARCHAR(50) DEFAULT 'PENDING',
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    details JSONB DEFAULT '{}'::jsonb,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_runs_status ON migration_runs(status);
+CREATE INDEX IF NOT EXISTS idx_migration_runs_started ON migration_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS migration_logs (
+    id VARCHAR(255) PRIMARY KEY,
+    migration_run_id VARCHAR(255) REFERENCES migration_runs(id) ON DELETE CASCADE,
+    collection VARCHAR(100) NOT NULL,
+    document_id VARCHAR(255) NOT NULL,
+    operation VARCHAR(50) NOT NULL, -- INSERT, MERGE, SKIP, SEED_ATTACH, DEFER_FK, ERROR
+    status VARCHAR(50) NOT NULL, -- SUCCESS, SKIPPED, MERGED, FAILED, WARNING
+    error TEXT,
+    details JSONB DEFAULT '{}'::jsonb,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_logs_run_id ON migration_logs(migration_run_id);
+CREATE INDEX IF NOT EXISTS idx_migration_logs_col ON migration_logs(collection);
+CREATE INDEX IF NOT EXISTS idx_migration_logs_status ON migration_logs(status);
+
 -- =============================================================================
 -- End of QRMS PostgreSQL Schema
 -- =============================================================================
