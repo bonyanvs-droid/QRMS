@@ -33,6 +33,9 @@ export function createApp() {
   // 3. Secure Server-Side Forwarder (Used in 'remote-proxy' mode)
   // We MOUNT it at /api but it should skip /auth due to earlier mount
   app.use('/api', createRemoteForwarder());
+  app.use('/api/tenants', tenantRouter);
+  app.use('/api/stages', stageRouter);
+  app.use('/api/users', userRouter);
   app.use('/api/admin/backup/restore', backupRestoreRouter);
   app.use('/api/admin/migration', backupRestoreRouter);
   app.use('/api/admin/backup/database', databaseBackupRouter);

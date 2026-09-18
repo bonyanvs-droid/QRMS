@@ -925,6 +925,13 @@ export async function upsert<T = any>(
   }
 
   const sanitized = prepareRecord(config, rawData, tenantId);
+
+  // Users table: derive missing role from staff_role so Teacher-shaped payloads
+  // (which carry staffRole but no role) never violate the NOT NULL constraint
+  if (config.tableName === 'users' && sanitized.role === undefined && sanitized.staff_role) {
+    sanitized.role = sanitized.staff_role;
+  }
+
   const keys = Object.keys(sanitized);
 
   if (keys.length === 0) {

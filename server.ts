@@ -5,7 +5,7 @@ import { config } from './server/config/env';
 
 async function startServer() {
   const app = createApp();
-  const PORT = 3000;
+  const PORT = config.port || 3000;
 
   const distPath = path.join(process.cwd(), 'dist');
 

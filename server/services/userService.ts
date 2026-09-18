@@ -15,15 +15,34 @@ const SAFE_USER_SELECT = `
   u.created_at, u.updated_at
 `;
 
-export async function getUsersByTenant(tenantId: string): Promise<User[]> {
+export interface UserFilters {
+  isArchived?: boolean;
+  role?: string;
+}
+
+export async function getUsersByTenant(tenantId: string, filters: UserFilters = {}): Promise<User[]> {
+  const conditions: string[] = ['u.tenant_id = $1'];
+  const params: any[] = [tenantId];
+
+  if (filters.isArchived === true) {
+    conditions.push('(u.is_archived = TRUE OR u.teacher_archived = TRUE OR u.supervisor_archived = TRUE)');
+  } else {
+    conditions.push('(u.is_archived = FALSE OR u.is_archived IS NULL)');
+  }
+
+  if (filters.role) {
+    params.push(filters.role);
+    conditions.push(`u.role = $${params.length}`);
+  }
+
   const query = `
     SELECT ${SAFE_USER_SELECT}
     FROM users u
     LEFT JOIN halaqahs h ON u.halaqah_id = h.id
-    WHERE u.tenant_id = $1 AND (u.is_archived = FALSE OR u.is_archived IS NULL)
+    WHERE ${conditions.join(' AND ')}
     ORDER BY u.name ASC
   `;
-  return executeQuery<User>(query, [tenantId]);
+  return executeQuery<User>(query, params);
 }
 
 export async function getUserById(userId: string, tenantId?: string): Promise<User | null> {

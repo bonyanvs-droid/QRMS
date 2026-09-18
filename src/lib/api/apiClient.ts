@@ -182,7 +182,7 @@ class ApiClient {
     const res = await fetch(url, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(sanitizedBody),
+      body: sanitizedBody === null ? undefined : JSON.stringify(sanitizedBody),
     });
 
     const json = await this.parseJsonResponse(res, url);
@@ -208,7 +208,7 @@ class ApiClient {
     const res = await fetch(url, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(sanitizedBody),
+      body: sanitizedBody === null ? undefined : JSON.stringify(sanitizedBody),
     });
 
     const json = await this.parseJsonResponse(res, url);

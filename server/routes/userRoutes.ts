@@ -12,7 +12,11 @@ export const userRouter = Router();
 userRouter.get('/', requireTenantContext, async (req, res, next) => {
   try {
     const tenantId = req.tenantId!;
-    const users = await getUsersByTenant(tenantId);
+    const filters: { isArchived?: boolean; role?: string } = {};
+    if (req.query.isArchived === 'true') filters.isArchived = true;
+    else if (req.query.isArchived === 'false') filters.isArchived = false;
+    if (typeof req.query.role === 'string' && req.query.role) filters.role = req.query.role;
+    const users = await getUsersByTenant(tenantId, filters);
     res.json({
       ok: true,
       tenantId,

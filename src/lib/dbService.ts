@@ -415,7 +415,19 @@ export async function archiveUser(
 
   const u = typeof userOrId === 'object' ? (userOrId as any) : await UserRepository.getById(id);
   if (u) {
-    await UserRepository.save({ ...u, isArchived: true, archiveReason: reason, archivedAt: new Date().toISOString() });
+    const staffRole = u.staffRole || (u.role === 'teacher' ? 'teacher' : u.role === 'supervisor' ? 'supervisor' : undefined);
+    await UserRepository.save({
+      ...u,
+      role: u.role || staffRole,
+      isActive: false,
+      isArchived: true,
+      teacherArchived: staffRole === 'teacher',
+      supervisorArchived: staffRole === 'supervisor',
+      archiveType: staffRole,
+      archiveReason: reason,
+      archivedAt: new Date().toISOString(),
+      archivedBy: actor?.name || u.archivedBy,
+    });
     if (actor) {
       recordAuditLog(actor, 'auth', id, 'ARCHIVE_USER', { reason }, u.tenantId);
     }
@@ -425,7 +437,17 @@ export async function archiveUser(
 export async function restoreUser(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
   const u = await UserRepository.getById(userId);
   if (u) {
-    await UserRepository.save({ ...u, isArchived: false, archiveReason: undefined, archivedAt: undefined });
+    await UserRepository.save({
+      ...u,
+      isActive: true,
+      isArchived: false,
+      teacherArchived: false,
+      supervisorArchived: false,
+      archiveType: null,
+      archiveReason: null,
+      archivedAt: null,
+      archivedBy: null,
+    });
     if (actor) {
       recordAuditLog(actor, 'auth', userId, 'RESTORE_USER', {}, u.tenantId);
     }

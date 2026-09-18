@@ -1377,10 +1377,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 writeTenantStorage(activeTenantId, 'archived_teachers', 'furqan_archived_teachers', merged);
                 return merged;
               });
-              // Persist to isolated Firestore collection
-              legacyTeachers.forEach((t) => {
-                dbArchiveTeacher(t, currentActor).catch(console.warn);
-              });
             }
 
             // Recover and separate any archived supervisors present in legacy archived users
@@ -1406,10 +1402,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 const merged = Array.from(map.values());
                 writeTenantStorage(activeTenantId, 'archived_supervisors', 'furqan_archived_supervisors', merged);
                 return merged;
-              });
-              // Persist to isolated Firestore collection
-              legacySupervisors.forEach((s) => {
-                dbArchiveSupervisor(s, currentActor).catch(console.warn);
               });
             }
           })
@@ -2397,8 +2389,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const actorName = currentActor?.name || currentUser?.name || 'مدير النظام';
     const archiveReasonText = reason || 'أرشفة المعلم تحسباً للخطأ';
 
-    const archivedTeacherPayload: Teacher = {
+    const archivedTeacherPayload: Teacher & { role: string } = {
       id,
+      role: 'teacher',
       name: resolvedName,
       phone: resolvedPhone,
       halaqahId: targetTeacher?.halaqahId || targetUser?.halaqahId || '',

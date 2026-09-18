@@ -22,11 +22,11 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // server.ts
-var import_express7 = __toESM(require("express"), 1);
+var import_express10 = __toESM(require("express"), 1);
 var import_path3 = __toESM(require("path"), 1);
 
 // server/app.ts
-var import_express6 = __toESM(require("express"), 1);
+var import_express9 = __toESM(require("express"), 1);
 var import_cookie_parser = __toESM(require("cookie-parser"), 1);
 
 // server/middleware/tenantContext.ts
@@ -42,6 +42,16 @@ function extractTenantContext(req, res, next) {
   }
   if (rawOrgId && typeof rawOrgId === "string") {
     req.organizationId = rawOrgId.trim();
+  }
+  next();
+}
+function requireTenantContext(req, res, next) {
+  if (!req.tenantId) {
+    res.status(400).json({
+      ok: false,
+      error: "Tenant context is required for this operation. Please provide the X-Tenant-Id header or tenantId parameter."
+    });
+    return;
   }
   next();
 }
@@ -393,9 +403,8 @@ healthRouter.get("/", async (req, res, next) => {
   }
 });
 
-// server/routes/authRoutes.ts
+// server/routes/tenantRoutes.ts
 var import_express2 = require("express");
-var import_crypto = __toESM(require("crypto"), 1);
 
 // src/db/schema.ts
 function snakeToCamelCase(obj, parentKey) {
@@ -482,232 +491,180 @@ async function executeQuerySingle(text, params = []) {
   return rows.length > 0 ? rows[0] : null;
 }
 
-// server/routes/authRoutes.ts
-var authRouter = (0, import_express2.Router)();
-var activeSessions = /* @__PURE__ */ new Map();
-function hashPasswordWithSalt(password) {
-  const salted = password.trim() + "_ghazzawi_salt_2026";
-  return import_crypto.default.createHash("sha256").update(salted).digest("hex");
+// server/services/tenantService.ts
+async function getPublicTenants() {
+  const query = `
+    SELECT 
+      id, slug, name, organization_id, description, city, district, region, 
+      address, supervisor_name, contact_phone, email, whatsapp_number, 
+      logo_url, stage_logo_url, supported_stages, is_active, 
+      tenant_type, show_on_public_directory, created_at, updated_at
+    FROM tenants
+    WHERE is_active = TRUE AND show_on_public_directory = TRUE
+    ORDER BY name ASC
+  `;
+  return executeQuery(query);
 }
-function hashPasswordPlain(password) {
-  return import_crypto.default.createHash("sha256").update(password.trim()).digest("hex");
+async function getTenantByIdOrSlug(idOrSlug) {
+  const query = `
+    SELECT *
+    FROM tenants
+    WHERE id = $1 OR slug = $1
+    LIMIT 1
+  `;
+  return executeQuerySingle(query, [idOrSlug]);
 }
-function verifyUserPassword(plainPassword, user) {
-  if (!plainPassword) return false;
-  const trimmed = plainPassword.trim();
-  const inputSaltedHash = hashPasswordWithSalt(trimmed);
-  const inputPlainHash = hashPasswordPlain(trimmed);
-  const storedHash = (user.passwordHash || user.password_hash || "").trim();
-  if (storedHash) {
-    if (storedHash.toLowerCase() === inputSaltedHash.toLowerCase()) return true;
-    if (storedHash.toLowerCase() === inputPlainHash.toLowerCase()) return true;
-    if (storedHash === trimmed) return true;
-    return false;
-  }
-  const validInitialPasswords = [
-    "Admin@123456",
-    "Admin@123",
-    "123456",
-    "admin123",
-    user.phone?.trim(),
-    user.nationalId?.trim(),
-    user.national_id?.trim()
-  ].filter(Boolean);
-  return validInitialPasswords.includes(trimmed);
-}
-function normalizeDigits(val) {
-  if (!val) return "";
-  return String(val).trim().replace(/\D/g, "");
-}
-async function findUserByIdentifier(identifier) {
-  const trimmedIdentifier = identifier.trim();
-  const identDigits = normalizeDigits(trimmedIdentifier);
-  const identLower = trimmedIdentifier.toLowerCase();
-  const pool2 = getDbPool();
-  if (pool2) {
-    try {
-      const user2 = await executeQuerySingle(`
-        SELECT 
-          u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
-          u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
-          u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
-          u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
-          u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
-          u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
-          u.is_archived
-        FROM users u
-        WHERE (u.is_archived = FALSE OR u.is_archived IS NULL)
-          AND (
-            u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
-            OR u.login_identifier = $1 OR u.id = $1
-          )
-        LIMIT 1
-      `, [trimmedIdentifier, identLower]);
-      if (user2) return user2;
-    } catch (dbErr) {
-      console.warn("[AUTH] Direct DB query fallback to remote forwarder:", dbErr);
-    }
-  }
-  const user = config.devApiUsername;
-  const pass = config.devApiPassword;
-  const token = Buffer.from(user + ":" + pass).toString("base64");
-  const remoteUrl = config.devRemoteApiUrl || "https://qrms-dev.schoolscreen.sa/api";
+
+// server/routes/tenantRoutes.ts
+var tenantRouter = (0, import_express2.Router)();
+tenantRouter.get("/", async (req, res, next) => {
   try {
-    const tenantsRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/tenants`, {
-      headers: {
-        Authorization: `Basic ${token}`,
-        Accept: "application/json"
-      }
-    });
-    let tenants = [];
-    if (tenantsRes.ok) {
-      const tenantsData = await tenantsRes.json();
-      tenants = tenantsData.data || [];
-    }
-    if (tenants.length === 0) {
-      tenants = [{ id: "tenant_1789350839237" }, { id: "tenant_1789346881267" }];
-    }
-    for (const t of tenants) {
-      const usersRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/users`, {
-        headers: {
-          Authorization: `Basic ${token}`,
-          Accept: "application/json",
-          "X-Tenant-Id": t.id
-        }
-      });
-      if (usersRes.ok) {
-        const usersData = await usersRes.json();
-        const userList = usersData.data || [];
-        for (const u of userList) {
-          const uPhone = (u.phone || "").trim();
-          const uPhoneDigits = normalizeDigits(uPhone);
-          const uNatId = (u.nationalId || u.national_id || "").trim();
-          const uEmail = (u.email || "").trim().toLowerCase();
-          const uLoginId = (u.loginIdentifier || u.login_identifier || "").trim().toLowerCase();
-          const uId = (u.id || "").trim().toLowerCase();
-          if (identDigits && uPhoneDigits) {
-            if (identDigits === uPhoneDigits) return u;
-            if (identDigits.startsWith("966") && identDigits.slice(3) === uPhoneDigits.replace(/^0/, "") || uPhoneDigits.startsWith("966") && uPhoneDigits.slice(3) === identDigits.replace(/^0/, "") || identDigits.replace(/^0/, "") === uPhoneDigits.replace(/^0/, "")) {
-              return u;
-            }
-          }
-          if (uNatId && (uNatId === trimmedIdentifier || identDigits && uNatId === identDigits)) {
-            return u;
-          }
-          if (uEmail && uEmail === identLower) {
-            return u;
-          }
-          if (uLoginId && uLoginId === identLower) {
-            return u;
-          }
-          if (uId && uId === identLower) {
-            return u;
-          }
-        }
-      }
-    }
-  } catch (remoteErr) {
-    console.error("[AUTH] Remote user fetch error:", remoteErr);
-  }
-  return null;
-}
-authRouter.post("/login", async (req, res, next) => {
-  try {
-    const { identifier, password } = req.body;
-    if (!identifier || typeof identifier !== "string" || !identifier.trim()) {
-      res.status(400).json({ ok: false, error: "\u0645\u0639\u0631\u0641 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0637\u0644\u0648\u0628 (\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0637\u0646\u064A\u0629)." });
-      return;
-    }
-    if (!password || typeof password !== "string") {
-      res.status(400).json({ ok: false, error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629." });
-      return;
-    }
-    const userRow = await findUserByIdentifier(identifier);
-    if (!userRow) {
-      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631." });
-      return;
-    }
-    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
-      res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
-      return;
-    }
-    const isPasswordValid = verifyUserPassword(password, userRow);
-    if (!isPasswordValid) {
-      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
-      return;
-    }
-    const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;
-    const { passwordHash, password_hash, ...safeUser } = userRow;
-    activeSessions.set(sessionId, {
-      user: safeUser,
-      createdAt: Date.now()
-    });
-    res.cookie("session_id", sessionId, {
-      httpOnly: true,
-      secure: config.isProduction,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 * 1e3
-    });
+    const tenants = await getPublicTenants();
     res.json({
       ok: true,
-      user: safeUser,
-      token: sessionId,
-      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
+      count: tenants.length,
+      data: tenants
     });
   } catch (err) {
-    console.error("[AUTH] Login unexpected error:", err);
     next(err);
   }
 });
-authRouter.get("/me", (req, res) => {
-  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (!sessionId) {
-    res.status(401).json({ ok: false, error: "Not authenticated" });
-    return;
-  }
-  const session = activeSessions.get(sessionId);
-  if (!session || !session.user) {
-    res.status(401).json({ ok: false, error: "Session expired or invalid" });
-    return;
-  }
-  res.json({ ok: true, user: session.user });
-});
-authRouter.post("/logout", (req, res) => {
-  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (sessionId) {
-    activeSessions.delete(sessionId);
-  }
-  res.clearCookie("session_id", { path: "/" });
-  res.json({ ok: true, message: "Logged out successfully" });
-});
-authRouter.post("/update-password", async (req, res) => {
+tenantRouter.get("/:idOrSlug", async (req, res, next) => {
   try {
-    const { userId, newPassword } = req.body;
-    if (!userId || !newPassword) {
-      res.status(400).json({ ok: false, error: "User ID and new password are required" });
+    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
+    if (!tenant) {
+      res.status(404).json({
+        ok: false,
+        error: "Tenant not found"
+      });
       return;
     }
-    const newHash = hashPasswordWithSalt(newPassword);
-    const pool2 = getDbPool();
-    if (pool2) {
-      await pool2.query("UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = NOW() WHERE id = $2", [newHash, userId]);
-    }
-    for (const [sId, sess] of activeSessions.entries()) {
-      if (sess.user.id === userId) {
-        sess.user.mustChangePassword = false;
-        activeSessions.set(sId, sess);
-      }
-    }
-    res.json({ ok: true, message: "Password updated successfully" });
+    res.json({
+      ok: true,
+      data: tenant
+    });
   } catch (err) {
-    console.error("[AUTH] Update password error:", err);
-    res.status(500).json({ ok: false, error: "Failed to update password" });
+    next(err);
   }
 });
 
-// server/routes/entityRoutes.ts
+// server/routes/stageRoutes.ts
 var import_express3 = require("express");
+
+// server/services/stageService.ts
+async function getActiveStages() {
+  const query = `
+    SELECT *
+    FROM stages
+    WHERE is_active = TRUE
+    ORDER BY display_order ASC, name ASC
+  `;
+  return executeQuery(query);
+}
+async function getStageById(stageId) {
+  const query = `
+    SELECT *
+    FROM stages
+    WHERE id = $1
+    LIMIT 1
+  `;
+  return executeQuerySingle(query, [stageId]);
+}
+
+// server/routes/stageRoutes.ts
+var stageRouter = (0, import_express3.Router)();
+stageRouter.get("/", async (req, res, next) => {
+  try {
+    const stages = await getActiveStages();
+    res.json({
+      ok: true,
+      count: stages.length,
+      data: stages
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+stageRouter.get("/:id", async (req, res, next) => {
+  try {
+    const stage = await getStageById(req.params.id);
+    if (!stage) {
+      res.status(404).json({
+        ok: false,
+        error: "Educational stage not found"
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      data: stage
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// server/routes/userRoutes.ts
+var import_express4 = require("express");
+
+// server/services/userService.ts
+var SAFE_USER_SELECT = `
+  u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
+  u.national_id, u.login_identifier, u.role, u.staff_role, u.halaqah_id,
+  h.name AS halaqah_name,
+  u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
+  u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
+  u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
+  u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
+  u.is_archived, u.teacher_archived, u.supervisor_archived, u.archive_type,
+  u.archived_at, u.archived_by, u.archive_reason,
+  u.created_at, u.updated_at
+`;
+async function getUsersByTenant(tenantId, filters = {}) {
+  const conditions = ["u.tenant_id = $1"];
+  const params = [tenantId];
+  if (filters.isArchived === true) {
+    conditions.push("(u.is_archived = TRUE OR u.teacher_archived = TRUE OR u.supervisor_archived = TRUE)");
+  } else {
+    conditions.push("(u.is_archived = FALSE OR u.is_archived IS NULL)");
+  }
+  if (filters.role) {
+    params.push(filters.role);
+    conditions.push(`u.role = $${params.length}`);
+  }
+  const query = `
+    SELECT ${SAFE_USER_SELECT}
+    FROM users u
+    LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY u.name ASC
+  `;
+  return executeQuery(query, params);
+}
+async function getUserById(userId, tenantId) {
+  let query;
+  let params;
+  if (tenantId) {
+    query = `
+      SELECT ${SAFE_USER_SELECT}
+      FROM users u
+      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+      WHERE u.id = $1 AND u.tenant_id = $2
+      LIMIT 1
+    `;
+    params = [userId, tenantId];
+  } else {
+    query = `
+      SELECT ${SAFE_USER_SELECT}
+      FROM users u
+      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+      WHERE u.id = $1
+      LIMIT 1
+    `;
+    params = [userId];
+  }
+  return executeQuerySingle(query, params);
+}
 
 // server/services/entityService.ts
 var ENTITY_TABLE_CONFIGS = {
@@ -2038,6 +1995,9 @@ async function upsert(collectionName, rawData, tenantId) {
     throw new Error(`Unknown or unsupported collection: '${collectionName}'`);
   }
   const sanitized = prepareRecord(config2, rawData, tenantId);
+  if (config2.tableName === "users" && sanitized.role === void 0 && sanitized.staff_role) {
+    sanitized.role = sanitized.staff_role;
+  }
   const keys = Object.keys(sanitized);
   if (keys.length === 0) {
     throw new Error(`No valid columns provided for table '${config2.tableName}'`);
@@ -2128,8 +2088,316 @@ async function deleteRecord(collectionName, id, tenantId) {
   return !!deleted;
 }
 
+// server/routes/userRoutes.ts
+var userRouter = (0, import_express4.Router)();
+userRouter.get("/", requireTenantContext, async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId;
+    const filters = {};
+    if (req.query.isArchived === "true") filters.isArchived = true;
+    else if (req.query.isArchived === "false") filters.isArchived = false;
+    if (typeof req.query.role === "string" && req.query.role) filters.role = req.query.role;
+    const users = await getUsersByTenant(tenantId, filters);
+    res.json({
+      ok: true,
+      tenantId,
+      count: users.length,
+      data: users
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+userRouter.get("/:id", async (req, res, next) => {
+  try {
+    const user = await getUserById(req.params.id, req.tenantId);
+    if (!user) {
+      res.status(404).json({
+        ok: false,
+        error: "User not found in the specified context"
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      data: user
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+userRouter.post("/", async (req, res, next) => {
+  try {
+    const saved = await upsert("users", req.body, req.tenantId);
+    res.json({
+      ok: true,
+      data: saved
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+userRouter.post("/bulk", async (req, res, next) => {
+  try {
+    const items = req.body.items || req.body.records || (Array.isArray(req.body) ? req.body : []);
+    const result = await bulkUpsert("users", items, req.tenantId);
+    res.json({
+      ok: true,
+      count: result.count,
+      data: result.items
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+userRouter.delete("/:id", async (req, res, next) => {
+  try {
+    const deleted = await deleteRecord("users", req.params.id, req.tenantId);
+    if (!deleted) {
+      res.status(404).json({
+        ok: false,
+        error: "User not found or could not be deleted"
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      message: `User ${req.params.id} deleted successfully`
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// server/routes/authRoutes.ts
+var import_express5 = require("express");
+var import_crypto = __toESM(require("crypto"), 1);
+var authRouter = (0, import_express5.Router)();
+var activeSessions = /* @__PURE__ */ new Map();
+function hashPasswordWithSalt(password) {
+  const salted = password.trim() + "_ghazzawi_salt_2026";
+  return import_crypto.default.createHash("sha256").update(salted).digest("hex");
+}
+function hashPasswordPlain(password) {
+  return import_crypto.default.createHash("sha256").update(password.trim()).digest("hex");
+}
+function verifyUserPassword(plainPassword, user) {
+  if (!plainPassword) return false;
+  const trimmed = plainPassword.trim();
+  const inputSaltedHash = hashPasswordWithSalt(trimmed);
+  const inputPlainHash = hashPasswordPlain(trimmed);
+  const storedHash = (user.passwordHash || user.password_hash || "").trim();
+  if (storedHash) {
+    if (storedHash.toLowerCase() === inputSaltedHash.toLowerCase()) return true;
+    if (storedHash.toLowerCase() === inputPlainHash.toLowerCase()) return true;
+    if (storedHash === trimmed) return true;
+    return false;
+  }
+  const validInitialPasswords = [
+    "Admin@123456",
+    "Admin@123",
+    "123456",
+    "admin123",
+    user.phone?.trim(),
+    user.nationalId?.trim(),
+    user.national_id?.trim()
+  ].filter(Boolean);
+  return validInitialPasswords.includes(trimmed);
+}
+function normalizeDigits(val) {
+  if (!val) return "";
+  return String(val).trim().replace(/\D/g, "");
+}
+async function findUserByIdentifier(identifier) {
+  const trimmedIdentifier = identifier.trim();
+  const identDigits = normalizeDigits(trimmedIdentifier);
+  const identLower = trimmedIdentifier.toLowerCase();
+  const pool2 = getDbPool();
+  if (pool2) {
+    try {
+      const user2 = await executeQuerySingle(`
+        SELECT 
+          u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
+          u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
+          u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
+          u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
+          u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
+          u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
+          u.is_archived
+        FROM users u
+        WHERE (u.is_archived = FALSE OR u.is_archived IS NULL)
+          AND (
+            u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
+            OR u.login_identifier = $1 OR u.id = $1
+          )
+        LIMIT 1
+      `, [trimmedIdentifier, identLower]);
+      if (user2) return user2;
+    } catch (dbErr) {
+      console.warn("[AUTH] Direct DB query fallback to remote forwarder:", dbErr);
+    }
+  }
+  const user = config.devApiUsername;
+  const pass = config.devApiPassword;
+  const token = Buffer.from(user + ":" + pass).toString("base64");
+  const remoteUrl = config.devRemoteApiUrl || "https://qrms-dev.schoolscreen.sa/api";
+  try {
+    const tenantsRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/tenants`, {
+      headers: {
+        Authorization: `Basic ${token}`,
+        Accept: "application/json"
+      }
+    });
+    let tenants = [];
+    if (tenantsRes.ok) {
+      const tenantsData = await tenantsRes.json();
+      tenants = tenantsData.data || [];
+    }
+    if (tenants.length === 0) {
+      tenants = [{ id: "tenant_1789350839237" }, { id: "tenant_1789346881267" }];
+    }
+    for (const t of tenants) {
+      const usersRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/users`, {
+        headers: {
+          Authorization: `Basic ${token}`,
+          Accept: "application/json",
+          "X-Tenant-Id": t.id
+        }
+      });
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        const userList = usersData.data || [];
+        for (const u of userList) {
+          const uPhone = (u.phone || "").trim();
+          const uPhoneDigits = normalizeDigits(uPhone);
+          const uNatId = (u.nationalId || u.national_id || "").trim();
+          const uEmail = (u.email || "").trim().toLowerCase();
+          const uLoginId = (u.loginIdentifier || u.login_identifier || "").trim().toLowerCase();
+          const uId = (u.id || "").trim().toLowerCase();
+          if (identDigits && uPhoneDigits) {
+            if (identDigits === uPhoneDigits) return u;
+            if (identDigits.startsWith("966") && identDigits.slice(3) === uPhoneDigits.replace(/^0/, "") || uPhoneDigits.startsWith("966") && uPhoneDigits.slice(3) === identDigits.replace(/^0/, "") || identDigits.replace(/^0/, "") === uPhoneDigits.replace(/^0/, "")) {
+              return u;
+            }
+          }
+          if (uNatId && (uNatId === trimmedIdentifier || identDigits && uNatId === identDigits)) {
+            return u;
+          }
+          if (uEmail && uEmail === identLower) {
+            return u;
+          }
+          if (uLoginId && uLoginId === identLower) {
+            return u;
+          }
+          if (uId && uId === identLower) {
+            return u;
+          }
+        }
+      }
+    }
+  } catch (remoteErr) {
+    console.error("[AUTH] Remote user fetch error:", remoteErr);
+  }
+  return null;
+}
+authRouter.post("/login", async (req, res, next) => {
+  try {
+    const { identifier, password } = req.body;
+    if (!identifier || typeof identifier !== "string" || !identifier.trim()) {
+      res.status(400).json({ ok: false, error: "\u0645\u0639\u0631\u0641 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0637\u0644\u0648\u0628 (\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0637\u0646\u064A\u0629)." });
+      return;
+    }
+    if (!password || typeof password !== "string") {
+      res.status(400).json({ ok: false, error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629." });
+      return;
+    }
+    const userRow = await findUserByIdentifier(identifier);
+    if (!userRow) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631." });
+      return;
+    }
+    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
+      res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
+      return;
+    }
+    const isPasswordValid = verifyUserPassword(password, userRow);
+    if (!isPasswordValid) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
+      return;
+    }
+    const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;
+    const { passwordHash, password_hash, ...safeUser } = userRow;
+    activeSessions.set(sessionId, {
+      user: safeUser,
+      createdAt: Date.now()
+    });
+    res.cookie("session_id", sessionId, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1e3
+    });
+    res.json({
+      ok: true,
+      user: safeUser,
+      token: sessionId,
+      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
+    });
+  } catch (err) {
+    console.error("[AUTH] Login unexpected error:", err);
+    next(err);
+  }
+});
+authRouter.get("/me", (req, res) => {
+  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!sessionId) {
+    res.status(401).json({ ok: false, error: "Not authenticated" });
+    return;
+  }
+  const session = activeSessions.get(sessionId);
+  if (!session || !session.user) {
+    res.status(401).json({ ok: false, error: "Session expired or invalid" });
+    return;
+  }
+  res.json({ ok: true, user: session.user });
+});
+authRouter.post("/logout", (req, res) => {
+  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (sessionId) {
+    activeSessions.delete(sessionId);
+  }
+  res.clearCookie("session_id", { path: "/" });
+  res.json({ ok: true, message: "Logged out successfully" });
+});
+authRouter.post("/update-password", async (req, res) => {
+  try {
+    const { userId, newPassword } = req.body;
+    if (!userId || !newPassword) {
+      res.status(400).json({ ok: false, error: "User ID and new password are required" });
+      return;
+    }
+    const newHash = hashPasswordWithSalt(newPassword);
+    const pool2 = getDbPool();
+    if (pool2) {
+      await pool2.query("UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = NOW() WHERE id = $2", [newHash, userId]);
+    }
+    for (const [sId, sess] of activeSessions.entries()) {
+      if (sess.user.id === userId) {
+        sess.user.mustChangePassword = false;
+        activeSessions.set(sId, sess);
+      }
+    }
+    res.json({ ok: true, message: "Password updated successfully" });
+  } catch (err) {
+    console.error("[AUTH] Update password error:", err);
+    res.status(500).json({ ok: false, error: "Failed to update password" });
+  }
+});
+
 // server/routes/entityRoutes.ts
-var entityRouter = (0, import_express3.Router)();
+var import_express6 = require("express");
+var entityRouter = (0, import_express6.Router)();
 entityRouter.use((req, res, next) => {
   const systemPaths = ["/auth", "/health", "/tenants", "/stages", "/users", "/admin"];
   if (systemPaths.some((p) => req.path.startsWith(p))) {
@@ -2268,7 +2536,7 @@ entityRouter.delete("/:collection/:id", validateCollection, async (req, res, nex
 });
 
 // server/routes/backupRestoreRoutes.ts
-var import_express4 = require("express");
+var import_express7 = require("express");
 
 // migration/config/collectionMap.ts
 var COLLECTION_MAPPINGS = {
@@ -6815,7 +7083,7 @@ function validateBackupJsonFile(jsonStringOrObject) {
 }
 
 // server/routes/backupRestoreRoutes.ts
-var backupRestoreRouter = (0, import_express4.Router)();
+var backupRestoreRouter = (0, import_express7.Router)();
 function requireAdminRole(req, res, next) {
   const userRole = req.headers["x-user-role"] || "";
   const isAuthorized = ["system_admin", "campus_admin", "admin", "general_supervisor"].includes(userRole);
@@ -6995,7 +7263,7 @@ backupRestoreRouter.post("/execute", requireAdminRole, async (req, res) => {
 });
 
 // server/routes/databaseBackupRoutes.ts
-var import_express5 = require("express");
+var import_express8 = require("express");
 var import_fs2 = __toESM(require("fs"), 1);
 var import_path2 = __toESM(require("path"), 1);
 
@@ -7146,7 +7414,7 @@ function isValidBackupFilename(filename) {
 }
 
 // server/routes/databaseBackupRoutes.ts
-var databaseBackupRouter = (0, import_express5.Router)();
+var databaseBackupRouter = (0, import_express8.Router)();
 function requireAdminRole2(req, res, next) {
   const userRole = req.headers["x-user-role"] || "";
   const isAuthorized = ["system_admin", "campus_admin", "admin", "general_supervisor"].includes(userRole);
@@ -7220,14 +7488,17 @@ databaseBackupRouter.get("/database/download/:filename", requireAdminRole2, (req
 
 // server/app.ts
 function createApp() {
-  const app = (0, import_express6.default)();
+  const app = (0, import_express9.default)();
   app.use((0, import_cookie_parser.default)());
-  app.use(import_express6.default.json({ limit: "50mb" }));
-  app.use(import_express6.default.urlencoded({ extended: true, limit: "50mb" }));
+  app.use(import_express9.default.json({ limit: "50mb" }));
+  app.use(import_express9.default.urlencoded({ extended: true, limit: "50mb" }));
   app.use("/api/auth", authRouter);
   app.use("/api/health", healthRouter);
   app.use("/api", extractTenantContext);
   app.use("/api", createRemoteForwarder());
+  app.use("/api/tenants", tenantRouter);
+  app.use("/api/stages", stageRouter);
+  app.use("/api/users", userRouter);
   app.use("/api/admin/backup/restore", backupRestoreRouter);
   app.use("/api/admin/migration", backupRestoreRouter);
   app.use("/api/admin/backup/database", databaseBackupRouter);
@@ -7257,9 +7528,9 @@ function createApp() {
 // server.ts
 async function startServer() {
   const app = createApp();
-  const PORT = 3e3;
+  const PORT = config.port || 3e3;
   const distPath = import_path3.default.join(process.cwd(), "dist");
-  app.use(import_express7.default.static(distPath));
+  app.use(import_express10.default.static(distPath));
   app.get("*all", (req, res, next) => {
     if (req.path.startsWith("/api")) {
       return next();
