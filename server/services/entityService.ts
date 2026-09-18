@@ -867,6 +867,30 @@ function prepareRecord(config: TableConfig, rawData: Record<string, any>, tenant
         } else if (typeof val === 'object') {
           val = JSON.stringify(val);
         }
+      } else {
+        // Non-JSONB fields: strictly prevent objects like "{}" or Firestore Timestamps from breaking PostgreSQL
+        if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+          // Check for Firestore-like timestamp objects { seconds, nanoseconds }
+          if ('seconds' in val || '_seconds' in val) {
+            const sec = (val as any).seconds ?? (val as any)._seconds ?? 0;
+            const nano = (val as any).nanoseconds ?? (val as any)._nanoseconds ?? 0;
+            val = new Date(sec * 1000 + Math.floor(nano / 1000000)).toISOString();
+          } else if (Object.keys(val).length === 0) {
+            // Empty object `{}`
+            if (col === 'created_at' || col === 'updated_at' || col === 'timestamp') {
+              val = new Date().toISOString();
+            } else {
+              val = null;
+            }
+          } else {
+            val = null;
+          }
+        } else if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (trimmed === '{}' || trimmed === '') {
+            val = null;
+          }
+        }
       }
 
       sanitized[col] = val;
@@ -881,7 +905,7 @@ function prepareRecord(config: TableConfig, rawData: Record<string, any>, tenant
 
   // Auto-set updated_at timestamp if present in allowed columns
   if (config.allowedColumns.includes('updated_at')) {
-    sanitized.updated_at = new Date();
+    sanitized.updated_at = new Date().toISOString();
   }
 
   return sanitized;

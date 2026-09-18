@@ -10,6 +10,15 @@ import {
 
 export const entityRouter = Router();
 
+entityRouter.use((req, res, next) => {
+  const systemPaths = ['/auth', '/health', '/tenants', '/stages', '/users', '/admin'];
+  if (systemPaths.some(p => req.path.startsWith(p))) {
+    return next();
+  }
+  console.log(`[ENTITY-DEBUG] Request reached entityRouter: ${req.method} ${req.originalUrl} | Path: ${req.path}`);
+  next();
+});
+
 /**
  * Validates whether the requested collection name is registered
  */

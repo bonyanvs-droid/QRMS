@@ -94,17 +94,55 @@ export type DbTableName = keyof DbTableMapping;
 /**
  * Utility to convert PostgreSQL snake_case rows into camelCase objects
  */
-export function snakeToCamelCase<T = any>(obj: any): T {
-  if (obj === null || typeof obj !== 'object') {
+export function snakeToCamelCase<T = any>(obj: any, parentKey?: string): T {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  // Handle Date instances from PostgreSQL pg driver
+  if (obj instanceof Date) {
+    if (isNaN(obj.getTime())) {
+      return '' as unknown as T;
+    }
+    const iso = obj.toISOString();
+    // For pure DATE columns (or midnight UTC), format as YYYY-MM-DD
+    const isPureDateKey = parentKey && /(?:^|[a-z])(Date|date)$/.test(parentKey);
+    const isMidnight = iso.endsWith('T00:00:00.000Z');
+    if (isPureDateKey || isMidnight) {
+      return iso.split('T')[0] as unknown as T;
+    }
+    return iso as unknown as T;
+  }
+  if (typeof obj !== 'object') {
     return obj;
   }
   if (Array.isArray(obj)) {
-    return obj.map((item) => snakeToCamelCase(item)) as unknown as T;
+    return obj.map((item) => snakeToCamelCase(item, parentKey)) as unknown as T;
   }
   const camelObj: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     const camelKey = key.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
-    camelObj[camelKey] = snakeToCamelCase(value);
+    
+    // Numeric coercion for known PostgreSQL NUMERIC columns
+    const isNumericField = [
+      'spellingPassingThreshold',
+      'passingScore',
+      'passingThreshold',
+      'baseTuition',
+      'discountAmount',
+      'scholarshipAmount',
+      'paidAmount',
+      'balanceDue',
+      'estimatedAmount',
+      'actualSpent',
+      'budget',
+      'overallProjectBudget'
+    ].includes(camelKey);
+
+    if (isNumericField && typeof value === 'string' && value.trim() !== '' && !isNaN(Number(value))) {
+      camelObj[camelKey] = Number(value);
+    } else {
+      camelObj[camelKey] = snakeToCamelCase(value, camelKey);
+    }
   }
   return camelObj as T;
 }
@@ -113,8 +151,11 @@ export function snakeToCamelCase<T = any>(obj: any): T {
  * Utility to convert camelCase objects into PostgreSQL snake_case column key-value pairs
  */
 export function camelToSnakeCase<T = any>(obj: any): T {
-  if (obj === null || typeof obj !== 'object') {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
     return obj;
+  }
+  if (obj instanceof Date) {
+    return obj as unknown as T;
   }
   if (Array.isArray(obj)) {
     return obj.map((item) => camelToSnakeCase(item)) as unknown as T;

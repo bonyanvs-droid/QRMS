@@ -14,9 +14,9 @@ export function usePWA() {
   useEffect(() => {
     // Check if running as standalone app
     const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true ||
-      document.referrer.includes('android-app://');
+      (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)')?.matches) ||
+      (typeof window !== 'undefined' && (window.navigator as any)?.standalone === true) ||
+      (typeof document !== 'undefined' && Boolean(document.referrer?.includes('android-app://')));
 
     setIsInstalled(isStandalone);
 

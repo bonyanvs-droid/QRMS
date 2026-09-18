@@ -50,7 +50,23 @@ export default defineConfig(() => {
       }),
     ],
     build: {
-      chunkSizeWarningLimit: 8000,
+      outDir: 'dist',
+      chunkSizeWarningLimit: 3000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('xlsx')) return 'vendor-xlsx';
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('html-to-image') || id.includes('print-js')) return 'vendor-export';
+              if (id.includes('firebase')) return 'vendor-firebase';
+              if (id.includes('lucide-react')) return 'vendor-lucide';
+              if (id.includes('motion')) return 'vendor-motion';
+              if (id.includes('react') || id.includes('scheduler') || id.includes('@remix-run')) return 'vendor-react';
+              return 'vendor-common';
+            }
+          },
+        },
+      },
     },
     resolve: {
       alias: {

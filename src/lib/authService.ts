@@ -7,7 +7,6 @@ import { auth } from './firebase';
 import { User, UserRole } from '../types';
 import { hashPassword } from './dbService';
 import { recordAuditLog } from './auditService';
-import { SEED_USERS } from '../data/initialData';
 import { apiClient } from './api/apiClient';
 import { UserRepository } from './repositories/userRepository';
 
@@ -95,54 +94,18 @@ export async function authenticateUser(
         mustChangePassword: res.mustChangePassword,
       };
     }
-  } catch (apiErr: any) {
-    console.warn('[Auth] Server login response:', apiErr.message);
-  }
-
-  // Fallback to SEED_USERS for offline / sandbox compatibility
-  const phoneVariants = getPhoneVariants(cleanIdentifier);
-  const seedMatch = SEED_USERS.find(
-    (u) =>
-      phoneVariants.includes(u.phone) ||
-      (u.nationalId && u.nationalId === cleanIdentifier) ||
-      (u.loginIdentifier && u.loginIdentifier === cleanIdentifier) ||
-      (u.email && u.email.toLowerCase() === cleanIdentifier.toLowerCase()) ||
-      u.id === cleanIdentifier
-  );
-
-  if (seedMatch) {
-    if (plainPassword) {
-      const cleanPass = plainPassword.trim();
-      const rawHash = await hashPassword(cleanPass);
-      const saltedHash = await hashPasswordWithSalt(cleanPass);
-      const storedHash = seedMatch.password || '';
-
-      const isValid =
-        storedHash === rawHash ||
-        storedHash === saltedHash ||
-        storedHash === cleanPass ||
-        cleanPass === 'Admin@123456' ||
-        cleanPass === '123456';
-
-      if (!isValid) {
-        return {
-          success: false,
-          errorMessage: 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
-        };
-      }
-    }
 
     return {
-      success: true,
-      user: { ...seedMatch },
-      mustChangePassword: seedMatch.mustChangePassword,
+      success: false,
+      errorMessage: res?.error || 'بيانات الدخول غير صحيحة. يرجى التحقق وإعادة المحاولة.',
+    };
+  } catch (apiErr: any) {
+    const errorMsg = apiErr?.message || 'تعذر الاتصال بخادم المنظومة. يرجى التحقق من الشبكة وإعادة المحاولة.';
+    return {
+      success: false,
+      errorMessage: errorMsg,
     };
   }
-
-  return {
-    success: false,
-    errorMessage: 'بيانات الدخول غير مسجلة في قاعدة بيانات المنظومة.',
-  };
 }
 
 /**
@@ -220,6 +183,9 @@ export async function signInWithGoogle(): Promise<AuthLoginResult> {
  */
 export async function performLogout(userId?: string, userName?: string, userRole?: UserRole): Promise<void> {
   try {
+    try {
+      await apiClient.post('/auth/logout');
+    } catch (_) {}
     await fbSignOut(auth);
     if (userId && userName) {
       await recordAuditLog({

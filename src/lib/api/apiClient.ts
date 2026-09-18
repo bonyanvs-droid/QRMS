@@ -12,12 +12,13 @@ class ApiClient {
   private listeners: Map<string, Set<ListenerCallback<any>>> = new Map();
   private cache: Map<string, any> = new Map();
   private pollIntervals: Map<string, NodeJS.Timeout> = new Map();
+  private inFlightGets: Map<string, Promise<any>> = new Map();
 
   /**
-   * Returns the configured target remote API URL that all operations forward to
+   * Returns the configured target API URL (relative /api for seamless proxying and local execution)
    */
   getTargetApiUrl(): string {
-    return 'https://qrms-dev.schoolscreen.sa/api';
+    return '/api';
   }
 
   getDataSource(): string {
@@ -43,6 +44,45 @@ class ApiClient {
       headers['X-Tenant-Id'] = this.activeTenantId;
     }
     return headers;
+  }
+
+  /**
+   * Recursively normalizes empty objects `{}` or invalid string patterns in date/timestamp fields to null
+   */
+  private sanitizeData<T = any>(obj: T): T {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'string') {
+      const trimmed = obj.trim();
+      return (trimmed === '{}' ? (null as any) : obj) as T;
+    }
+    if (typeof obj !== 'object') return obj;
+
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.sanitizeData(item)) as any;
+    }
+
+    // Check if it is an empty plain object where primitive or null was expected
+    const keys = Object.keys(obj as object);
+    if (keys.length === 0 && !(obj instanceof Date)) {
+      return null as any;
+    }
+
+    const sanitized: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj as object)) {
+      const isDateField = /(?:date|time|at|_at)$/i.test(key) || key === 'termStart' || key === 'termEnd' || key === 'phaseStart' || key === 'phaseEnd';
+      if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
+        if (Object.keys(val).length === 0) {
+          sanitized[key] = null;
+          continue;
+        }
+      }
+      if (typeof val === 'string' && val.trim() === '{}' && isDateField) {
+        sanitized[key] = null;
+        continue;
+      }
+      sanitized[key] = this.sanitizeData(val);
+    }
+    return sanitized as T;
   }
 
   /**
@@ -74,7 +114,7 @@ class ApiClient {
       throw new Error(errorMessage);
     }
 
-    return json;
+    return this.sanitizeData(json);
   }
 
   /**
@@ -82,12 +122,13 @@ class ApiClient {
    */
   private buildUrl(endpoint: string, queryParams?: Record<string, any>): string {
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const baseUrl = this.getTargetApiUrl().replace(/\/+$/, '');
     
-    // Normalize path to avoid duplicate /api prefix
+    // Normalize path to always start with /api
     const path = cleanEndpoint.startsWith('/api/')
-      ? cleanEndpoint.substring(4)
-      : cleanEndpoint;
+      ? cleanEndpoint
+      : cleanEndpoint === '/api'
+      ? '/api'
+      : `/api${cleanEndpoint}`;
 
     const query = new URLSearchParams();
     if (queryParams) {
@@ -98,34 +139,50 @@ class ApiClient {
       }
     }
     const queryString = query.toString();
-    return `${baseUrl}${path}${queryString ? `?${queryString}` : ''}`;
+    return `${path}${queryString ? `?${queryString}` : ''}`;
   }
 
   /**
-   * Universal GET request
+   * Universal GET request with in-flight deduplication
    */
   async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<T> {
     const url = this.buildUrl(endpoint, params);
+    const dedupeKey = `${this.activeTenantId || ''}:${url}`;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
+    // Return in-flight request if already pending to prevent bursting
+    if (this.inFlightGets.has(dedupeKey)) {
+      return this.inFlightGets.get(dedupeKey)!;
+    }
 
-    const json = await this.parseJsonResponse(res, url);
-    return json.data !== undefined ? json.data : json;
+    const fetchPromise = (async () => {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: this.getHeaders(),
+        });
+
+        const json = await this.parseJsonResponse(res, url);
+        return json.data !== undefined ? json.data : json;
+      } finally {
+        this.inFlightGets.delete(dedupeKey);
+      }
+    })();
+
+    this.inFlightGets.set(dedupeKey, fetchPromise);
+    return fetchPromise;
   }
 
   /**
    * Universal POST request
    */
-  async post<T = any>(endpoint: string, data: any): Promise<T> {
+  async post<T = any>(endpoint: string, data: any = {}): Promise<T> {
     const url = this.buildUrl(endpoint);
+    const sanitizedBody = this.sanitizeData(data);
 
     const res = await fetch(url, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify(sanitizedBody),
     });
 
     const json = await this.parseJsonResponse(res, url);
@@ -146,11 +203,12 @@ class ApiClient {
    */
   async put<T = any>(endpoint: string, data: any): Promise<T> {
     const url = this.buildUrl(endpoint);
+    const sanitizedBody = this.sanitizeData(data);
 
     const res = await fetch(url, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify(sanitizedBody),
     });
 
     const json = await this.parseJsonResponse(res, url);
@@ -194,7 +252,7 @@ class ApiClient {
     collection: string,
     callback: ListenerCallback<T>,
     filterParams?: Record<string, any>,
-    pollIntervalMs: number = 10000
+    pollIntervalMs: number = 60000
   ): Unsubscribe {
     const listenerKey = `${collection}_${JSON.stringify(filterParams || {})}`;
     
@@ -204,6 +262,10 @@ class ApiClient {
     this.listeners.get(listenerKey)!.add(callback);
 
     const fetchLatest = async () => {
+      // Skip background polling if tab is hidden
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
       try {
         const data = await this.get<T>(`/${collection}`, filterParams);
         this.cache.set(listenerKey, data);
@@ -217,7 +279,7 @@ class ApiClient {
     fetchLatest();
 
     // Start background polling if not already running
-    if (!this.pollIntervals.has(listenerKey)) {
+    if (!this.pollIntervals.has(listenerKey) && pollIntervalMs > 0) {
       const timer = setInterval(fetchLatest, pollIntervalMs);
       this.pollIntervals.set(listenerKey, timer);
     }

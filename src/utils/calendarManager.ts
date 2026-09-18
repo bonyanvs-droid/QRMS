@@ -33,19 +33,35 @@ export function calculateAcademicWeek(
   currentDate: Date = new Date(),
   forceManualWeek?: number | null
 ): AcademicTimelineProgress {
+  const safeConfig: AcademicYearConfig = {
+    name: config?.name || 'العام الدراسي 1448 هـ',
+    semester: config?.semester || 'الفصل الدراسي الأول',
+    startDate: typeof config?.startDate === 'string' && config.startDate.trim() !== '' && config.startDate !== '{}' ? config.startDate : '2026-08-15',
+    endDate: typeof config?.endDate === 'string' && config.endDate.trim() !== '' && config.endDate !== '{}' ? config.endDate : '2026-11-15',
+    totalWeeks: Number(config?.totalWeeks) || 12,
+    operationalStartWeek: Number(config?.operationalStartWeek) || 3,
+    operationalEndWeek: Number(config?.operationalEndWeek) || 14,
+    currentWeek: Number(config?.currentWeek) || 5,
+    manualWeekOverride: !!config?.manualWeekOverride,
+    daysPerWeek: Number(config?.daysPerWeek) || 4,
+    spellingPassingThreshold: Number(config?.spellingPassingThreshold) || 85,
+    gradeTargets: config?.gradeTargets || {},
+    id: config?.id || 'ay_1447_t2',
+  };
+
   // If manual override is active via argument or config flag, respect it strictly
-  const manualWeek = forceManualWeek ?? (config.manualWeekOverride ? config.currentWeek : null);
-  if (manualWeek !== undefined && manualWeek !== null && manualWeek > 0) {
+  const manualWeek = forceManualWeek ?? (safeConfig.manualWeekOverride ? safeConfig.currentWeek : null);
+  if (manualWeek !== undefined && manualWeek !== null && !isNaN(manualWeek) && manualWeek > 0) {
     const totalWeeks = 15;
     const elapsed = Math.min(totalWeeks, Math.max(1, manualWeek));
     const remaining = Math.max(0, totalWeeks - elapsed);
     const progress = Math.min(100, Math.round((elapsed / totalWeeks) * 100));
-    const isOperational = elapsed >= config.operationalStartWeek && elapsed <= config.operationalEndWeek;
+    const isOperational = elapsed >= safeConfig.operationalStartWeek && elapsed <= safeConfig.operationalEndWeek;
     
     let phase = 'الأسابيع التمهيدية والتسجيل';
     if (isOperational) {
-      phase = `الخطة التشغيلية (الأسبوع ${elapsed - config.operationalStartWeek + 1} من ${config.totalWeeks})`;
-    } else if (elapsed > config.operationalEndWeek) {
+      phase = `الخطة التشغيلية (الأسبوع ${elapsed - safeConfig.operationalStartWeek + 1} من ${safeConfig.totalWeeks})`;
+    } else if (elapsed > safeConfig.operationalEndWeek) {
       phase = 'مرحلة الاختبارات والختام';
     }
 
@@ -54,8 +70,8 @@ export function calculateAcademicWeek(
       isAutoCalculated: false,
       elapsedWeeks: elapsed,
       totalWeeks,
-      operationalWeeksTotal: config.totalWeeks || 12,
-      operationalElapsedWeeks: Math.max(0, Math.min(config.totalWeeks, elapsed - config.operationalStartWeek + 1)),
+      operationalWeeksTotal: safeConfig.totalWeeks,
+      operationalElapsedWeeks: Math.max(0, Math.min(safeConfig.totalWeeks, elapsed - safeConfig.operationalStartWeek + 1)),
       remainingWeeks: remaining,
       timeProgressPercentage: progress,
       isOperationalNow: isOperational,
@@ -63,9 +79,16 @@ export function calculateAcademicWeek(
     };
   }
 
-  // Automatic calculation from calendar date
-  const start = new Date(config.startDate);
-  const now = new Date(currentDate);
+  // Automatic calculation from calendar date with robust validation
+  let start = new Date(safeConfig.startDate);
+  if (isNaN(start.getTime())) {
+    start = new Date('2026-08-15');
+  }
+
+  let now = new Date(currentDate);
+  if (isNaN(now.getTime())) {
+    now = new Date();
+  }
 
   // If before start date
   if (now < start) {
@@ -74,7 +97,7 @@ export function calculateAcademicWeek(
       isAutoCalculated: true,
       elapsedWeeks: 0,
       totalWeeks: 15,
-      operationalWeeksTotal: config.totalWeeks || 12,
+      operationalWeeksTotal: safeConfig.totalWeeks,
       operationalElapsedWeeks: 0,
       remainingWeeks: 15,
       timeProgressPercentage: 0,
@@ -87,18 +110,18 @@ export function calculateAcademicWeek(
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
   // 7 days per academic week
   const rawWeek = Math.floor(diffDays / 7) + 1;
-  const clampedWeek = Math.min(15, Math.max(1, rawWeek));
+  const clampedWeek = Math.min(15, Math.max(1, isNaN(rawWeek) ? safeConfig.currentWeek : rawWeek));
 
   const totalWeeks = 15;
   const remainingWeeks = Math.max(0, totalWeeks - clampedWeek);
   const timeProgress = Math.min(100, Math.round((clampedWeek / totalWeeks) * 100));
-  const isOperational = clampedWeek >= config.operationalStartWeek && clampedWeek <= config.operationalEndWeek;
+  const isOperational = clampedWeek >= safeConfig.operationalStartWeek && clampedWeek <= safeConfig.operationalEndWeek;
 
   let phaseLabel = 'مرحلة التمهيد وتوزيع الحلقات';
   if (isOperational) {
-    const operationalWeekNum = clampedWeek - config.operationalStartWeek + 1;
-    phaseLabel = `الخطة التشغيلية الأساسية (أسبوع ${operationalWeekNum} من ${config.totalWeeks})`;
-  } else if (clampedWeek > config.operationalEndWeek) {
+    const operationalWeekNum = clampedWeek - safeConfig.operationalStartWeek + 1;
+    phaseLabel = `الخطة التشغيلية الأساسية (أسبوع ${operationalWeekNum} من ${safeConfig.totalWeeks})`;
+  } else if (clampedWeek > safeConfig.operationalEndWeek) {
     phaseLabel = 'فترة الاختبارات والاستعداد المدرسي';
   }
 
@@ -107,8 +130,8 @@ export function calculateAcademicWeek(
     isAutoCalculated: true,
     elapsedWeeks: clampedWeek,
     totalWeeks,
-    operationalWeeksTotal: config.totalWeeks || 12,
-    operationalElapsedWeeks: Math.max(0, Math.min(config.totalWeeks, clampedWeek - config.operationalStartWeek + 1)),
+    operationalWeeksTotal: safeConfig.totalWeeks,
+    operationalElapsedWeeks: Math.max(0, Math.min(safeConfig.totalWeeks, clampedWeek - safeConfig.operationalStartWeek + 1)),
     remainingWeeks,
     timeProgressPercentage: timeProgress,
     isOperationalNow: isOperational,

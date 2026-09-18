@@ -10,17 +10,40 @@ import {
 import { StudentQuranPlan } from '../../quran/types/plan';
 import { StageQuranConfig } from '../../quran/models/stageConfig';
 
+export function sanitizeEducationalPlanWeek(w: any): EducationalPlanWeek {
+  if (!w || typeof w !== 'object') {
+    return w;
+  }
+  const sanitizeDate = (val: any): string => {
+    if (typeof val === 'string' && val.trim() !== '' && val !== '{}') return val;
+    if (val instanceof Date && !isNaN(val.getTime())) return val.toISOString().split('T')[0];
+    return '';
+  };
+  return {
+    ...w,
+    startDate: sanitizeDate(w.startDate),
+    endDate: sanitizeDate(w.endDate),
+    budget: typeof w.budget === 'string' && !isNaN(Number(w.budget)) ? Number(w.budget) : (typeof w.budget === 'number' ? w.budget : 0),
+    overallProjectBudget: typeof w.overallProjectBudget === 'string' && !isNaN(Number(w.overallProjectBudget)) ? Number(w.overallProjectBudget) : (typeof w.overallProjectBudget === 'number' ? w.overallProjectBudget : 0),
+  };
+}
+
 export class AcademicRepository {
   static async getEducationalPlans(tenantId?: string): Promise<EducationalPlanWeek[]> {
-    return apiClient.get<EducationalPlanWeek[]>('/educational_plan_weeks', tenantId ? { tenantId } : undefined);
+    const plans = await apiClient.get<EducationalPlanWeek[]>('/educational_plan_weeks', tenantId ? { tenantId } : undefined);
+    return (plans || []).map(sanitizeEducationalPlanWeek);
   }
 
   static async saveEducationalPlan(plan: EducationalPlanWeek): Promise<EducationalPlanWeek> {
-    return apiClient.post<EducationalPlanWeek>('/educational_plan_weeks', plan);
+    const saved = await apiClient.post<EducationalPlanWeek>('/educational_plan_weeks', plan);
+    return sanitizeEducationalPlanWeek(saved);
   }
 
   static subscribeEducationalPlans(callback: (plans: EducationalPlanWeek[]) => void, tenantId?: string): () => void {
-    return apiClient.subscribe<EducationalPlanWeek[]>('educational_plan_weeks', callback, tenantId ? { tenantId } : undefined);
+    return apiClient.subscribe<EducationalPlanWeek[]>('educational_plan_weeks', (plans) => {
+      const sanitized = (plans || []).map(sanitizeEducationalPlanWeek);
+      callback(sanitized);
+    }, tenantId ? { tenantId } : undefined);
   }
 
   static async getSpellingLessons(stageId?: string): Promise<SpellingLesson[]> {

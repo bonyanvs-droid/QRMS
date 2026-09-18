@@ -1,7 +1,5 @@
 import { Student, DailySessionRecord, SpellingLesson, AcademicYearConfig } from '../types';
 import { calculateAggregateMetrics } from '../utils/statusCalculator';
-import { isCurrentSessionDemo } from './demoGuard';
-import { apiClient } from './api/apiClient';
 
 export interface PublicSummaryData {
   totalStudents: number;
@@ -30,20 +28,53 @@ export interface PublicSummaryData {
   updatedAt: string;
 }
 
+let activePublicSummary: PublicSummaryData | null = null;
+const summaryListeners = new Set<(summary: PublicSummaryData) => void>();
+
 /**
- * Subscribes to the public aggregated metrics.
+ * Subscribes to the public aggregated metrics derived from live operational data.
  */
 export function subscribeToPublicSummary(
   callback: (summary: PublicSummaryData) => void
 ): () => void {
-  if (isCurrentSessionDemo()) {
-    return () => {};
+  summaryListeners.add(callback);
+  if (activePublicSummary) {
+    callback(activePublicSummary);
   }
-  return apiClient.subscribe<PublicSummaryData>('public_summary', callback);
+  return () => {
+    summaryListeners.delete(callback);
+  };
 }
 
 /**
- * Recalculates and updates the public summary aggregate in PostgreSQL.
+ * Recalculates the public summary metrics from live operational records.
+ */
+export function computePublicSummary(
+  students: Student[],
+  records: DailySessionRecord[],
+  lessons: SpellingLesson[],
+  academicConfig: AcademicYearConfig
+): PublicSummaryData {
+  const metrics = calculateAggregateMetrics(students, records, lessons, academicConfig);
+  const gradeCounts = {
+    tamheedi: students.filter((s) => s.grade === 'تمهيدي').length,
+    grade1: students.filter((s) => s.grade === 'صف أول').length,
+    grade2: students.filter((s) => s.grade === 'صف ثاني').length,
+  };
+  const summaryData: PublicSummaryData = {
+    ...metrics,
+    gradeCounts,
+    updatedAt: new Date().toISOString(),
+  };
+  activePublicSummary = summaryData;
+  for (const listener of summaryListeners) {
+    listener(summaryData);
+  }
+  return summaryData;
+}
+
+/**
+ * Recalculates and updates the public summary aggregate.
  */
 export async function updatePublicSummary(
   students: Student[],
@@ -51,23 +82,6 @@ export async function updatePublicSummary(
   lessons: SpellingLesson[],
   academicConfig: AcademicYearConfig
 ): Promise<void> {
-  if (isCurrentSessionDemo()) {
-    return;
-  }
-  try {
-    const metrics = calculateAggregateMetrics(students, records, lessons, academicConfig);
-    const gradeCounts = {
-      tamheedi: students.filter((s) => s.grade === 'تمهيدي').length,
-      grade1: students.filter((s) => s.grade === 'صف أول').length,
-      grade2: students.filter((s) => s.grade === 'صف ثاني').length,
-    };
-    const summaryData: PublicSummaryData = {
-      ...metrics,
-      gradeCounts,
-      updatedAt: new Date().toISOString(),
-    };
-    await apiClient.post('/public_summary', summaryData);
-  } catch (error: any) {
-    console.warn('Notice updating public summary in PostgreSQL:', error?.message || error);
-  }
+  computePublicSummary(students, records, lessons, academicConfig);
 }
+

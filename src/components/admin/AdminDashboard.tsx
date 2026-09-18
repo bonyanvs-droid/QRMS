@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useApp } from '../../context/AppContext';
+import { useApp, isSupervisorRecord } from '../../context/AppContext';
 import {
   Shield,
   Settings,
@@ -47,7 +47,7 @@ import {
   ChevronUp,
   Sparkles,
 } from 'lucide-react';
-import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule } from '../../types';
+import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig } from '../../types';
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
@@ -292,12 +292,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
     return (users || []).filter((u) => {
       if (u.isArchived || u.supervisorArchived || u.isActive === false) return false;
       if (archivedSupervisorIds.has(u.id) || archivedTeacherIds.has(u.id)) return false;
-      const isSup =
-        u.role === 'supervisor' ||
-        u.staffRole === 'supervisor' ||
-        (typeof u.id === 'string' && (u.id.includes('supervisor') || u.id.startsWith('usr_sup_')));
-      if (!isSup) return false;
-      if (u.role === 'teacher') return false;
+      if (!isSupervisorRecord(u)) return false;
       if (
         activeTenantId &&
         u.tenantId &&
@@ -484,22 +479,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   const [viewingHistoryStudent, setViewingHistoryStudent] = useState<Student | null>(null);
 
   // Outcome Configuration Form State
-  const [outcomeForm, setOutcomeForm] = useState({
-    outcomeText: activeTenant?.referenceOutcome || '«متقنٌ لهجاء القرآن وحفظه إلى الغاشية»',
-    targetSurah: activeTenant?.targetSurahDefault || 'الغاشية',
-    tenantId: activeTenantId,
+  const [outcomeForm, setOutcomeForm] = useState(() => {
+    const stageOutcome = stages.find((s) => s.id === 'baraem')?.outcomeSummary;
+    return {
+      outcomeText:
+        activeTenant?.referenceOutcome?.trim() ||
+        (stageOutcome
+          ? `«${stageOutcome}»`
+          : activeTenant?.targetSurahDefault
+          ? `«متقنٌ لهجاء القرآن وحفظه إلى ${activeTenant.targetSurahDefault}»`
+          : ''),
+      targetSurah: activeTenant?.targetSurahDefault || 'الغاشية',
+      tenantId: activeTenantId,
+    };
   });
   const [outcomeSaved, setOutcomeSaved] = useState(false);
   const [outcomeSaving, setOutcomeSaving] = useState(false);
 
   // Keep outcomeForm in sync when activeTenant changes
   React.useEffect(() => {
+    const stageOutcome = stages.find((s) => s.id === 'baraem')?.outcomeSummary;
     setOutcomeForm({
-      outcomeText: activeTenant?.referenceOutcome || `«متقنٌ لهجاء القرآن وحفظه إلى ${activeTenant?.targetSurahDefault || 'الغاشية'}»`,
+      outcomeText:
+        activeTenant?.referenceOutcome?.trim() ||
+        (stageOutcome
+          ? `«${stageOutcome}»`
+          : activeTenant?.targetSurahDefault
+          ? `«متقنٌ لهجاء القرآن وحفظه إلى ${activeTenant.targetSurahDefault}»`
+          : ''),
       targetSurah: activeTenant?.targetSurahDefault || 'الغاشية',
       tenantId: activeTenantId,
     });
-  }, [activeTenant, activeTenantId]);
+  }, [activeTenant, activeTenantId, stages]);
 
   // Audit Log Filters
   const [auditSearch, setAuditSearch] = useState('');
@@ -509,6 +520,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   // Academic Config Form State
   const [academicForm, setAcademicForm] = useState(academicConfig);
   const [configSaved, setConfigSaved] = useState(false);
+  const isAcademicFormDirtyRef = React.useRef(false);
+
+  // Synchronize form when academicConfig loads or updates from backend API, unless user is actively editing
+  React.useEffect(() => {
+    if (academicConfig && !isAcademicFormDirtyRef.current) {
+      setAcademicForm(academicConfig);
+    }
+  }, [academicConfig]);
+
+  const handleAcademicFormChange = (updates: Partial<AcademicYearConfig>) => {
+    isAcademicFormDirtyRef.current = true;
+    setAcademicForm((prev) => ({ ...prev, ...updates }));
+  };
 
   // Student Modals
   const [editingStudent, setEditingStudent] = useState<Partial<Student> | null>(null);
@@ -588,8 +612,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   const [importJsonText, setImportJsonText] = useState('');
   const [importSuccess, setImportSuccess] = useState<boolean | null>(null);
 
-  const handleSaveAcademic = (e: React.FormEvent) => {
+    const handleSaveAcademic = (e: React.FormEvent) => {
     e.preventDefault();
+    isAcademicFormDirtyRef.current = false;
     updateAcademicConfig(academicForm);
     setConfigSaved(true);
     setTimeout(() => setConfigSaved(false), 2000);
@@ -966,7 +991,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <input
                   type="text"
                   value={academicForm.name}
-                  onChange={(e) => setAcademicForm({ ...academicForm, name: e.target.value })}
+                  onChange={(e) => handleAcademicFormChange({ name: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
                 />
               </div>
@@ -975,7 +1000,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <input
                   type="text"
                   value={academicForm.semester}
-                  onChange={(e) => setAcademicForm({ ...academicForm, semester: e.target.value })}
+                  onChange={(e) => handleAcademicFormChange({ semester: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
                 />
               </div>
@@ -987,7 +1012,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                       type="checkbox"
                       checked={!!academicForm.manualWeekOverride}
                       onChange={(e) =>
-                        setAcademicForm({ ...academicForm, manualWeekOverride: e.target.checked })
+                        handleAcademicFormChange({ manualWeekOverride: e.target.checked })
                       }
                       className="rounded text-emerald-600 focus:ring-emerald-500"
                     />
@@ -998,7 +1023,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                   <select
                     value={academicForm.currentWeek}
                     onChange={(e) =>
-                      setAcademicForm({ ...academicForm, currentWeek: parseInt(e.target.value) })
+                      handleAcademicFormChange({ currentWeek: parseInt(e.target.value) })
                     }
                     className="w-full px-3 py-2.5 rounded-xl border border-amber-500 bg-amber-50/50 font-black text-amber-900"
                   >
@@ -1025,7 +1050,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <input
                   type="date"
                   value={academicForm.startDate}
-                  onChange={(e) => setAcademicForm({ ...academicForm, startDate: e.target.value })}
+                  onChange={(e) => handleAcademicFormChange({ startDate: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
                 />
               </div>
@@ -1034,7 +1059,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <input
                   type="date"
                   value={academicForm.endDate}
-                  onChange={(e) => setAcademicForm({ ...academicForm, endDate: e.target.value })}
+                  onChange={(e) => handleAcademicFormChange({ endDate: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
                 />
               </div>
@@ -1047,9 +1072,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                   type="number"
                   value={academicForm.operationalStartWeek}
                   onChange={(e) =>
-                    setAcademicForm({
-                      ...academicForm,
-                      operationalStartWeek: parseInt(e.target.value),
+                    handleAcademicFormChange({
+                      operationalStartWeek: parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
@@ -1061,7 +1085,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                   type="number"
                   value={academicForm.operationalEndWeek}
                   onChange={(e) =>
-                    setAcademicForm({ ...academicForm, operationalEndWeek: parseInt(e.target.value) })
+                    handleAcademicFormChange({
+                      operationalEndWeek: parseInt(e.target.value) || 0,
+                    })
                   }
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
                 />
@@ -1072,9 +1098,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                   type="number"
                   value={academicForm.spellingPassingThreshold}
                   onChange={(e) =>
-                    setAcademicForm({
-                      ...academicForm,
-                      spellingPassingThreshold: parseInt(e.target.value),
+                    handleAcademicFormChange({
+                      spellingPassingThreshold: parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
@@ -1149,8 +1174,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                               newTargets.tamheedi = { minSurah: e.target.value };
                               newTargets.grade1 = { minSurah: e.target.value };
                             }
-                            setAcademicForm({
-                              ...academicForm,
+                            handleAcademicFormChange({
                               gradeTargets: newTargets,
                             });
                           }}

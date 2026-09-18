@@ -699,28 +699,36 @@ export function isSupervisorRecord(item: any): boolean {
   const staffRole = String(item.staffRole || '');
   const archiveType = String(item.archiveType || '');
 
-  // 1. Explicit supervisor role or staffRole
+  // 1. Explicitly NOT a supervisor if student or parent
+  if (role === 'student' || role === 'parent') return false;
+
+  // 2. Explicit admin roles are not supervisors unless explicitly scoped without admin role
+  if (role === 'campus_admin' || role === 'system_admin' || role === 'admin') {
+    return false;
+  }
+
+  // 3. Explicit supervisor role or staffRole
   if (role === 'supervisor' || staffRole === 'supervisor') return true;
 
-  // 2. Known supervisor IDs or supervisor ID patterns
+  // 4. Archive type indicates supervisor
+  if (archiveType === 'supervisor' || item.supervisorArchived === true) {
+    return true;
+  }
+
+  // 5. Known supervisor ID prefixes or patterns (e.g. usr_sup_...)
   if (
-    id.includes('supervisor') ||
     id.startsWith('usr_sup_') ||
-    id === 'usr_supervisor_ghazzawi' ||
-    id === 'usr_supervisor_minshawi' ||
-    id === 'usr_supervisor_ahmed' ||
-    id === 'usr_supervisor_furqan'
+    id.startsWith('usr_supervisor_') ||
+    id.includes('supervisor')
   ) {
     return true;
   }
 
-  // 3. Supervisor archive indicators (ONLY if not explicitly a teacher ID)
-  if ((item.supervisorArchived === true || archiveType === 'supervisor') && !id.startsWith('usr_teacher_')) {
-    return true;
-  }
-
-  // 4. Supervisor data structures
-  if ((item.supervisorScope || item.assignedStageIds || item.assignedHalaqahIds) && !id.startsWith('usr_teacher_')) {
+  // 6. Supervisor scope or assigned stages
+  if (
+    (item.supervisorScope && typeof item.supervisorScope === 'object' && Object.keys(item.supervisorScope).length > 0 && (item.supervisorScope.type || item.supervisorScope.stageIds?.length > 0)) ||
+    (Array.isArray(item.assignedStageIds) && item.assignedStageIds.length > 0)
+  ) {
     return true;
   }
 
@@ -729,26 +737,30 @@ export function isSupervisorRecord(item: any): boolean {
 
 export function isTeacherRecord(item: any): boolean {
   if (!item || typeof item !== 'object') return false;
-  // CRITICAL: A supervisor can NEVER be classified as a teacher
-  if (isSupervisorRecord(item)) {
-    return false;
-  }
+
+  // CRITICAL: A supervisor or admin or student/parent can NEVER be classified as a teacher
+  if (isSupervisorRecord(item)) return false;
 
   const id = String(item.id || '');
   const role = String(item.role || '');
   const staffRole = String(item.staffRole || '');
   const archiveType = String(item.archiveType || '');
 
-  // CRITICAL: Do NOT use Boolean(item.halaqahId) because students also have halaqahId.
-  // Only classify as teacher if role explicitly says so or id indicates it.
-  return (
-    role === 'teacher' ||
-    staffRole === 'teacher' ||
-    archiveType === 'teacher' ||
-    item.teacherArchived === true ||
-    id.includes('teacher') ||
-    id.startsWith('usr_teacher_')
-  );
+  // 1. Explicitly NOT a teacher if student, parent, or admin
+  if (role === 'student' || role === 'parent') return false;
+  if (role === 'campus_admin' || role === 'system_admin' || role === 'admin') return false;
+
+  // 2. Explicit teacher role or staffRole
+  if (role === 'teacher' || staffRole === 'teacher' || archiveType === 'teacher' || item.teacherArchived === true) {
+    return true;
+  }
+
+  // 3. Explicit teacher ID patterns
+  if (id.startsWith('usr_tch_') || id.startsWith('usr_teacher_') || id.includes('teacher')) {
+    return true;
+  }
+
+  return false;
 }
 
 export function getInitialArchivedTeachers(_tid?: string): Teacher[] {
