@@ -221,6 +221,18 @@ backupRestoreRouter.post('/execute', requireAdminRole, async (req: Request, res:
       adminEmail,
     });
 
+    // The API must reflect the engine's actual outcome — an INTEGRITY_FAILURE
+    // (post-COMMIT verification failed) must never be reported as success.
+    if (result.success === false) {
+      return res.status(500).json({
+        success: false,
+        error: result.message || 'فشل الترحيل: الحالة الفعلية لقاعدة البيانات بعد COMMIT غير مطابقة للمتوقع.',
+        migrationRun: result.migrationRun,
+        logs: result.logs,
+        verification: result.verification,
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: result.message,

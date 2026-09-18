@@ -102,6 +102,14 @@ export class MockPostgresTransactionalClient implements MigrationDbClient {
       return { rows: [{ unlocked: true }] };
     }
 
+    // to_regclass simulation — reports whether the mock "has" a table.
+    // Simulates PostgreSQL catalog checks used by the engine's pre-BEGIN gate.
+    if (trimmed.startsWith('SELECT to_regclass')) {
+      const match = trimmed.match(/to_regclass\('(?:public\.)?([a-z_]+)'\)/i);
+      const tableName = match ? match[1] : '';
+      return { rows: [{ table_exists: this.tables.has(tableName) ? `public.${tableName}` : null }] };
+    }
+
     // Transaction Management
     if (trimmed === 'BEGIN') {
       this.inTransaction = true;
@@ -109,6 +117,8 @@ export class MockPostgresTransactionalClient implements MigrationDbClient {
       return { command: 'BEGIN' };
     }
 
+    // COMMIT result simulation — honors command tags so the engine can
+    // verify that COMMIT actually committed (not silently converted to ROLLBACK).
     if (trimmed === 'COMMIT') {
       this.inTransaction = false;
       this.savepointTables = null;

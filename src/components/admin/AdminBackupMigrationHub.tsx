@@ -33,6 +33,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { FirestoreBackupExporterTab } from './FirestoreBackupExporterTab';
+import { DatabaseBackupTab } from './DatabaseBackupTab';
 import { FirestoreRestoreTab } from './FirestoreRestoreTab';
 import { 
   FullReconciliationReport, 
@@ -49,7 +50,7 @@ import { useApp } from '../../context/AppContext';
 
 export const AdminBackupMigrationHub: React.FC = () => {
   const { currentUser } = useApp();
-  const [activeSubTab, setActiveSubTab] = useState<'upload_preflight' | 'dryrun' | 'export' | 'migration' | 'logs'>('upload_preflight');
+  const [activeSubTab, setActiveSubTab] = useState<'upload_preflight' | 'dryrun' | 'export' | 'database' | 'migration' | 'logs'>('upload_preflight');
 
   // Upload & File State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -367,6 +368,19 @@ export const AdminBackupMigrationHub: React.FC = () => {
         >
           <Download className="w-4 h-4" />
           <span>تصدير نسخة احتياطية من Firestore</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('database')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all ${
+            activeSubTab === 'database'
+              ? 'bg-indigo-700 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>نسخ احتياطي لقاعدة البيانات (PostgreSQL)</span>
         </button>
 
         <button
@@ -751,6 +765,8 @@ export const AdminBackupMigrationHub: React.FC = () => {
       {/* SUBTAB 3: FIRESTORE EXPORT */}
       {/* ========================================================================= */}
       {activeSubTab === 'export' && <FirestoreBackupExporterTab />}
+
+      {activeSubTab === 'database' && <DatabaseBackupTab />}
 
       {/* ========================================================================= */}
       {/* SUBTAB 4: REAL MIGRATION CONTROLLER */}

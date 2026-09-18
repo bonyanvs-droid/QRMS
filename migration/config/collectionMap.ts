@@ -77,8 +77,30 @@ export const COLLECTION_MAPPINGS: Record<string, CollectionMigrationConfig> = {
     dependencies: [],
     fieldMappings: [
       { firestoreField: 'id', postgresColumn: 'id', type: 'string', required: true },
-      { firestoreField: 'name', postgresColumn: 'name', type: 'string', required: true },
-      { firestoreField: 'code', postgresColumn: 'code', type: 'string', required: true },
+      {
+        firestoreField: 'name',
+        postgresColumn: 'name',
+        type: 'string',
+        required: true,
+        transform: (val: any, rawDoc?: any) =>
+          String(
+            val ||
+              rawDoc?.title ||
+              rawDoc?.stageName ||
+              rawDoc?.label ||
+              rawDoc?.code ||
+              rawDoc?.id ||
+              rawDoc?.documentId ||
+              ''
+          ).trim(),
+      },
+      {
+        firestoreField: 'code',
+        postgresColumn: 'code',
+        type: 'string',
+        required: true,
+        transform: (val: any, rawDoc?: any) => String(val || rawDoc?.id || rawDoc?.documentId || '').trim(),
+      },
       { firestoreField: 'description', postgresColumn: 'description', type: 'string' },
       { firestoreField: 'targetGrades', postgresColumn: 'target_grades', type: 'jsonb', defaultValue: [] },
       { firestoreField: 'dailyPaceDescription', postgresColumn: 'daily_pace_description', type: 'string' },

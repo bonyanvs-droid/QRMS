@@ -63,11 +63,20 @@ export const BACKUP_COLLECTIONS: string[] = [
   'teachers',
 ];
 
+/**
+ * Canonical backup contract version produced by this exporter.
+ * Must match the structure expected by backupUploadValidator + migration engine.
+ */
+export const BACKUP_FORMAT_VERSION = '2.0.0';
+
+/**
+ * Flat document shape — the canonical import contract.
+ * Firestore document ID is preserved as the `id` field; all original
+ * Firestore fields live at the document root (no envelope/wrapper).
+ */
 export interface SerializedFirestoreDoc {
   id: string;
-  collection: string;
-  path: string;
-  data: Record<string, any>;
+  [key: string]: any;
 }
 
 export interface SerializedSubcollectionDoc {
@@ -98,6 +107,21 @@ export interface BackupMetadata {
 }
 
 export interface FirestoreFullBackup {
+  // Canonical root-level import contract — consumed by
+  // backupUploadValidator, reconciliation, preflight and the migration engine.
+  backupVersion: string;
+  backupType: string;
+  exportStatus: 'COMPLETE' | 'PARTIAL';
+  auditTimestamp: string;
+  firebaseProjectId: string;
+  firestoreDatabaseId: string;
+  sourceEnvironment: string;
+  application: string;
+  totalCollections: number;
+  totalDocuments: number;
+  totalSubcollectionDocuments: number;
+  documentCounts: Record<string, number>;
+  // Nested metadata block kept for the exporter UI + restore dry-run engine.
   metadata: BackupMetadata;
   collections: Record<string, SerializedFirestoreDoc[]>;
   subcollections: Record<string, SerializedSubcollectionDoc[]>;
@@ -214,12 +238,12 @@ export async function executeFirestoreBackup(
       snapshot.forEach((docSnap) => {
         const rawData = docSnap.data();
         const serializedData = serializeFirestoreValue(rawData);
-        
+
+        // Canonical flat document: original Firestore fields at root level,
+        // document ID preserved and always wins over any data field named "id".
         docsList.push({
+          ...serializedData,
           id: docSnap.id,
-          collection: colName,
-          path: `collections/${colName}/${docSnap.id}`,
-          data: serializedData,
         });
       });
 
@@ -270,42 +294,89 @@ export async function executeFirestoreBackup(
   subcollectionCounts['custodies/*/expenses'] = custodyExpensesDocs.length;
   totalSubdocsCount += custodyExpensesDocs.length;
 
-  const exportStatus: 'COMPLETE' | 'PARTIAL' = failedCollections.length === 0 && errors.length === 0 ? 'COMPLETE' : 'PARTIAL';
-
-  // 3. Assemble full backup object
+  // 3. Assemble full backup object (canonical import contract)
   reportProgress('الانتهاء والتجميع', totalCollections, 0, 'اكتمل', 'building_archive');
 
-  const fullBackup: FirestoreFullBackup = {
-    metadata: {
-      backupVersion: '1.0.0',
-      backupType: 'FIRESTORE_FULL_SNAPSHOT',
-      createdAt: new Date().toISOString(),
-      firebaseProjectId: firebaseConfig.projectId || 'trans-tree-p53bd',
-      firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || 'ai-studio-remixqrms-62c30d59-335a-4f40-8bfd-b498418c7ebd',
-      application: 'نظام إدارة المجمعات القرآنية (Quranic Centers Management System)',
-      collections: BACKUP_COLLECTIONS,
-      documentCounts,
-      subcollectionCounts,
-      totalCollections,
-      totalDocuments: totalDocsCount,
-      totalSubcollectionDocuments: totalSubdocsCount,
-      exportStatus,
-      failedCollections: failedCollections.length > 0 ? failedCollections : undefined,
-      errors: errors.length > 0 ? errors : undefined,
-    },
+  const fullBackup = assembleFirestoreFullBackup({
     collections: resultCollections,
     subcollections: resultSubcollections,
-  };
+    documentCounts,
+    subcollectionCounts,
+    failedCollections,
+    errors,
+  });
 
   reportProgress(
     'اكتملت النسخة الاحتياطية',
     totalCollections,
     totalDocsCount,
-    exportStatus === 'COMPLETE' ? 'اكتملت كافة المجموعات والمسارات بنجاح' : 'تحذير: نسخة جزئية',
-    exportStatus === 'COMPLETE' ? 'completed' : 'failed'
+    fullBackup.exportStatus === 'COMPLETE' ? 'اكتملت كافة المجموعات والمسارات بنجاح' : 'تحذير: نسخة جزئية',
+    fullBackup.exportStatus === 'COMPLETE' ? 'completed' : 'failed'
   );
 
   return fullBackup;
+}
+
+/**
+ * Pure assembly of the canonical backup file object.
+ * Produces the exact root-level contract consumed by backupUploadValidator,
+ * reconciliation, preflight and the migration engine — flat documents,
+ * explicit backupVersion, real project metadata, computed counts.
+ * Extracted as a pure function so the contract is unit-testable without Firestore.
+ */
+export function assembleFirestoreFullBackup(params: {
+  collections: Record<string, SerializedFirestoreDoc[]>;
+  subcollections: Record<string, SerializedSubcollectionDoc[]>;
+  documentCounts: Record<string, number>;
+  subcollectionCounts: Record<string, number>;
+  failedCollections: string[];
+  errors: string[];
+}): FirestoreFullBackup {
+  const totalDocsCount = Object.values(params.documentCounts).reduce((acc, n) => acc + n, 0);
+  const totalSubdocsCount = Object.values(params.subcollectionCounts).reduce((acc, n) => acc + n, 0);
+  const exportStatus: 'COMPLETE' | 'PARTIAL' =
+    params.failedCollections.length === 0 && params.errors.length === 0 ? 'COMPLETE' : 'PARTIAL';
+  const createdAt = new Date().toISOString();
+  const firebaseProjectId = firebaseConfig.projectId || 'trans-tree-p53bd';
+  const firestoreDatabaseId =
+    firebaseConfig.firestoreDatabaseId || 'ai-studio-remixqrms-62c30d59-335a-4f40-8bfd-b498418c7ebd';
+  const application = 'نظام إدارة المجمعات القرآنية (Quranic Centers Management System)';
+
+  return {
+    // Canonical root-level import contract
+    backupVersion: BACKUP_FORMAT_VERSION,
+    backupType: 'FIRESTORE_FULL_SNAPSHOT',
+    exportStatus,
+    auditTimestamp: createdAt,
+    firebaseProjectId,
+    firestoreDatabaseId,
+    sourceEnvironment: 'QRMS_FIRESTORE_PRODUCTION',
+    application,
+    totalCollections: BACKUP_COLLECTIONS.length,
+    totalDocuments: totalDocsCount,
+    totalSubcollectionDocuments: totalSubdocsCount,
+    documentCounts: params.documentCounts,
+    // Nested metadata block kept for the exporter UI + restore dry-run engine.
+    metadata: {
+      backupVersion: BACKUP_FORMAT_VERSION,
+      backupType: 'FIRESTORE_FULL_SNAPSHOT',
+      createdAt,
+      firebaseProjectId,
+      firestoreDatabaseId,
+      application,
+      collections: BACKUP_COLLECTIONS,
+      documentCounts: params.documentCounts,
+      subcollectionCounts: params.subcollectionCounts,
+      totalCollections: BACKUP_COLLECTIONS.length,
+      totalDocuments: totalDocsCount,
+      totalSubcollectionDocuments: totalSubdocsCount,
+      exportStatus,
+      failedCollections: params.failedCollections.length > 0 ? params.failedCollections : undefined,
+      errors: params.errors.length > 0 ? params.errors : undefined,
+    },
+    collections: params.collections,
+    subcollections: params.subcollections,
+  };
 }
 
 /**

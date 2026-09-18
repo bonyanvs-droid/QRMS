@@ -21,6 +21,13 @@ import { MigrationValidator } from '../validators/migrationValidator';
 import { generate527ReconciliationReport, FullReconciliationReport } from './reconciliationEngine';
 import { INITIAL_STAGES, INITIAL_USERS, INITIAL_SPELLING_LESSONS } from '../../src/data/initialData';
 import { TenantResolverEngine } from './tenantResolverEngine';
+import {
+  buildForeignKeyResolver,
+  validateAllForeignKeys,
+  resolveSpellingLessonReference,
+} from './foreignKeyResolverEngine';
+
+export { resolveSpellingLessonReference } from './foreignKeyResolverEngine';
 
 export type MigrationRunStatus = 
   | 'PENDING'
@@ -29,7 +36,8 @@ export type MigrationRunStatus =
   | 'COMPLETED'
   | 'FAILED'
   | 'ROLLED_BACK'
-  | 'VERIFICATION_FAILED';
+  | 'VERIFICATION_FAILED'
+  | 'INTEGRITY_FAILURE';
 
 export interface MigrationLogItem {
   id: string;
@@ -156,6 +164,158 @@ export function getMigrationLogs(runId?: string): MigrationLogItem[] {
 }
 
 /**
+ * Required-Field Source Validation
+ * Scans every mapped collection's documents BEFORE any transaction begins and
+ * verifies each NOT NULL (required) mapped field can be satisfied:
+ * - Field present with a non-empty value => OK
+ * - Field absent but derivable via the rule's transform() or defaultValue => WARNING
+ * - Field absent with no derivation path => FATAL ERROR (blocks migration pre-transaction)
+ */
+export function validateRequiredSourceFields(
+  collectionsObj: Record<string, any[]>
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const [colName, docs] of Object.entries(collectionsObj || {})) {
+    const colConfig = COLLECTION_MAPPINGS[colName];
+    if (!colConfig || !Array.isArray(docs)) continue;
+
+    for (const doc of docs) {
+      const docId = String(doc?.id || doc?.documentId || 'UNKNOWN');
+      for (const rule of colConfig.fieldMappings) {
+        if (!rule.required) continue;
+
+        const rawValue = doc?.[rule.firestoreField];
+        const isMissing = rawValue === undefined || rawValue === null;
+        const isEmpty = !isMissing && String(rawValue).trim() === '';
+        if (!isMissing && !isEmpty) continue;
+
+        // undefined/null produce NULL at INSERT for every type.
+        // '' also produces NULL/invalid for non-string types (date, number, jsonb...),
+        // but is insertable for plain 'string' columns.
+        const producesNull = isMissing || (isEmpty && rule.type !== 'string');
+        let derivable = rule.defaultValue !== undefined;
+        if (!derivable && rule.transform) {
+          try {
+            const derived = rule.transform(rawValue, doc);
+            derivable = derived !== undefined && derived !== null && String(derived).trim() !== '';
+          } catch {
+            derivable = false;
+          }
+        }
+
+        if (producesNull && !derivable) {
+          errors.push(
+            `حقل مطلوب مفقود: المستند '${docId}' في المجموعة '${colName}' لا يحتوي على '${rule.firestoreField}' ولا يمكن اشتقاق العمود '${rule.postgresColumn}' (NOT NULL) من أي مصدر.`
+          );
+        } else {
+          warnings.push(
+            `الحقل المطلوب '${rule.firestoreField}' ${isMissing ? 'غير موجود' : 'فارغ'} في المستند '${docId}' (${colName}) - ${derivable ? `سيتم اشتقاق العمود '${rule.postgresColumn}' تلقائياً من بيانات المستند نفسه أو القيمة الافتراضية المعتمدة.` : `سيُدرج كسلسلة فارغة في العمود '${rule.postgresColumn}'.`}`
+          );
+        }
+      }
+    }
+  }
+
+  return { errors, warnings };
+}
+
+/**
+ * Student -> Teacher FK Resolution Validation
+ * A student's teacherId is valid ONLY if, at students-insert time, it resolves to
+ * an actual users.id. Valid resolution paths:
+ *   1. teacherId matches a teachers doc (raw id)        -> remapped to usr_<rawId>
+ *   2. teacherId equals a final merged teacher users.id -> usr_<rawId> (identity)
+ *   3. teacherId equals an existing platform_users id   -> preserved as-is
+ * Anything else is a guaranteed FK violation and must be reported BEFORE migration.
+ */
+export function validateStudentTeacherReferences(
+  collectionsObj: Record<string, any[]>
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const students = collectionsObj['students'];
+  if (!Array.isArray(students) || students.length === 0) {
+    return { errors, warnings };
+  }
+
+  // Every users.id that will exist when students are inserted (step 26):
+  // platform_users ids (step 10) + merged teacher ids usr_<rawId> (post step 10).
+  const resolvableTeacherUserIds = new Set<string>();
+  for (const u of collectionsObj['platform_users'] || []) {
+    const uid = String(u?.id || u?.documentId || '').trim();
+    if (uid) {
+      resolvableTeacherUserIds.add(uid);
+    }
+  }
+  for (const t of collectionsObj['teachers'] || []) {
+    const rawId = String(t?.id || t?.documentId || '').trim();
+    if (!rawId) continue;
+    resolvableTeacherUserIds.add(rawId); // raw teacher id — resolvable via teacherMapping
+    resolvableTeacherUserIds.add(`usr_${rawId}`); // final merged users.id
+  }
+
+  for (const s of students) {
+    const docId = String(s?.id || s?.documentId || 'UNKNOWN');
+    const teacherId = s?.teacherId;
+    if (teacherId === undefined || teacherId === null || String(teacherId).trim() === '') {
+      continue; // no teacher reference — teacher_id stays NULL (FK allows NULL)
+    }
+    const tid = String(teacherId).trim();
+    if (resolvableTeacherUserIds.has(tid)) {
+      continue; // resolvable via teacherMapping or already a valid users.id
+    }
+    errors.push(
+      `مرجع معلم غير قابل للحل (Unresolved Teacher FK): الطالب '${docId}' يشير إلى المعلم '${tid}' الذي لا يوجد في مجموعة teachers ولا يمثل معرف users.id صالحاً في platform_users — لا يمكن إدراج students.teacher_id.`
+    );
+  }
+
+  return { errors, warnings };
+}
+
+
+/**
+ * Student -> Spelling Lesson FK Resolution Validation
+ * A student's currentSpellingLessonId is valid ONLY if it resolves to an actual
+ * spelling_lessons.id (backup doc, canonical seed, or legacy 'lesson_N' form).
+ * Anything else is a guaranteed FK violation and must be reported BEFORE migration.
+ */
+export function validateStudentSpellingLessonReferences(
+  collectionsObj: Record<string, any[]>
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const students = collectionsObj['students'];
+  if (!Array.isArray(students) || students.length === 0) {
+    return { errors, warnings };
+  }
+
+  for (const s of students) {
+    const docId = String(s?.id || s?.documentId || 'UNKNOWN');
+    const rawLessonId = s?.currentSpellingLessonId;
+    if (rawLessonId === undefined || rawLessonId === null || String(rawLessonId).trim() === '') {
+      continue; // no reference — column stays NULL (FK allows NULL)
+    }
+
+    const res = resolveSpellingLessonReference(rawLessonId, collectionsObj);
+    if (res.resolutionType === 'UNRESOLVED') {
+      errors.push(
+        `مرجع درس هجاء غير قابل للحل (Unresolved Spelling Lesson FK): الطالب '${docId}' يشير إلى الدرس '${String(rawLessonId).trim()}' غير الموجود في spelling_lessons ولا يمثل صيغة قديمة قابلة للتحويل (lesson_N).`
+      );
+    } else if (res.resolutionType === 'LEGACY_LESSON_NUMBER') {
+      warnings.push(
+        `تحويل مرجع درس قديم: الطالب '${docId}' يشير إلى '${String(rawLessonId).trim()}' (صيغة قديمة) - سيتم ربطه بالدرس '${res.resolvedLessonId}'.`
+      );
+    }
+  }
+
+  return { errors, warnings };
+}
+
+/**
  * Phase 1 & 2: Read, Transform, Validate & Execute Preflight
  * Evaluates real counts and relational constraints dynamically from the provided backup dataset.
  */
@@ -252,6 +412,19 @@ export function executeMigrationPreflight(
     mergedCount = reconciliation.staffMergedCount;
     skippedCount = reconciliation.emptyOrZeroCount;
   }
+
+  // Required-field gate: surface missing NOT NULL source fields BEFORE any transaction.
+  const requiredFieldCheck = validateRequiredSourceFields(collectionsObj);
+  errors.push(...requiredFieldCheck.errors);
+  warnings.push(...requiredFieldCheck.warnings);
+
+  // Comprehensive FK resolution gate: validate EVERY relationship of EVERY
+  // mapped collection (users/teachers, halaqahs, spelling lessons, stages,
+  // students, organizations, tracks, seasonal programs...) and report ALL
+  // unresolved references in one matrix BEFORE any transaction starts.
+  const foreignKeyCheck = validateAllForeignKeys(collectionsObj, tenantResolver);
+  errors.push(...foreignKeyCheck.errors);
+  warnings.push(...foreignKeyCheck.warnings);
 
   const seedOnlyCount = (collectionsObj['educational_stages']?.length || 0) === 0 ? INITIAL_STAGES.length : 0;
   const safetyCheckPassed = errors.length === 0;
@@ -658,6 +831,106 @@ export async function executePostMigrationVerification(
  * 7. If verified: Log to `migration_runs` & `migration_logs`, COMMIT.
  * 8. If exception or verification failure: ROLLBACK, Log failure, Release lock, Throw error.
  */
+/**
+ * POST-COMMIT Hard Verification
+ * Runs AFTER a confirmed COMMIT using separate queries (autocommit) — the
+ * final status reflects ACTUAL committed rows in PostgreSQL, never in-memory
+ * counters alone. Verifies the key migrated tables contain exactly the
+ * expected number of committed records.
+ */
+export interface PostCommitVerificationResult {
+  ok: boolean;
+  summary: string;
+  results: { table: string; expectedCount: number; actualCount: number; ok: boolean }[];
+}
+
+export async function verifyPostCommitData(
+  client: MigrationDbClient,
+  expectations: { table: string; expectedCount: number }[]
+): Promise<PostCommitVerificationResult> {
+  const results: { table: string; expectedCount: number; actualCount: number; ok: boolean }[] = [];
+
+  for (const exp of expectations) {
+    let actualCount = -1;
+    try {
+      const res = await client.query(`SELECT COUNT(*)::int AS count FROM ${exp.table}`);
+      actualCount = Number(res?.rows?.[0]?.count ?? -1);
+    } catch {
+      actualCount = -1;
+    }
+    results.push({
+      table: exp.table,
+      expectedCount: exp.expectedCount,
+      actualCount,
+      ok: actualCount === exp.expectedCount,
+    });
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  const summary =
+    failed.length === 0
+      ? `تم التحقق بعد COMMIT بنجاح: جميع الجداول الأساسية تحتوي الأعداد المتوقعة تمامًا (${results.length} جداول).`
+      : `السجلات المُعتمدة غير مطابقة للمتوقع: ${failed
+          .map((f) => `${f.table} (متوقع ${f.expectedCount} / فعلي ${f.actualCount})`)
+          .join('، ')}`;
+
+  return { ok: failed.length === 0, summary, results };
+}
+
+/**
+ * Persists the migration run record + item logs AFTER the confirmed COMMIT
+ * (Option A — separate database operations, never inside the migration
+ * transaction). A logging failure here cannot roll back committed data and
+ * cannot create a false-success state; the caller surfaces it as a warning.
+ */
+export async function persistMigrationRunPostCommit(
+  client: MigrationDbClient,
+  runRecord: MigrationRunRecord,
+  logs: MigrationLogItem[]
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const runQuery = buildParameterizedInsertQuery('migration_runs', {
+      id: runRecord.id,
+      started_at: runRecord.startedAt,
+      completed_at: runRecord.completedAt,
+      source: runRecord.source,
+      target: runRecord.target,
+      source_doc_count: runRecord.sourceDocCount,
+      attempted_inserts: runRecord.attemptedInserts,
+      successful_inserts: runRecord.successfulInserts,
+      skipped_records: runRecord.skippedRecords,
+      merged_records: runRecord.mergedRecords,
+      failed_records: runRecord.failedRecords,
+      warnings_count: runRecord.warningsCount,
+      errors_count: runRecord.errorsCount,
+      verification_status: runRecord.verificationStatus,
+      status: runRecord.status,
+      details: runRecord.details,
+      error_message: runRecord.errorMessage || null,
+    });
+    await client.query(runQuery.sql, runQuery.values);
+
+    for (const log of logs) {
+      const logQuery = buildParameterizedInsertQuery('migration_logs', {
+        id: log.id,
+        migration_run_id: log.migrationRunId,
+        collection: log.collection,
+        document_id: log.documentId,
+        operation: log.operation,
+        status: log.status,
+        error: log.error || null,
+        details: log.details || {},
+        timestamp: log.timestamp,
+      });
+      await client.query(logQuery.sql, logQuery.values);
+    }
+
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 export async function executeControlledMigration(
   client: MigrationDbClient,
   backupData: any,
@@ -705,6 +978,31 @@ export async function executeControlledMigration(
     );
   }
 
+  // Pre-Execution Required-Field Gate: abort BEFORE BEGIN if any NOT NULL source field cannot be satisfied
+  const requiredFieldCheck = validateRequiredSourceFields(collectionsObj);
+  if (requiredFieldCheck.errors.length > 0) {
+    activeRunningMigrationId = null;
+    throw new Error(
+      `تم إيقاف الترحيل بسبب حقول مطلوبة مفقودة (Required NOT NULL Fields): ${requiredFieldCheck.errors[0]}${requiredFieldCheck.errors.length > 1 ? ` (+${requiredFieldCheck.errors.length - 1} أخطاء أخرى)` : ''}`
+    );
+  }
+
+  // Pre-Execution Comprehensive FK Gate: abort BEFORE BEGIN on ANY unresolved
+  // relationship across ALL mapped collections (users/teachers, halaqahs,
+  // spelling lessons, stages, students, organizations, tracks, ...).
+  const foreignKeyCheck = validateAllForeignKeys(collectionsObj, tenantResolver);
+  if (foreignKeyCheck.errors.length > 0) {
+    activeRunningMigrationId = null;
+    throw new Error(
+      `تم إيقاف الترحيل بسبب علاقات أجنبية غير محلولة (Unresolved Foreign Keys): ${foreignKeyCheck.errors[0]}${foreignKeyCheck.errors.length > 1 ? ` (+${foreignKeyCheck.errors.length - 1} أخطاء أخرى)` : ''}`
+    );
+  }
+
+  // Central FK resolver: every FK column of every collection receives its
+  // FINAL PostgreSQL id (teacher merge mapping, tenant resolution, legacy
+  // lesson/stage forms, preserved ids).
+  const fkResolver = buildForeignKeyResolver(collectionsObj, tenantResolver);
+
   const runRecord: MigrationRunRecord = {
     id: runId,
     startedAt: new Date().toISOString(),
@@ -745,6 +1043,18 @@ export async function executeControlledMigration(
 
     // 2. BEGIN TRANSACTION
     await client.query('BEGIN');
+
+    // Guard: migration bookkeeping tables MUST exist before any work.
+    // A missing table previously caused an in-transaction INSERT failure that
+    // was silently swallowed, which aborted the transaction — and PostgreSQL
+    // then silently converted COMMIT into ROLLBACK (false-success bug).
+    const runsTableCheck = await client.query(`SELECT to_regclass('public.migration_runs') AS table_exists`);
+    const logsTableCheck = await client.query(`SELECT to_regclass('public.migration_logs') AS table_exists`);
+    if (!runsTableCheck?.rows?.[0]?.table_exists || !logsTableCheck?.rows?.[0]?.table_exists) {
+      throw new Error(
+        'جداول سجل الترحيل (migration_runs / migration_logs) غير موجودة في قاعدة البيانات — يجب تطبيق المخطط الرسمي قبل الترحيل لمنع فشل صامت بعد COMMIT.'
+      );
+    }
 
     logs.push({
       id: `${runId}_log_init`,
@@ -815,10 +1125,21 @@ export async function executeControlledMigration(
             if (studentTenantRes.isResolved && studentTenantRes.resolvedTenantId) {
               transformed.data.tenant_id = studentTenantRes.resolvedTenantId;
             }
-            // Resolve current_spelling_lesson_id
+            // Resolve students.teacher_id -> actual PostgreSQL users.id via the
+            // teacher merge mapping (same invariant as halaqahs.teacher_id):
+            // raw teacher id -> usr_<rawId> final users.id.
+            if (rawDoc.teacherId) {
+              const mappedTeacherId = teacherMapping.get(String(rawDoc.teacherId).trim()) || rawDoc.teacherId;
+              transformed.data.teacher_id = mappedTeacherId;
+            }
+            // Resolve current_spelling_lesson_id -> actual spelling_lessons.id.
+            // Preserves exact ids; maps legacy 'lesson_N' references (written by
+            // legacy bulk import) to the real lesson with that lesson number.
             if (rawDoc.currentSpellingLessonId) {
-              const splId = String(rawDoc.currentSpellingLessonId).trim();
-              transformed.data.current_spelling_lesson_id = splId;
+              const lessonRes = resolveSpellingLessonReference(rawDoc.currentSpellingLessonId, collectionsObj);
+              if (lessonRes.resolvedLessonId) {
+                transformed.data.current_spelling_lesson_id = lessonRes.resolvedLessonId;
+              }
             }
           }
 
@@ -830,6 +1151,28 @@ export async function executeControlledMigration(
             const halaqahTenantRes = tenantResolver.resolveTenantId(rawDoc.tenantId || rawDoc.tenant_id);
             if (halaqahTenantRes.isResolved && halaqahTenantRes.resolvedTenantId) {
               transformed.data.tenant_id = halaqahTenantRes.resolvedTenantId;
+            }
+          }
+
+          // Central FK resolution pass: EVERY isForeignKey column of EVERY
+          // collection receives its FINAL PostgreSQL id. Covers relationships
+          // beyond the entity-specific blocks above (daily_records.teacher_id,
+          // remedial_plans.teacher_id, meetings.created_by, staff_attendance.user_id,
+          // custodies.holder_id, stage aliases, legacy lesson forms, ...).
+          for (const rule of config.fieldMappings) {
+            if (!rule.isForeignKey || !rule.foreignKeyTable) continue;
+            const currentVal = transformed.data[rule.postgresColumn];
+            if (currentVal === undefined || currentVal === null) continue;
+            if (String(currentVal).trim() === '') {
+              // CRITICAL: an empty string is NOT NULL in PostgreSQL — inserting
+              // '' into an FK column triggers a violation ('' is never a valid
+              // target id). An empty reference means "no reference": store NULL.
+              transformed.data[rule.postgresColumn] = null;
+              continue;
+            }
+            const fkRes = fkResolver.resolveForeignKey(rule.foreignKeyTable, currentVal, colName, rule.firestoreField);
+            if (fkRes.resolvedId) {
+              transformed.data[rule.postgresColumn] = fkRes.resolvedId;
             }
           }
 
@@ -848,8 +1191,18 @@ export async function executeControlledMigration(
             operation: 'INSERT',
             status: 'FAILED',
             error: err?.message,
+            details: {
+              pgDetail: err?.detail || null,
+              pgCode: err?.code || null,
+              pgConstraint: err?.constraint || null,
+              pgTable: err?.table || null,
+            },
             timestamp: new Date().toISOString(),
           });
+          // A PostgreSQL error aborts the entire transaction; continuing would only
+          // produce "current transaction is aborted" noise. Stop immediately and
+          // let the outer catch perform ROLLBACK + cleanup.
+          throw err;
         }
       }
 
@@ -892,33 +1245,56 @@ export async function executeControlledMigration(
     runRecord.verificationStatus = 'VERIFIED';
     runRecord.completedAt = new Date().toISOString();
 
-    // 7. Record Migration Run into Database
-    try {
-      const runQuery = buildParameterizedInsertQuery('migration_runs', {
-        id: runRecord.id,
-        started_at: runRecord.startedAt,
-        completed_at: runRecord.completedAt,
-        source: runRecord.source,
-        target: runRecord.target,
-        source_doc_count: runRecord.sourceDocCount,
-        attempted_inserts: runRecord.attemptedInserts,
-        successful_inserts: runRecord.successfulInserts,
-        skipped_records: runRecord.skippedRecords,
-        merged_records: runRecord.mergedRecords,
-        failed_records: runRecord.failedRecords,
-        warnings_count: runRecord.warningsCount,
-        errors_count: runRecord.errorsCount,
-        verification_status: runRecord.verificationStatus,
-        status: runRecord.status,
-        details: runRecord.details,
-      });
-      await client.query(runQuery.sql, runQuery.values);
-    } catch {
-      // Table may be created or populated in schema
-    }
+    // Expected committed row counts for the post-COMMIT hard verification.
+    const uniqueIds = (ids: string[]) => {
+      const set = new Set<string>();
+      for (const id of ids) {
+        const clean = String(id || '').trim();
+        if (clean) {
+          set.add(clean);
+        }
+      }
+      return set;
+    };
+    const platformUserIds = (collectionsObj['platform_users'] || []).map((u: any) => String(u?.id || u?.documentId || ''));
+    const teacherUserIds = (collectionsObj['teachers'] || []).map((t: any) => {
+      const rawId = String(t?.id || t?.documentId || '').trim();
+      return rawId.startsWith('usr_') ? rawId : `usr_${rawId}`;
+    });
+    const postCommitExpectations = [
+      { table: 'tenants', expectedCount: (collectionsObj['tenants'] || []).length },
+      {
+        table: 'users',
+        expectedCount: uniqueIds([...platformUserIds, ...teacherUserIds, ...INITIAL_USERS.map((u) => u.id)]).size,
+      },
+      {
+        table: 'stages',
+        expectedCount: uniqueIds([
+          ...INITIAL_STAGES.map((s) => s.id),
+          ...(collectionsObj['educational_stages'] || []).map((d: any) => String(d?.id || d?.documentId || '')),
+        ]).size,
+      },
+      {
+        table: 'spelling_lessons',
+        expectedCount: uniqueIds([
+          ...INITIAL_SPELLING_LESSONS.map((s) => s.id),
+          ...(collectionsObj['spelling_lessons'] || []).map((d: any) => String(d?.id || d?.documentId || '')),
+        ]).size,
+      },
+      { table: 'halaqahs', expectedCount: (collectionsObj['halaqahs'] || []).length },
+      { table: 'students', expectedCount: (collectionsObj['students'] || []).length },
+      { table: 'audit_logs', expectedCount: (collectionsObj['audit_logs'] || []).length },
+    ];
 
-    // 8. COMMIT TRANSACTION
-    await client.query('COMMIT');
+    // 8. COMMIT TRANSACTION — the COMMIT must ACTUALLY commit.
+    // PostgreSQL silently converts COMMIT on an aborted transaction into
+    // ROLLBACK WITHOUT raising an error — so the command tag must be verified.
+    const commitResult = await client.query('COMMIT');
+    if (!commitResult || commitResult.command !== 'COMMIT') {
+      throw new Error(
+        `فشل COMMIT الفعلي للمعاملة (استجابة غير متوقعة: ${commitResult?.command || 'unknown'}) — المعاملة كانت ملغاة وحوّلها PostgreSQL إلى ROLLBACK صامت. لا يمكن اعتبار الترحيل ناجحًا.`
+      );
+    }
 
     logs.push({
       id: `${runId}_log_commit`,
@@ -927,9 +1303,80 @@ export async function executeControlledMigration(
       documentId: 'COMMIT',
       operation: 'INSERT',
       status: 'SUCCESS',
-      details: { message: 'تم اعتماد كافة السجلات بنجاح في قاعدة البيانات (COMMIT TRANSACTION).' },
+      details: { message: 'تم اعتماد كافة السجلات بنجاح في قاعدة البيانات (COMMIT TRANSACTION مُؤكد).', command: commitResult.command },
       timestamp: new Date().toISOString(),
     });
+
+    // 9. POST-COMMIT HARD VERIFICATION (separate queries, outside the transaction)
+    // The final status reflects ACTUAL committed rows in PostgreSQL — never
+    // in-memory counters alone.
+    const postCommitCheck = await verifyPostCommitData(client, postCommitExpectations);
+    if (!postCommitCheck.ok) {
+      runRecord.status = 'INTEGRITY_FAILURE';
+      runRecord.verificationStatus = 'VERIFICATION_FAILED';
+      runRecord.completedAt = new Date().toISOString();
+      runRecord.errorMessage = `فشل التحقق بعد COMMIT: ${postCommitCheck.summary}`;
+      logs.push({
+        id: `${runId}_log_integrity_failure`,
+        migrationRunId: runId,
+        collection: 'SYSTEM',
+        documentId: 'POST_COMMIT_VERIFICATION',
+        operation: 'ERROR',
+        status: 'FAILED',
+        error: runRecord.errorMessage,
+        details: { postCommitResults: postCommitCheck.results },
+        timestamp: new Date().toISOString(),
+      });
+
+      const failureLogging = await persistMigrationRunPostCommit(client, runRecord, logs);
+      if (!failureLogging.ok) {
+        logs.push({
+          id: `${runId}_log_persist_warning`,
+          migrationRunId: runId,
+          collection: 'SYSTEM',
+          documentId: 'RUN_LOGGING',
+          operation: 'ERROR',
+          status: 'WARNING',
+          error: `تعذّر تسجيل سجل الترحيل الفاشل في قاعدة البيانات: ${failureLogging.error}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      migrationRunHistory.unshift(runRecord);
+      migrationLogStore.push(...logs);
+
+      return {
+        success: false,
+        migrationRun: runRecord,
+        logs,
+        verification,
+        message: runRecord.errorMessage,
+      };
+    }
+
+    runRecord.status = 'COMPLETED';
+    runRecord.verificationStatus = 'VERIFIED';
+    runRecord.completedAt = new Date().toISOString();
+    runRecord.details = { ...(runRecord.details || {}), postCommitVerification: postCommitCheck.results };
+
+    // 10. Record Migration Run into Database — AFTER the confirmed COMMIT,
+    // using separate database operations (Option A). A logging failure here
+    // cannot roll back committed data and cannot create a false-success;
+    // it is surfaced as a documented warning instead of being swallowed.
+    const loggingResult = await persistMigrationRunPostCommit(client, runRecord, logs);
+    if (!loggingResult.ok) {
+      logs.push({
+        id: `${runId}_log_persist_warning`,
+        migrationRunId: runId,
+        collection: 'SYSTEM',
+        documentId: 'RUN_LOGGING',
+        operation: 'ERROR',
+        status: 'WARNING',
+        error: `تعذّر تسجيل سجل الترحيل في قاعدة البيانات (البيانات مُعتمدة ومُتحقق منها بالفعل): ${loggingResult.error}`,
+        timestamp: new Date().toISOString(),
+      });
+      runRecord.warningsCount++;
+    }
 
     // Save to memory store for API reads
     migrationRunHistory.unshift(runRecord);
@@ -966,6 +1413,25 @@ export async function executeControlledMigration(
       details: { message: 'تم التراجع الكامل عن العملية (ROLLBACK) لحماية سلامة البيانات.' },
       timestamp: new Date().toISOString(),
     });
+
+    // Best-effort persistence of the failed run + item logs (post-ROLLBACK the
+    // connection is usable again — separate operations, never inside the
+    // aborted transaction). A logging failure here cannot mask the real
+    // migration error and cannot create a false-success state; it is surfaced
+    // as a documented warning instead of being swallowed.
+    const failureLogging = await persistMigrationRunPostCommit(client, runRecord, logs);
+    if (!failureLogging.ok) {
+      logs.push({
+        id: `${runId}_log_persist_warning`,
+        migrationRunId: runId,
+        collection: 'SYSTEM',
+        documentId: 'RUN_LOGGING',
+        operation: 'ERROR',
+        status: 'WARNING',
+        error: `تعذّر تسجيل سجل الترحيل الفاشل في قاعدة البيانات: ${failureLogging.error}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     migrationRunHistory.unshift(runRecord);
     migrationLogStore.push(...logs);

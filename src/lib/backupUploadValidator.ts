@@ -156,6 +156,24 @@ export function validateBackupJsonFile(jsonStringOrObject: string | any): Backup
           return;
         }
 
+        // Legacy export envelope detection: {id, collection, path, data:{...}}
+        // produced by exporter contract v1. The migration engine consumes flat
+        // documents, so wrapped files must be rejected clearly at validation time.
+        if (
+          doc.data !== null &&
+          typeof doc.data === 'object' &&
+          !Array.isArray(doc.data) &&
+          typeof doc.collection === 'string' &&
+          typeof doc.path === 'string'
+        ) {
+          malformedDocs.push({
+            collection: colName,
+            index,
+            reason: 'صيغة تصدير مغلفة قديمة (Legacy Envelope Format). أعد تصدير النسخة من لوحة التحكم للحصول على الصيغة المتوافقة مع الترحيل.',
+          });
+          return;
+        }
+
         const id = doc.id || doc.documentId || doc._id;
         if (!id || typeof id !== 'string' || !id.trim()) {
           missingIds.push({

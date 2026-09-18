@@ -76,7 +76,8 @@ async function runTestSuite() {
   const testClient = new MockPostgresTransactionalClient();
   const result = await executeControlledMigration(testClient, {
     collections: {
-      platform_users: [{ id: 'usr_admin', name: 'المدير', phone: '0500000000', role: 'system_admin' }],
+      tenants: [{ id: 'tenant_1', slug: 'ghazzawi', name: 'مجمع الغزاوي' }],
+      platform_users: [{ id: 'usr_admin', name: 'المدير', phone: '0500000000', role: 'system_admin', tenantId: 'ghazzawi' }],
     }
   }, {
     confirmedByAdmin: true,

@@ -7,6 +7,7 @@ import { tenantRouter } from './routes/tenantRoutes';
 import { stageRouter } from './routes/stageRoutes';
 import { userRouter } from './routes/userRoutes';
 import { backupRestoreRouter } from './routes/backupRestoreRoutes';
+import { databaseBackupRouter } from './routes/databaseBackupRoutes';
 
 export function createApp() {
   const app = express();
@@ -25,6 +26,7 @@ export function createApp() {
   app.use('/api/users', userRouter);
   app.use('/api/admin/backup/restore', backupRestoreRouter);
   app.use('/api/admin/migration', backupRestoreRouter);
+  app.use('/api/admin/backup/database', databaseBackupRouter);
 
   // Global Error Handler for API routes
   app.use('/api', errorHandler);
