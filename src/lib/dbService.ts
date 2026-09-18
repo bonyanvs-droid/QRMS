@@ -1,23 +1,20 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  getDoc,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  deleteField,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-  Unsubscribe,
-  serverTimestamp,
-  writeBatch,
-} from 'firebase/firestore';
-import { db, auth } from './firebase';
-import { isCurrentSessionDemo } from './demoGuard';
+/**
+ * QRMS PostgreSQL Data Service
+ * 
+ * Full Operational Data Access Layer for QRMS.
+ * 100% of operational reads, writes, mutations, and real-time subscriptions are routed
+ * directly to the PostgreSQL database backend with zero Firestore dependencies.
+ */
+
+import { apiClient } from './api/apiClient';
+import { StudentRepository } from './repositories/studentRepository';
+import { HalaqahRepository } from './repositories/halaqahRepository';
+import { DailyRecordRepository } from './repositories/dailyRecordRepository';
+import { UserRepository } from './repositories/userRepository';
+import { TenantRepository } from './repositories/tenantRepository';
+import { AcademicRepository } from './repositories/academicRepository';
+import { AdminRepository } from './repositories/adminRepository';
+import { recordAuditLog } from './auditService';
 import {
   AcademicYearConfig,
   DailySessionRecord,
@@ -40,6 +37,12 @@ import {
   StudentFinancialRecord,
   PaymentTransaction,
   PaymentStatus,
+  RevenueItem,
+  ExpenseItem,
+  Custody,
+  CustodyExpenseItem,
+  BudgetRequest,
+  FinanceSettingsData,
   AssociationNomination,
   NominationStatus,
   EmergencySupportSession,
@@ -52,33 +55,15 @@ import {
   SeasonalProgram,
   SeasonalActivity,
   SeasonalParticipation,
+  FrontendConfig,
 } from '../types';
 import { StudentQuranPlan } from '../quran/types/plan';
-import { normalizeStudentQuranPlan } from '../quran/utils/planNormalizer';
 import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../quran/models/stageConfig';
-import { recordAuditLog, sanitizeFirestoreData } from './auditService';
-import {
-  INITIAL_ACADEMIC_YEAR,
-  INITIAL_SPELLING_LESSONS,
-  INITIAL_EDUCATIONAL_PLAN,
-  INITIAL_BADGES,
-  INITIAL_REMEDIAL_PLANS,
-  INITIAL_TENANTS,
-  INITIAL_STAGES,
-  INITIAL_ARCHIVES,
-  INITIAL_ORGANIZATIONS,
-} from '../data/initialData';
-import {
-  COMPREHENSIVE_HALAQAHS,
-  COMPREHENSIVE_TEACHERS,
-  COMPREHENSIVE_USERS,
-  ALL_COMPREHENSIVE_STUDENTS,
-  COMPREHENSIVE_SESSION_RECORDS,
-} from '../data/multiStageRoster';
+
+export type Unsubscribe = () => void;
 
 /**
  * Native SHA-256 password hashing.
- * Passwords are NEVER stored as plain text in the database.
  */
 export async function hashPassword(password: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(password.trim());
@@ -87,10 +72,6 @@ export async function hashPassword(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Initial default Admin credentials (hashed immediately)
-const DEFAULT_ADMIN_PHONE = '0569990593';
-const DEFAULT_ADMIN_NAME = 'د. نور إبراهيم محمد يوسف';
-
 export interface DatabaseState {
   isInitialized: boolean;
   isSyncing: boolean;
@@ -98,2908 +79,877 @@ export interface DatabaseState {
 }
 
 /**
- * Seeds and synchronizes all Educational Stages, Halaqahs (strictly linked to stageId),
- * Teachers, Users, and Students into Firestore.
- */
-export async function seedAllStagesAndHalaqahsToFirestore(_force = false): Promise<{ success: boolean; message: string }> {
-  return {
-    success: true,
-    message: 'تم إيقاف التعبئة التلقائية للبيانات حفاظاً على تصفير قاعدة البيانات.',
-  };
-}
-
-/**
- * Ensures Firestore database health and retroactively synchronizes any historical
- * tenants into platform_users with their proper campus_admin credentials.
+ * Bootstraps database connectivity check and initial setup
  */
 export async function ensureDatabaseInitialized(): Promise<void> {
   try {
-    const healthRef = doc(db, '_health', 'status');
-    const healthSnap = await getDoc(healthRef);
-    if (!healthSnap.exists()) {
-      await setDoc(healthRef, {
-        status: 'active',
-        initializedAt: new Date().toISOString(),
-        source: 'cloud_firestore',
-      });
-    }
-    // Retroactive synchronization for all tenants into platform_users
-    await syncAllTenantsAdminUsers();
+    const health = await apiClient.get('/health');
+    console.log('[PostgreSQL] Database operational status:', health);
   } catch (err) {
-    console.warn('[Firestore] Health check / tenant admin sync notice:', err);
+    console.warn('[PostgreSQL] Database connection probe warning:', err);
   }
 }
 
-/**
- * Retroactively checks all tenants in the tenants collection and guarantees that each
- * tenant has its corresponding campus_admin account saved in platform_users.
- */
+export async function seedAllStagesAndHalaqahsToFirestore(_force = false): Promise<{ success: boolean; message: string }> {
+  return { success: true, message: 'Seeding to PostgreSQL is managed via SQL migrations' };
+}
+
 export async function syncAllTenantsAdminUsers(): Promise<void> {
-  try {
-    const tenantsSnap = await getDocs(collection(db, 'tenants'));
-    if (tenantsSnap.empty) return;
+  // Managed by PostgreSQL users table
+}
 
-    for (const tDoc of tenantsSnap.docs) {
-      const tenant = { id: tDoc.id, ...tDoc.data() } as MosqueComplexTenant;
-      const phone = tenant.contactPhone || (tenant as any).supervisorPhone || (tenant as any).phone || '';
-      const cleanPhone = phone.replace(/[^\d+]/g, '').trim();
-      const defaultAdminPass = 'Admin@123456';
+// -----------------------------------------------------------------------------
+// Universal Subscription Helper for polymorphic argument lists
+// -----------------------------------------------------------------------------
 
-      // 1. Check if an admin user already exists for this tenant in platform_users
-      const qTenant = query(
-        collection(db, 'platform_users'),
-        where('tenantId', '==', tenant.id),
-        where('role', '==', 'campus_admin')
-      );
-      const snapTenant = await getDocs(qTenant);
+function parseSubArgs<T>(
+  a1: any,
+  a2?: any,
+  a3?: any,
+  a4?: any
+): { callback: (data: T) => void; tenantId?: string; role?: string; entityId?: string } {
+  if (typeof a1 === 'function') {
+    return { callback: a1, tenantId: typeof a2 === 'string' ? a2 : undefined };
+  }
+  if (typeof a2 === 'function') {
+    return { callback: a2, tenantId: typeof a1 === 'string' ? a1 : undefined };
+  }
+  if (typeof a3 === 'function') {
+    return {
+      callback: a3,
+      tenantId: typeof a4 === 'string' ? a4 : typeof a1 === 'string' ? a1 : undefined,
+      role: typeof a1 === 'string' ? a1 : undefined,
+      entityId: typeof a2 === 'string' ? a2 : undefined,
+    };
+  }
+  if (typeof a4 === 'function') {
+    return {
+      callback: a4,
+      tenantId: typeof a1 === 'string' ? a1 : undefined,
+    };
+  }
+  return { callback: () => {} };
+}
 
-      if (!snapTenant.empty) {
-        // Update user record if needed (keep credentials up to date)
-        const existingAdminDoc = snapTenant.docs[0];
-        const existingData = existingAdminDoc.data();
-        const needsUpdate =
-          existingData.name !== (tenant.supervisorName || `مدير ${tenant.name}`) ||
-          (phone && existingData.phone !== phone) ||
-          existingData.isActive !== (tenant.isActive !== false);
+// -----------------------------------------------------------------------------
+// Realtime Subscriptions (PostgreSQL API Client Powered)
+// -----------------------------------------------------------------------------
 
-        if (needsUpdate) {
-          await setDoc(
-            doc(db, 'platform_users', existingAdminDoc.id),
-            sanitizeFirestoreData({
-              name: tenant.supervisorName || `مدير ${tenant.name}`,
-              fullName: tenant.supervisorName || `مدير ${tenant.name}`,
-              phone: phone || existingData.phone || '',
-              loginIdentifier: cleanPhone || existingData.loginIdentifier || phone,
-              email: tenant.email || existingData.email || undefined,
-              organizationId: tenant.organizationId || existingData.organizationId || null,
-              isActive: tenant.isActive !== false,
-              updatedAt: new Date().toISOString(),
-            }),
-            { merge: true }
-          );
-        }
-      } else {
-        // Create the missing campus_admin document directly in platform_users
-        const adminDocId = `usr_adm_${tenant.id}`;
-        const passwordHash = await hashPassword(defaultAdminPass);
+export function subscribeToUsers(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<User[]>(a1, a2, a3, a4);
+  return UserRepository.subscribe(callback, tenantId);
+}
 
-        await setDoc(
-          doc(db, 'platform_users', adminDocId),
-          sanitizeFirestoreData({
-            id: adminDocId,
-            name: tenant.supervisorName || `مدير ${tenant.name}`,
-            fullName: tenant.supervisorName || `مدير ${tenant.name}`,
-            phone: phone || '',
-            loginIdentifier: cleanPhone || phone || `admin_${tenant.id}`,
-            email: tenant.email || undefined,
-            role: 'campus_admin',
-            staffRole: 'supervisor',
-            tenantId: tenant.id,
-            organizationId: tenant.organizationId || null,
-            passwordHash,
-            isActive: tenant.isActive !== false,
-            mustChangePassword: false,
-            customPermissions: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }),
-          { merge: true }
-        );
-      }
+export function subscribeToHalaqahs(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<Halaqah[]>(a1, a2, a3, a4);
+  return HalaqahRepository.subscribe(callback, tenantId);
+}
+
+export function subscribeToStudents(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<Student[]>(a1, a2, a3, a4);
+  return StudentRepository.subscribe(callback, tenantId);
+}
+
+export function subscribeToDailyRecords(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<DailySessionRecord[]>(a1, a2, a3, a4);
+  return DailyRecordRepository.subscribe(callback, tenantId);
+}
+
+export function subscribeToSpellingLessons(
+  callback: (lessons: SpellingLesson[]) => void,
+  stageId?: string
+): Unsubscribe {
+  return AcademicRepository.subscribeSpellingLessons(callback, stageId);
+}
+
+export function subscribeToEducationalPlan(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<EducationalPlanWeek[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeEducationalPlans(callback, tenantId);
+}
+
+export function subscribeToAcademicConfig(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<AcademicYearConfig>(a1, a2, a3, a4);
+  return TenantRepository.subscribeAcademicYears((years) => {
+    if (years && years.length > 0) {
+      callback(years[0]);
     }
-  } catch (err) {
-    console.warn('Notice syncing tenant administrators into platform_users:', err);
+  }, tenantId);
+}
+
+export function subscribeToAuditLogs(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<AuditLog[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeAuditLogs(callback, tenantId);
+}
+
+export function subscribeToReportLogs(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<ReportLog[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeReportLogs(callback, tenantId);
+}
+
+export function subscribeToBadges(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<StudentBadge[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeBadges(callback, tenantId);
+}
+
+export function subscribeToRemedialPlans(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<RemedialActionPlan[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeRemedialPlans(callback, tenantId);
+}
+
+export function subscribeToTenants(
+  callback: (tenants: MosqueComplexTenant[]) => void
+): Unsubscribe {
+  return TenantRepository.subscribeTenants(callback);
+}
+
+export function subscribeToStages(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<EducationalStage[]>(a1, a2, a3, a4);
+  return TenantRepository.subscribeStages(callback, tenantId);
+}
+
+export function subscribeToArchives(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<AcademicTermArchive[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeArchives(callback, tenantId);
+}
+
+export function subscribeToOrganizations(
+  callback: (orgs: Organization[]) => void
+): Unsubscribe {
+  return AdminRepository.subscribeOrganizations(callback);
+}
+
+export function subscribeToQuranPlans(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<StudentQuranPlan[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeQuranPlans(callback, tenantId);
+}
+
+export function subscribeToQuranStageConfigs(
+  callback: (configs: StageQuranConfig[]) => void
+): Unsubscribe {
+  return AcademicRepository.subscribeStageQuranConfigs(callback);
+}
+
+export function subscribeToAdmissions(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<RegistrationRequest[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeRegistrationRequests(callback, tenantId);
+}
+
+export function subscribeToFinancialRecords(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<StudentFinancialRecord[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<StudentFinancialRecord[]>('student_financial_records', callback, { tenantId });
+}
+
+export function subscribeToRevenues(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<RevenueItem[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<RevenueItem[]>('finance_revenues', callback, { tenantId });
+}
+
+export function subscribeToExpenses(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<ExpenseItem[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<ExpenseItem[]>('finance_expenses', callback, { tenantId });
+}
+
+export function subscribeToCustodies(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<Custody[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<Custody[]>('finance_custodies', callback, { tenantId });
+}
+
+export function subscribeToBudgetRequests(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<BudgetRequest[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<BudgetRequest[]>('finance_budget_requests', callback, { tenantId });
+}
+
+export function subscribeToFinanceSettings(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<FinanceSettingsData>(a1, a2, a3, a4);
+  return apiClient.subscribe<FinanceSettingsData>('finance_settings', callback, { tenantId });
+}
+
+export function subscribeToNominations(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<AssociationNomination[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeAssociationNominations(callback, tenantId);
+}
+
+export function subscribeToSupportSessions(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<EmergencySupportSession[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeSupportSessions(callback, tenantId);
+}
+
+export function subscribeToTrackDefinitions(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<TrackDefinition[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeTrackDefinitions(callback, tenantId);
+}
+
+export function subscribeToTrackNominations(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<TrackNomination[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeTrackNominations(callback, tenantId);
+}
+
+export function subscribeToSeasonalPrograms(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<SeasonalProgram[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeSeasonalPrograms(callback, tenantId);
+}
+
+export function subscribeToSeasonalActivities(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<SeasonalActivity[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeSeasonalActivities(callback, tenantId);
+}
+
+export function subscribeToSeasonalParticipations(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<SeasonalParticipation[]>(a1, a2, a3, a4);
+  return AcademicRepository.subscribeSeasonalParticipations(callback, tenantId);
+}
+
+export function subscribeToMeetings(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<Meeting[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeMeetings(callback, tenantId);
+}
+
+export function subscribeToStaffAttendance(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<AttendanceRecord[]>(a1, a2, a3, a4);
+  return AdminRepository.subscribeStaffAttendance(callback, tenantId);
+}
+
+export function subscribeToArchivedHalaqahs(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<Halaqah[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<Halaqah[]>('halaqahs', callback, { isArchived: true, tenantId });
+}
+
+export function subscribeToArchivedUsers(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<User[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<User[]>('users', callback, { isArchived: true, tenantId });
+}
+
+export function subscribeToArchivedTeachers(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<User[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<User[]>('users', callback, { isArchived: true, role: 'teacher', tenantId });
+}
+
+export function subscribeToArchivedSupervisors(a1: any, a2?: any, a3?: any, a4?: any): Unsubscribe {
+  const { callback, tenantId } = parseSubArgs<User[]>(a1, a2, a3, a4);
+  return apiClient.subscribe<User[]>('users', callback, { isArchived: true, role: 'supervisor', tenantId });
+}
+
+// -----------------------------------------------------------------------------
+// Database Mutations (PostgreSQL API Layer)
+// -----------------------------------------------------------------------------
+
+export async function saveStudent(student: Student, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await StudentRepository.save(student);
+  if (actor) {
+    recordAuditLog(actor, 'student', student.id, 'SAVE_STUDENT', { name: student.name }, student.tenantId);
   }
 }
 
-// -------------------------------------------------------------
-// Real-time Listeners (Reactive Multi-Device Synchronization)
-// -------------------------------------------------------------
-
-export function subscribeToUsers(
-  tenantIdOrCallback: string | ((users: User[]) => void),
-  optionalCallback?: (users: User[]) => void
-): Unsubscribe {
-  let tenantId: string | undefined;
-  let callback: (users: User[]) => void;
-  if (typeof tenantIdOrCallback === 'function') {
-    callback = tenantIdOrCallback;
-  } else {
-    tenantId = tenantIdOrCallback;
-    callback = optionalCallback || (() => {});
-  }
-  const q = tenantId
-    ? query(collection(db, 'platform_users'), where('tenantId', '==', tenantId))
-    : collection(db, 'platform_users');
-
-  return onSnapshot(q as any, (snapshot) => {
-    const users: User[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      users.push({
-        id: docSnap.id,
-        name: data.fullName || data.name || '',
-        fullName: data.fullName || data.name || '',
-        phone: data.phone || '',
-        nationalId: data.nationalId,
-        loginIdentifier: data.loginIdentifier || data.nationalId || data.phone || docSnap.id,
-        email: data.email,
-        role: data.role || 'teacher',
-        password: data.passwordHash || data.password,
-        passwordHash: data.passwordHash,
-        halaqahId: data.halaqahId,
-        studentId: data.studentId,
-        teacherId: data.teacherId,
-        studentIds: data.studentIds,
-        tenantId: data.tenantId,
-        organizationId: data.organizationId,
-        supervisionMode: data.supervisionMode,
-        isActive: data.isActive ?? true,
-        staffRole: data.staffRole,
-        isArchived: data.isArchived ?? false,
-        teacherArchived: data.teacherArchived ?? false,
-        supervisorArchived: data.supervisorArchived ?? false,
-        archivedAt: data.archivedAt,
-        archivedBy: data.archivedBy,
-        archiveReason: data.archiveReason,
-        permissionMode: data.permissionMode,
-        mustChangePassword: data.mustChangePassword ?? false,
-        supervisorScope: data.supervisorScope,
-        customPermissions: data.customPermissions,
-        assignedStageIds: data.assignedStageIds,
-        assignedHalaqahIds: data.assignedHalaqahIds,
-        isAllHalaqahs: data.isAllHalaqahs ?? false,
-        delegations: data.delegations,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      });
-    });
-    callback(users);
-  }, (err) => {
-    console.warn('Platform users subscription notice:', err.message);
-  });
-}
-
-export function subscribeToHalaqahs(
-  tenantIdOrCallback: string | ((halaqahs: Halaqah[]) => void),
-  optionalCallback?: (halaqahs: Halaqah[]) => void
-): Unsubscribe {
-  let tenantId: string | undefined;
-  let callback: (halaqahs: Halaqah[]) => void;
-
-  if (typeof tenantIdOrCallback === 'function') {
-    callback = tenantIdOrCallback;
-  } else {
-    tenantId = tenantIdOrCallback;
-    callback = optionalCallback || (() => {});
-  }
-
-  // Subscribe to halaqahs collection with real-time updates
-  const colRef = collection(db, 'halaqahs');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const halaqahs: Halaqah[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<Halaqah, 'id'>;
-      const h: Halaqah = { id: docSnap.id, ...data };
-      if (!tenantId) {
-        halaqahs.push(h);
-      } else {
-        // Match explicit tenant or fallback equivalent IDs (ghazzawi vs tenant_ghazzawi or empty tenant)
-        const docTenant = h.tenantId;
-        if (!docTenant || docTenant === tenantId || (tenantId === 'ghazzawi' && (docTenant === 'tenant_ghazzawi' || docTenant === 'ghazzawi'))) {
-          halaqahs.push(h);
-        } else if (tenantId === 'tenant_ghazzawi' && (docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi')) {
-          halaqahs.push(h);
-        } else if (docTenant === tenantId) {
-          halaqahs.push(h);
-        }
-      }
-    });
-    callback(halaqahs);
-  }, (err) => {
-    console.warn('Halaqahs subscription notice:', err.message);
-  });
-}
-
-export function subscribeToStudents(
-  userRole: string,
-  halaqahId?: string,
-  callback?: (students: Student[]) => void,
-  tenantId?: string
-): Unsubscribe {
-  const colRef = collection(db, 'students');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const students: Student[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<Student, 'id'>;
-      const s: Student = { id: docSnap.id, ...data };
-
-      let matchTenant = true;
-      if (tenantId && tenantId !== 'all') {
-        const docTenant = s.tenantId;
-        if (docTenant) {
-          if (tenantId === 'ghazzawi' || tenantId === 'tenant_ghazzawi') {
-            matchTenant = docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi';
-          } else {
-            matchTenant = docTenant === tenantId;
-          }
-        }
-      }
-
-      let matchRole = true;
-      if (userRole === 'teacher' && halaqahId) {
-        matchRole = s.halaqahId === halaqahId;
-      }
-
-      if (matchTenant && matchRole) {
-        students.push(s);
-      }
-    });
-
-    students.sort((a, b) => (a.fullName || a.name || '').localeCompare(b.fullName || b.name || '', 'ar'));
-    if (callback) callback(students);
-  }, (err) => {
-    console.warn('Students subscription notice:', err.message);
-  });
-}
-
-export function subscribeToDailyRecords(
-  userRole: string,
-  halaqahId?: string,
-  callback?: (records: DailySessionRecord[]) => void,
-  tenantId?: string
-): Unsubscribe {
-  const colRef = collection(db, 'daily_records');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const records: DailySessionRecord[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<DailySessionRecord, 'id'>;
-      const r: DailySessionRecord = { id: docSnap.id, ...data };
-
-      let matchTenant = true;
-      if (tenantId && tenantId !== 'all') {
-        const docTenant = r.tenantId;
-        if (docTenant) {
-          if (tenantId === 'ghazzawi' || tenantId === 'tenant_ghazzawi') {
-            matchTenant = docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi';
-          } else {
-            matchTenant = docTenant === tenantId;
-          }
-        }
-      }
-
-      let matchRole = true;
-      if (userRole === 'teacher' && halaqahId) {
-        matchRole = r.halaqahId === halaqahId;
-      }
-
-      if (matchTenant && matchRole) {
-        records.push(r);
-      }
-    });
-
-    records.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    if (callback) callback(records);
-  }, (err) => {
-    console.warn('Daily records subscription notice:', err.message);
-  });
-}
-
-export function subscribeToSpellingLessons(callback: (lessons: SpellingLesson[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'spelling_lessons'), orderBy('lessonNumber', 'asc')), (snapshot) => {
-    const lessons: SpellingLesson[] = [];
-    snapshot.forEach((doc) => {
-      lessons.push({ id: doc.id, ...(doc.data() as Omit<SpellingLesson, 'id'>) });
-    });
-    callback(lessons);
-  }, (err) => {
-    console.warn('Spelling lessons subscription notice:', err.message);
-  });
-}
-
-export function subscribeToEducationalPlan(callback: (plan: EducationalPlanWeek[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'educational_plan'), orderBy('weekNumber', 'asc')), (snapshot) => {
-    const plan: EducationalPlanWeek[] = [];
-    snapshot.forEach((doc) => {
-      plan.push({ id: doc.id, ...(doc.data() as Omit<EducationalPlanWeek, 'id'>) });
-    });
-    callback(plan);
-  }, (err) => {
-    console.warn('Educational plan subscription notice:', err.message);
-  });
-}
-
-export function subscribeToSeasonalPrograms(callback: (programs: SeasonalProgram[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, 'seasonal_programs'), (snapshot) => {
-    const list: SeasonalProgram[] = [];
-    snapshot.forEach((doc) => {
-      list.push({ id: doc.id, ...(doc.data() as Omit<SeasonalProgram, 'id'>) });
-    });
-    callback(list);
-  }, (err) => {
-    console.warn('Seasonal programs subscription notice:', err.message);
-  });
-}
-
-export function subscribeToSeasonalActivities(callback: (activities: SeasonalActivity[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, 'seasonal_activities'), (snapshot) => {
-    const list: SeasonalActivity[] = [];
-    snapshot.forEach((doc) => {
-      list.push({ id: doc.id, ...(doc.data() as Omit<SeasonalActivity, 'id'>) });
-    });
-    callback(list);
-  }, (err) => {
-    console.warn('Seasonal activities subscription notice:', err.message);
-  });
-}
-
-export function subscribeToSeasonalParticipations(callback: (participations: SeasonalParticipation[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, 'seasonal_participations'), (snapshot) => {
-    const list: SeasonalParticipation[] = [];
-    snapshot.forEach((doc) => {
-      list.push({ id: doc.id, ...(doc.data() as Omit<SeasonalParticipation, 'id'>) });
-    });
-    callback(list);
-  }, (err) => {
-    console.warn('Seasonal participations subscription notice:', err.message);
-  });
-}
-
-export function subscribeToAcademicConfig(callback: (config: AcademicYearConfig) => void): Unsubscribe {
-  return onSnapshot(doc(db, 'academic_years', INITIAL_ACADEMIC_YEAR.id), (docSnap) => {
-    if (docSnap.exists()) {
-      callback({ id: docSnap.id, ...(docSnap.data() as Omit<AcademicYearConfig, 'id'>) });
-    }
-  }, (err) => {
-    console.warn('Academic config subscription notice:', err.message);
-  });
-}
-
-export function subscribeToAuditLogs(callback: (logs: AuditLog[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc')), (snapshot) => {
-    const logs: AuditLog[] = [];
-    snapshot.forEach((doc) => {
-      logs.push({ id: doc.id, ...(doc.data() as Omit<AuditLog, 'id'>) });
-    });
-    callback(logs);
-  }, (err) => {
-    console.warn('Audit logs subscription notice:', err.message);
-  });
-}
-
-export function subscribeToReportLogs(callback: (logs: ReportLog[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'report_logs'), orderBy('timestamp', 'desc')), (snapshot) => {
-    const logs: ReportLog[] = [];
-    snapshot.forEach((doc) => {
-      logs.push({ id: doc.id, ...(doc.data() as Omit<ReportLog, 'id'>) });
-    });
-    callback(logs);
-  }, (err) => {
-    console.warn('Report logs subscription notice:', err.message);
-  });
-}
-
-export function subscribeToBadges(
-  arg1: string | ((badges: StudentBadge[]) => void),
-  arg2?: string | ((badges: StudentBadge[]) => void)
-): Unsubscribe {
-  let tenantId: string | undefined;
-  let callback: (badges: StudentBadge[]) => void = () => {};
-
-  if (typeof arg1 === 'function') {
-    callback = arg1;
-    if (typeof arg2 === 'string') tenantId = arg2;
-  } else if (typeof arg1 === 'string') {
-    tenantId = arg1;
-    if (typeof arg2 === 'function') callback = arg2;
-  }
-
-  const q = tenantId
-    ? query(collection(db, 'badges'), where('tenantId', '==', tenantId), orderBy('awardedAt', 'desc'))
-    : query(collection(db, 'badges'), orderBy('awardedAt', 'desc'));
-
-  return onSnapshot(q, (snapshot) => {
-    const badges: StudentBadge[] = [];
-    snapshot.forEach((doc) => {
-      badges.push({ id: doc.id, ...(doc.data() as Omit<StudentBadge, 'id'>) });
-    });
-    callback(badges);
-  }, (err) => {
-    console.warn('Badges subscription notice:', err.message);
-  });
-}
-
-export function subscribeToRemedialPlans(
-  userRole: string,
-  halaqahId?: string,
-  callback?: (plans: RemedialActionPlan[]) => void,
-  tenantId?: string
-): Unsubscribe {
-  const constraints: any[] = [];
-  if (tenantId) {
-    constraints.push(where('tenantId', '==', tenantId));
-  }
-  if (userRole === 'teacher' && halaqahId) {
-    constraints.push(where('halaqahId', '==', halaqahId));
-  }
-  constraints.push(orderBy('createdAt', 'desc'));
-
-  const q = query(collection(db, 'remedial_plans'), ...constraints);
-
-  return onSnapshot(q, (snapshot) => {
-    const plans: RemedialActionPlan[] = [];
-    snapshot.forEach((doc) => {
-      plans.push({ id: doc.id, ...(doc.data() as Omit<RemedialActionPlan, 'id'>) });
-    });
-    if (callback) callback(plans);
-  }, (err) => {
-    console.warn('Remedial plans subscription notice:', err.message);
-  });
-}
-
-// -------------------------------------------------------------
-// P4: Admissions & Registration Subscriptions
-// -------------------------------------------------------------
-export function subscribeToAdmissions(
-  tenantId: string,
-  callback: (requests: RegistrationRequest[]) => void
-): Unsubscribe {
-  const colRef = collection(db, 'registration_requests');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const requests: RegistrationRequest[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<RegistrationRequest, 'id'>;
-      const r: RegistrationRequest = { id: docSnap.id, ...data };
-      if (!tenantId || tenantId === 'all') {
-        requests.push(r);
-      } else {
-        const docTenant = r.tenantId;
-        if (!docTenant || docTenant === tenantId ||
-           ((tenantId === 'ghazzawi' || tenantId === 'tenant_ghazzawi') && (docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi'))) {
-          requests.push(r);
-        }
-      }
-    });
-    // Sort client-side by createdAt desc
-    requests.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    callback(requests);
-  }, (err) => {
-    console.warn('Admissions subscription notice:', err.message);
-  });
-}
-
-// -------------------------------------------------------------
-// P5: Financial Records Subscriptions
-// -------------------------------------------------------------
-export function subscribeToFinancialRecords(
-  tenantId: string,
-  callback: (records: StudentFinancialRecord[]) => void
-): Unsubscribe {
-  const q = query(
-    collection(db, 'financial_records'),
-    where('tenantId', '==', tenantId)
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    const records: StudentFinancialRecord[] = [];
-    snapshot.forEach((doc) => {
-      records.push({ id: doc.id, ...(doc.data() as Omit<StudentFinancialRecord, 'id'>) });
-    });
-    callback(records);
-  }, (err) => {
-    console.warn('Financial records subscription notice:', err.message);
-  });
-}
-
-// -------------------------------------------------------------
-// P6: Association Nominations Subscriptions
-// -------------------------------------------------------------
-export function subscribeToNominations(
-  tenantId: string,
-  callback: (noms: AssociationNomination[]) => void,
-  halaqahId?: string
-): Unsubscribe {
-  const colRef = collection(db, 'association_nominations');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const noms: AssociationNomination[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<AssociationNomination, 'id'>;
-      const n: AssociationNomination = { id: docSnap.id, ...data };
-      let matchTenant = true;
-      if (tenantId && tenantId !== 'all') {
-        const docTenant = n.tenantId;
-        if (docTenant) {
-          if (tenantId === 'ghazzawi' || tenantId === 'tenant_ghazzawi') {
-            matchTenant = docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi';
-          } else {
-            matchTenant = docTenant === tenantId;
-          }
-        }
-      }
-      let matchHalaqah = true;
-      if (halaqahId) {
-        matchHalaqah = n.halaqahId === halaqahId;
-      }
-      if (matchTenant && matchHalaqah) {
-        noms.push(n);
-      }
-    });
-    callback(noms);
-  }, (err) => {
-    console.warn('Nominations subscription notice:', err.message);
-  });
-}
-
-// -------------------------------------------------------------
-// P8: Track Definitions & Track Nominations Subscriptions
-// -------------------------------------------------------------
-export function subscribeToTrackDefinitions(
-  tenantId: string,
-  callback: (tracks: TrackDefinition[]) => void
-): Unsubscribe {
-  const q = query(collection(db, 'track_definitions'));
-  return onSnapshot(q, (snapshot) => {
-    const tracks: TrackDefinition[] = [];
-    snapshot.forEach((doc) => {
-      tracks.push({ id: doc.id, ...(doc.data() as Omit<TrackDefinition, 'id'>) });
-    });
-    // Filter tracks matching tenant or global (tenantId undefined or empty or equal)
-    const filtered = tracks.filter((t) => !t.tenantId || t.tenantId === tenantId);
-    callback(filtered);
-  }, (err) => {
-    console.warn('Track definitions subscription notice:', err.message);
-  });
-}
-
-export function subscribeToTrackNominations(
-  tenantId: string,
-  callback: (noms: TrackNomination[]) => void,
-  halaqahId?: string
-): Unsubscribe {
-  const colRef = collection(db, 'track_nominations');
-
-  return onSnapshot(colRef, (snapshot) => {
-    const noms: TrackNomination[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Omit<TrackNomination, 'id'>;
-      const n: TrackNomination = { id: docSnap.id, ...data };
-      let matchTenant = true;
-      if (tenantId && tenantId !== 'all') {
-        const docTenant = n.tenantId;
-        if (docTenant) {
-          if (tenantId === 'ghazzawi' || tenantId === 'tenant_ghazzawi') {
-            matchTenant = docTenant === 'ghazzawi' || docTenant === 'tenant_ghazzawi';
-          } else {
-            matchTenant = docTenant === tenantId;
-          }
-        }
-      }
-      let matchHalaqah = true;
-      if (halaqahId) {
-        matchHalaqah = n.halaqahId === halaqahId;
-      }
-      if (matchTenant && matchHalaqah) {
-        noms.push(n);
-      }
-    });
-    callback(noms);
-  }, (err) => {
-    console.warn('Track nominations subscription notice:', err.message);
-  });
-}
-
-// -------------------------------------------------------------
-// P7: Emergency Support Sessions Subscriptions
-// -------------------------------------------------------------
-export function subscribeToSupportSessions(
-  tenantId: string,
-  callback: (sessions: EmergencySupportSession[]) => void
-): Unsubscribe {
-  const q = query(
-    collection(db, 'support_sessions'),
-    where('tenantId', '==', tenantId),
-    where('isActive', '==', true)
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    const sessions: EmergencySupportSession[] = [];
-    const now = new Date().toISOString();
-    snapshot.forEach((doc) => {
-      const data = doc.data() as Omit<EmergencySupportSession, 'id'>;
-      if (data.expiresAt > now) {
-        sessions.push({ id: doc.id, ...data });
-      }
-    });
-    callback(sessions);
-  }, (err) => {
-    console.warn('Support sessions subscription notice:', err.message);
-  });
-}
-
-export function subscribeToTenants(callback: (tenants: MosqueComplexTenant[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, 'tenants'), (snapshot) => {
-    const tenants: MosqueComplexTenant[] = [];
-    snapshot.forEach((doc) => {
-      tenants.push({ id: doc.id, ...(doc.data() as Omit<MosqueComplexTenant, 'id'>) });
-    });
-    callback(tenants);
-  }, (err) => {
-    console.warn('Tenants subscription notice:', err.message);
-  });
-}
-
-export function subscribeToStages(callback: (stages: EducationalStage[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'educational_stages'), orderBy('order', 'asc')), (snapshot) => {
-    const stages: EducationalStage[] = [];
-    snapshot.forEach((doc) => {
-      stages.push({ id: doc.id, ...(doc.data() as Omit<EducationalStage, 'id'>) });
-    });
-    callback(stages);
-  }, (err) => {
-    console.warn('Stages subscription notice:', err.message);
-  });
-}
-
-export function subscribeToArchives(callback: (archives: AcademicTermArchive[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'academic_archives'), orderBy('archivedAt', 'desc')), (snapshot) => {
-    const archives: AcademicTermArchive[] = [];
-    snapshot.forEach((doc) => {
-      archives.push({ id: doc.id, ...(doc.data() as Omit<AcademicTermArchive, 'id'>) });
-    });
-    callback(archives);
-  }, (err) => {
-    console.warn('Archives subscription notice:', err.message);
-  });
-}
-
-export function subscribeToOrganizations(callback: (orgs: Organization[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, 'organizations'), (snapshot) => {
-    const orgs: Organization[] = [];
-    snapshot.forEach((doc) => {
-      orgs.push({ id: doc.id, ...(doc.data() as Omit<Organization, 'id'>) });
-    });
-    if (orgs.length === 0) {
-      callback(INITIAL_ORGANIZATIONS);
-      return;
-    }
-    callback(orgs);
-  }, (err) => {
-    console.warn('Organizations subscription notice:', err.message);
-    callback(INITIAL_ORGANIZATIONS);
-  });
-}
-
-// -------------------------------------------------------------
-// Mutation Operations (With Audit Logging and Offline Support)
-// -------------------------------------------------------------
-
-export async function saveStudent(student: Student, actor: { id: string; name: string; role: any }): Promise<void> {
-  const ref = doc(db, 'students', student.id);
-  const existing = await getDoc(ref);
-  const isNew = !existing.exists();
-
-  await setDoc(ref, sanitizeFirestoreData({
-    ...student,
-    updatedAt: new Date().toISOString(),
-    ...(isNew ? { createdAt: new Date().toISOString() } : {}),
-  }));
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'student',
-    entityId: student.id,
-    entityName: student.fullName,
-    previousValue: isNew ? null : (existing.data() || null),
-    newValue: student,
-  });
-}
-
-export async function deleteStudent(studentId: string, actor: { id: string; name: string; role: any }): Promise<void> {
-  const ref = doc(db, 'students', studentId);
-  const existing = await getDoc(ref);
-  if (existing.exists()) {
-    const data = existing.data();
-    await deleteDoc(ref);
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'student',
-      entityId: studentId,
-      entityName: data.fullName,
-      previousValue: data,
-    });
+export async function deleteStudent(studentId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await StudentRepository.delete(studentId);
+  if (actor) {
+    recordAuditLog(actor, 'student', studentId, 'DELETE_STUDENT', {}, undefined);
   }
 }
 
-export async function saveHalaqah(halaqah: Halaqah, actor: { id: string; name: string; role: any }): Promise<void> {
-  const ref = doc(db, 'halaqahs', halaqah.id);
-  const existing = await getDoc(ref);
-  const isNew = !existing.exists();
+export async function saveHalaqah(halaqah: Halaqah, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await HalaqahRepository.save(halaqah);
+  if (actor) {
+    recordAuditLog(actor, 'halaqah', halaqah.id, 'SAVE_HALAQAH', { name: halaqah.name }, halaqah.tenantId);
+  }
+}
 
-  await setDoc(ref, sanitizeFirestoreData({
-    ...halaqah,
-    updatedAt: new Date().toISOString(),
-    ...(isNew ? { createdAt: new Date().toISOString() } : {}),
-  }));
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'halaqah',
-    entityId: halaqah.id,
-    entityName: halaqah.name,
-    previousValue: isNew ? null : (existing.data() || null),
-    newValue: halaqah,
-  });
+export async function deleteHalaqah(halaqahId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await HalaqahRepository.delete(halaqahId);
+  if (actor) {
+    recordAuditLog(actor, 'halaqah', halaqahId, 'DELETE_HALAQAH', {}, undefined);
+  }
 }
 
 export async function archiveHalaqah(
-  halaqah: Halaqah,
-  actor: { id: string; name: string; role: any },
-  reason?: string
+  halaqahOrId: Halaqah | string,
+  actorOrReason?: any,
+  reasonOrActor?: any
 ): Promise<void> {
-  const archivePayload: ArchivedHalaqah = {
-    ...halaqah,
-    isArchived: true,
-    archivedAt: new Date().toISOString(),
-    archivedBy: actor.name || 'مدير النظام',
-    archiveReason: reason || 'أرشفة يدوية تحسباً للخطأ',
-  };
+  const id = typeof halaqahOrId === 'string' ? halaqahOrId : halaqahOrId.id;
+  const actor = typeof actorOrReason === 'object' ? actorOrReason : typeof reasonOrActor === 'object' ? reasonOrActor : undefined;
+  const reason = typeof actorOrReason === 'string' ? actorOrReason : typeof reasonOrActor === 'string' ? reasonOrActor : 'أرشفة حلقة';
 
-  // 1. Save to archived_halaqahs collection
-  await setDoc(doc(db, 'archived_halaqahs', halaqah.id), sanitizeFirestoreData(archivePayload), { merge: true });
-
-  // 2. Delete from active halaqahs collection
-  await deleteDoc(doc(db, 'halaqahs', halaqah.id)).catch(() => {});
-
-  // 3. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'halaqah',
-    entityId: halaqah.id,
-    entityName: halaqah.name,
-    previousValue: halaqah,
-    newValue: archivePayload,
-    notes: `تمت أرشفة الحلقة [${halaqah.name}] وتخزينها في الأرشيف لحفظ البيانات وإمكانية استعادتها لاحقاً`,
-  });
-}
-
-export async function deleteHalaqah(
-  halaqahId: string,
-  actor: { id: string; name: string; role: any },
-  halaqahDataFallback?: Halaqah
-): Promise<void> {
-  const ref = doc(db, 'halaqahs', halaqahId);
-  const existing = await getDoc(ref);
-  const data = existing.exists() ? (existing.data() as Halaqah) : halaqahDataFallback;
-
-  if (data) {
-    await archiveHalaqah(data, actor, 'أرشفة يدوية عند الحذف تحسباً للخطأ');
-  } else {
-    await deleteDoc(ref);
+  const h = typeof halaqahOrId === 'object' ? halaqahOrId : await HalaqahRepository.getById(id);
+  if (h) {
+    await HalaqahRepository.save({ ...h, isArchived: true, archiveReason: reason, archivedAt: new Date().toISOString() });
+    if (actor) {
+      recordAuditLog(actor, 'halaqah', id, 'ARCHIVE_HALAQAH', { reason }, h.tenantId);
+    }
   }
 }
 
-export async function restoreHalaqah(
-  archivedHalaqah: ArchivedHalaqah,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const restoredPayload: Halaqah = {
-    ...archivedHalaqah,
-    isArchived: false,
-    isActive: true,
-  };
-  delete (restoredPayload as any).archivedAt;
-  delete (restoredPayload as any).archivedBy;
-  delete (restoredPayload as any).archiveReason;
-
-  // 1. Restore to active halaqahs
-  await setDoc(doc(db, 'halaqahs', archivedHalaqah.id), sanitizeFirestoreData(restoredPayload), { merge: true });
-
-  // 2. Delete from archived_halaqahs
-  await deleteDoc(doc(db, 'archived_halaqahs', archivedHalaqah.id)).catch(() => {});
-
-  // 3. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'create',
-    entityType: 'halaqah',
-    entityId: archivedHalaqah.id,
-    entityName: archivedHalaqah.name,
-    previousValue: archivedHalaqah,
-    newValue: restoredPayload,
-    notes: `تمت استعادة الحلقة [${archivedHalaqah.name}] من الأرشيف بنجاح وإعادتها للخدمة`,
-  });
-}
-
-export async function permanentlyDeleteArchivedHalaqah(
-  halaqahId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  await deleteDoc(doc(db, 'archived_halaqahs', halaqahId));
-  await deleteDoc(doc(db, 'halaqahs', halaqahId)).catch(() => {});
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'halaqah',
-    entityId: halaqahId,
-    entityName: halaqahId,
-    notes: `حذف نهائي للحلقة المؤرشفة [${halaqahId}]`,
-  });
-}
-
-export function subscribeToArchivedHalaqahs(
-  tenantId: string | undefined,
-  callback: (archived: ArchivedHalaqah[]) => void
-): Unsubscribe {
-  const colRef = collection(db, 'archived_halaqahs');
-  const q = tenantId ? query(colRef, where('tenantId', '==', tenantId)) : colRef;
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const archived: ArchivedHalaqah[] = [];
-      snapshot.forEach((d) => {
-        archived.push({ id: d.id, ...(d.data() as Omit<ArchivedHalaqah, 'id'>) });
-      });
-      callback(archived);
-    },
-    (err) => {
-      console.warn('Notice subscribing to archived_halaqahs:', err);
-      callback([]);
+export async function restoreHalaqah(halaqahOrId: Halaqah | string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  const id = typeof halaqahOrId === 'string' ? halaqahOrId : halaqahOrId.id;
+  const h = typeof halaqahOrId === 'object' ? halaqahOrId : await HalaqahRepository.getById(id);
+  if (h) {
+    await HalaqahRepository.save({ ...h, isArchived: false, archiveReason: undefined, archivedAt: undefined });
+    if (actor) {
+      recordAuditLog(actor, 'halaqah', id, 'RESTORE_HALAQAH', {}, h.tenantId);
     }
-  );
-}
-
-export function subscribeToArchivedUsers(
-  tenantId: string | undefined,
-  callback: (archived: User[]) => void
-): Unsubscribe {
-  const colRef = collection(db, 'archived_users');
-  const q = tenantId ? query(colRef, where('tenantId', '==', tenantId)) : colRef;
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const archived: User[] = [];
-      snapshot.forEach((d) => {
-        archived.push({ id: d.id, ...(d.data() as User) });
-      });
-      callback(archived);
-    },
-    (err) => {
-      console.warn('Notice subscribing to archived_users:', err);
-      callback([]);
-    }
-  );
-}
-
-export function subscribeToArchivedTeachers(
-  tenantId: string | undefined,
-  callback: (archived: Teacher[]) => void
-): Unsubscribe {
-  const colRef = collection(db, 'archived_teachers');
-  const q = tenantId ? query(colRef, where('tenantId', '==', tenantId)) : colRef;
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const archived: Teacher[] = [];
-      snapshot.forEach((d) => {
-        const data = d.data() as Teacher;
-        // Strict isolation: absolutely no supervisors in teachers archive
-        if (data.staffRole === 'supervisor' || (data as any).role === 'supervisor' || data.archiveType === 'supervisor' || data.supervisorArchived || d.id.startsWith('usr_sup_')) {
-          return;
-        }
-        archived.push({ id: d.id, ...data, isArchived: true, teacherArchived: true, archiveType: 'teacher' });
-      });
-      callback(archived);
-    },
-    (err) => {
-      console.warn('Notice subscribing to archived_teachers:', err);
-      callback([]);
-    }
-  );
-}
-
-export function subscribeToArchivedSupervisors(
-  tenantId: string | undefined,
-  callback: (archived: User[]) => void
-): Unsubscribe {
-  const colRef = collection(db, 'archived_supervisors');
-  const q = tenantId ? query(colRef, where('tenantId', '==', tenantId)) : colRef;
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const archived: User[] = [];
-      snapshot.forEach((d) => {
-        const data = d.data() as User;
-        // Strict isolation: absolutely no teachers in supervisors archive
-        if (data.role === 'teacher' || data.staffRole === 'teacher' || data.archiveType === 'teacher' || data.teacherArchived || d.id.startsWith('usr_teacher_')) {
-          return;
-        }
-        archived.push({ id: d.id, ...data, isArchived: true, supervisorArchived: true, archiveType: 'supervisor' });
-      });
-      callback(archived);
-    },
-    (err) => {
-      console.warn('Notice subscribing to archived_supervisors:', err);
-      callback([]);
-    }
-  );
-}
-
-export async function saveUser(
-  user: Omit<User, 'password'> & { plainPassword?: string },
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'platform_users', user.id);
-  const existing = await getDoc(ref);
-  const isNew = !existing.exists();
-
-  const updatePayload: Record<string, any> = {
-    id: user.id,
-    name: user.name,
-    fullName: user.fullName || user.name,
-    phone: user.phone || '',
-    role: user.role,
-    isActive: user.isActive !== false,
-    halaqahId: user.halaqahId || null,
-    tenantId: user.tenantId || null,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (user.nationalId) updatePayload.nationalId = user.nationalId;
-  if (user.loginIdentifier) {
-    updatePayload.loginIdentifier = user.loginIdentifier;
-  } else if (user.role === 'student' && user.nationalId) {
-    updatePayload.loginIdentifier = user.nationalId;
-  } else if (user.phone) {
-    updatePayload.loginIdentifier = user.phone;
-  } else {
-    updatePayload.loginIdentifier = user.id;
   }
+}
 
-  if (user.email) updatePayload.email = user.email;
-  if (user.studentId) updatePayload.studentId = user.studentId;
-  if (user.teacherId) updatePayload.teacherId = user.teacherId;
-  if (user.studentIds) updatePayload.studentIds = user.studentIds;
-  if (user.supervisorScope) updatePayload.supervisorScope = user.supervisorScope;
-  if (user.customPermissions) updatePayload.customPermissions = user.customPermissions;
-  if (user.assignedStageIds) updatePayload.assignedStageIds = user.assignedStageIds;
-  if (user.assignedHalaqahIds) updatePayload.assignedHalaqahIds = user.assignedHalaqahIds;
-  if (user.isAllHalaqahs !== undefined) updatePayload.isAllHalaqahs = user.isAllHalaqahs;
-  if (user.delegations) updatePayload.delegations = user.delegations;
-
-  if (user.staffRole) updatePayload.staffRole = user.staffRole;
-  if (user.isArchived !== undefined) updatePayload.isArchived = user.isArchived;
-  if (user.teacherArchived !== undefined) updatePayload.teacherArchived = user.teacherArchived;
-  if (user.supervisorArchived !== undefined) updatePayload.supervisorArchived = user.supervisorArchived;
-  if (user.archivedAt) updatePayload.archivedAt = user.archivedAt;
-  if (user.archivedBy) updatePayload.archivedBy = user.archivedBy;
-  if (user.archiveReason) updatePayload.archiveReason = user.archiveReason;
-  if (user.permissionMode) updatePayload.permissionMode = user.permissionMode;
-
-  if (user.mustChangePassword !== undefined) {
-    updatePayload.mustChangePassword = user.mustChangePassword;
+export async function permanentlyDeleteArchivedHalaqah(halaqahId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await HalaqahRepository.delete(halaqahId);
+  if (actor) {
+    recordAuditLog(actor, 'halaqah', halaqahId, 'PERM_DELETE_HALAQAH', {}, undefined);
   }
+}
 
-  if (user.plainPassword) {
-    updatePayload.passwordHash = await hashPassword(user.plainPassword);
+export async function saveUser(user: User, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await UserRepository.save(user);
+  if (actor) {
+    recordAuditLog(actor, 'auth', user.id, 'SAVE_USER', { name: user.name, role: user.role }, user.tenantId);
   }
-
-  if (isNew) {
-    updatePayload.createdAt = new Date().toISOString();
-    if (!updatePayload.passwordHash) {
-      updatePayload.passwordHash = await hashPassword('Admin@123456');
-      updatePayload.mustChangePassword = true;
-    }
-    await setDoc(ref, sanitizeFirestoreData(updatePayload), { merge: true });
-  } else {
-    await setDoc(ref, sanitizeFirestoreData(updatePayload), { merge: true });
-  }
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'auth',
-    entityId: user.id,
-    entityName: user.name,
-    previousValue: isNew ? null : (existing.data() || null),
-    newValue: updatePayload,
-  });
 }
 
 export async function archiveUser(
-  user: User,
-  actor: { id: string; name: string; role: any },
-  reason?: string
+  userOrId: User | Teacher | string,
+  actorOrReason?: any,
+  reasonOrActor?: any
 ): Promise<void> {
-  const archivePayload: Record<string, any> = {
-    ...user,
-    isActive: user.isActive ?? false,
-    isArchived: user.isArchived ?? true,
-    teacherArchived: user.teacherArchived ?? false,
-    supervisorArchived: user.supervisorArchived ?? false,
-    archivedAt: user.archivedAt || new Date().toISOString(),
-    archivedBy: user.archivedBy || actor.name || 'مدير النظام',
-    archiveReason: reason || user.archiveReason || 'أرشفة يدوية تحسباً للخطأ',
-    updatedAt: new Date().toISOString(),
-  };
+  const id = typeof userOrId === 'string' ? userOrId : userOrId.id;
+  const actor = typeof actorOrReason === 'object' ? actorOrReason : typeof reasonOrActor === 'object' ? reasonOrActor : undefined;
+  const reason = typeof actorOrReason === 'string' ? actorOrReason : typeof reasonOrActor === 'string' ? reasonOrActor : 'أرشفة مستخدم';
 
-  // 1. Save to archived_users collection
-  await setDoc(doc(db, 'archived_users', user.id), sanitizeFirestoreData(archivePayload), { merge: true });
-
-  // 2. Mark as archived in platform_users using setDoc with merge so it never fails if document was not yet created
-  await setDoc(doc(db, 'platform_users', user.id), sanitizeFirestoreData({
-    id: user.id,
-    name: user.name,
-    fullName: user.fullName || user.name,
-    phone: user.phone || '',
-    role: user.role,
-    staffRole: user.staffRole,
-    tenantId: user.tenantId || null,
-    isActive: archivePayload.isActive,
-    isArchived: archivePayload.isArchived,
-    teacherArchived: archivePayload.teacherArchived,
-    supervisorArchived: archivePayload.supervisorArchived,
-    archivedAt: archivePayload.archivedAt,
-    archivedBy: archivePayload.archivedBy,
-    archiveReason: archivePayload.archiveReason,
-    updatedAt: archivePayload.updatedAt,
-  }), { merge: true });
-
-  // 3. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: user.id,
-    entityName: user.name,
-    previousValue: user,
-    newValue: archivePayload,
-    notes: `تمت أرشفة المستخدم [${user.name}] (${user.role}) ونقله للأرشيف لحفظ البيانات`,
-  });
-}
-
-export async function restoreUser(
-  userId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'platform_users', userId);
-  await setDoc(ref, {
-    isActive: true,
-    isArchived: false,
-    teacherArchived: false,
-    supervisorArchived: false,
-    archivedAt: deleteField(),
-    archivedBy: deleteField(),
-    archiveReason: deleteField(),
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-
-  // Remove from archived_users
-  await deleteDoc(doc(db, 'archived_users', userId)).catch(() => {});
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'auth',
-    entityId: userId,
-    entityName: userId,
-    previousValue: null,
-    newValue: { isActive: true, isArchived: false },
-    notes: `تمت استعادة المستخدم [${userId}] من الأرشيف بنجاح وإعادة تفعيل حسابه`,
-  });
-}
-
-export async function permanentlyDeleteUser(
-  userId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'platform_users', userId);
-  const existing = await getDoc(ref);
-  const data = existing.data();
-  await deleteDoc(ref).catch(() => {});
-  await deleteDoc(doc(db, 'archived_users', userId)).catch(() => {});
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: userId,
-    entityName: data?.name || userId,
-    notes: `تم حذف المستخدم [${userId}] نهائياً من النظام بعد تأكيد الإدارة`,
-  });
-}
-
-// -------------------------------------------------------------
-// Teachers Dedicated Archive Operations (Isolated)
-// -------------------------------------------------------------
-export async function archiveTeacherInDb(
-  teacher: Teacher,
-  actor: { id: string; name: string; role: any },
-  reason?: string
-): Promise<void> {
-  const nowIso = new Date().toISOString();
-  const archivePayload: Record<string, any> = {
-    ...teacher,
-    isActive: false,
-    isArchived: true,
-    teacherArchived: true,
-    supervisorArchived: false,
-    archiveType: 'teacher',
-    staffRole: 'teacher',
-    archivedAt: teacher.archivedAt || nowIso,
-    archivedBy: teacher.archivedBy || actor.name || 'مدير النظام',
-    archiveReason: reason || teacher.archiveReason || 'أرشفة المعلم تحسباً للخطأ',
-    updatedAt: nowIso,
-  };
-
-  // 1. Save to archived_teachers collection
-  await setDoc(doc(db, 'archived_teachers', teacher.id), sanitizeFirestoreData(archivePayload), { merge: true });
-
-  // 2. Remove from archived_supervisors if it was ever there mistakenly
-  await deleteDoc(doc(db, 'archived_supervisors', teacher.id)).catch(() => {});
-
-  // 3. Mark as archived in platform_users
-  await setDoc(doc(db, 'platform_users', teacher.id), sanitizeFirestoreData({
-    id: teacher.id,
-    name: teacher.name,
-    fullName: teacher.name,
-    phone: teacher.phone || '',
-    role: 'teacher',
-    staffRole: 'teacher',
-    tenantId: teacher.tenantId || null,
-    isActive: false,
-    isArchived: true,
-    teacherArchived: true,
-    supervisorArchived: false,
-    archiveType: 'teacher',
-    archivedAt: archivePayload.archivedAt,
-    archivedBy: archivePayload.archivedBy,
-    archiveReason: archivePayload.archiveReason,
-    updatedAt: nowIso,
-  }), { merge: true });
-
-  // 4. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: teacher.id,
-    entityName: teacher.name,
-    previousValue: teacher,
-    newValue: archivePayload,
-    notes: `تمت أرشفة المعلم [${teacher.name}] ونقله لأرشيف المعلمين المستقل`,
-  });
-}
-
-export async function restoreTeacherFromDb(
-  teacherId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const nowIso = new Date().toISOString();
-  // 1. Remove from archived_teachers collection
-  await deleteDoc(doc(db, 'archived_teachers', teacherId)).catch(() => {});
-  await deleteDoc(doc(db, 'archived_users', teacherId)).catch(() => {});
-
-  // 2. Update platform_users
-  await setDoc(doc(db, 'platform_users', teacherId), sanitizeFirestoreData({
-    isActive: true,
-    isArchived: false,
-    teacherArchived: false,
-    supervisorArchived: false,
-    archivedAt: null,
-    archivedBy: null,
-    archiveReason: null,
-    archiveType: null,
-    updatedAt: nowIso,
-  }), { merge: true });
-
-  // 3. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'auth',
-    entityId: teacherId,
-    entityName: teacherId,
-    previousValue: null,
-    newValue: { isActive: true, isArchived: false, teacherArchived: false },
-    notes: `تمت استعادة المعلم [${teacherId}] من أرشيف المعلمين وإعادة تفعيله`,
-  });
-}
-
-export async function permanentlyDeleteTeacherFromDb(
-  teacherId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  await deleteDoc(doc(db, 'archived_teachers', teacherId)).catch(() => {});
-  await deleteDoc(doc(db, 'archived_users', teacherId)).catch(() => {});
-  await deleteDoc(doc(db, 'platform_users', teacherId)).catch(() => {});
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: teacherId,
-    entityName: teacherId,
-    notes: `تم حذف المعلم [${teacherId}] نهائياً من النظام وأرشيف المعلمين`,
-  });
-}
-
-// -------------------------------------------------------------
-// Supervisors Dedicated Archive Operations (Isolated)
-// -------------------------------------------------------------
-export async function archiveSupervisorInDb(
-  supervisor: User,
-  actor: { id: string; name: string; role: any },
-  reason?: string
-): Promise<void> {
-  const nowIso = new Date().toISOString();
-  const archivePayload: Record<string, any> = {
-    ...supervisor,
-    role: 'supervisor',
-    staffRole: 'supervisor',
-    isActive: false,
-    isArchived: true,
-    supervisorArchived: true,
-    teacherArchived: false,
-    archiveType: 'supervisor',
-    archivedAt: supervisor.archivedAt || nowIso,
-    archivedBy: supervisor.archivedBy || actor.name || 'مدير النظام',
-    archiveReason: reason || supervisor.archiveReason || 'أرشفة المشرف تحسباً للخطأ',
-    updatedAt: nowIso,
-  };
-
-  // 1. Save to archived_supervisors collection
-  await setDoc(doc(db, 'archived_supervisors', supervisor.id), sanitizeFirestoreData(archivePayload), { merge: true });
-
-  // 2. Remove from archived_teachers if it was ever there mistakenly
-  await deleteDoc(doc(db, 'archived_teachers', supervisor.id)).catch(() => {});
-
-  // 3. Mark as archived in platform_users
-  await setDoc(doc(db, 'platform_users', supervisor.id), sanitizeFirestoreData({
-    id: supervisor.id,
-    name: supervisor.name,
-    fullName: supervisor.fullName || supervisor.name,
-    phone: supervisor.phone || '',
-    role: 'supervisor',
-    staffRole: 'supervisor',
-    tenantId: supervisor.tenantId || null,
-    isActive: false,
-    isArchived: true,
-    supervisorArchived: true,
-    teacherArchived: false,
-    archiveType: 'supervisor',
-    archivedAt: archivePayload.archivedAt,
-    archivedBy: archivePayload.archivedBy,
-    archiveReason: archivePayload.archiveReason,
-    updatedAt: nowIso,
-  }), { merge: true });
-
-  // 4. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: supervisor.id,
-    entityName: supervisor.name,
-    previousValue: supervisor,
-    newValue: archivePayload,
-    notes: `تمت أرشفة المشرف [${supervisor.name}] ونقله لأرشيف المشرفين المستقل`,
-  });
-}
-
-export async function restoreSupervisorFromDb(
-  supervisorId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const nowIso = new Date().toISOString();
-  // 1. Remove from archived_supervisors collection
-  await deleteDoc(doc(db, 'archived_supervisors', supervisorId)).catch(() => {});
-  await deleteDoc(doc(db, 'archived_users', supervisorId)).catch(() => {});
-
-  // 2. Update platform_users
-  await setDoc(doc(db, 'platform_users', supervisorId), sanitizeFirestoreData({
-    isActive: true,
-    isArchived: false,
-    supervisorArchived: false,
-    teacherArchived: false,
-    archivedAt: null,
-    archivedBy: null,
-    archiveReason: null,
-    archiveType: null,
-    updatedAt: nowIso,
-  }), { merge: true });
-
-  // 3. Record audit log
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'auth',
-    entityId: supervisorId,
-    entityName: supervisorId,
-    previousValue: null,
-    newValue: { isActive: true, isArchived: false, supervisorArchived: false },
-    notes: `تمت استعادة المشرف [${supervisorId}] من أرشيف المشرفين وإعادة تفعيله`,
-  });
-}
-
-export async function permanentlyDeleteSupervisorFromDb(
-  supervisorId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  await deleteDoc(doc(db, 'archived_supervisors', supervisorId)).catch(() => {});
-  await deleteDoc(doc(db, 'archived_users', supervisorId)).catch(() => {});
-  await deleteDoc(doc(db, 'platform_users', supervisorId)).catch(() => {});
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'auth',
-    entityId: supervisorId,
-    entityName: supervisorId,
-    notes: `تم حذف المشرف [${supervisorId}] نهائياً من النظام وأرشيف المشرفين`,
-  });
-}
-
-export async function deleteUser(
-  userId: string,
-  actor: { id: string; name: string; role: any },
-  userDataFallback?: User
-): Promise<void> {
-  const ref = doc(db, 'platform_users', userId);
-  const existing = await getDoc(ref);
-  const data = existing.exists() ? (existing.data() as User) : userDataFallback;
-  if (data) {
-    await archiveUser(data, actor, 'أرشفة المستخدم عند الحذف تحسباً للخطأ');
-  } else {
-    await permanentlyDeleteUser(userId, actor);
-  }
-}
-
-export async function saveDailySessionRecord(
-  record: DailySessionRecord,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'daily_records', record.id);
-  const existing = await getDoc(ref);
-  const isNew = !existing.exists();
-
-  await setDoc(ref, sanitizeFirestoreData({
-    ...record,
-    updatedAt: new Date().toISOString(),
-    ...(isNew ? { createdAt: new Date().toISOString() } : {}),
-  }));
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'session_record',
-    entityId: record.id,
-    entityName: `سجل طالب ${record.studentId} - ${record.date}`,
-    previousValue: isNew ? null : (existing.data() || null),
-    newValue: record,
-  });
-}
-
-export async function saveBulkAttendance(
-  records: DailySessionRecord[],
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  for (const rec of records) {
-    const ref = doc(db, 'daily_records', rec.id);
-    await setDoc(ref, sanitizeFirestoreData({
-      ...rec,
-      updatedAt: new Date().toISOString(),
-      createdAt: rec.createdAt || new Date().toISOString(),
-    }));
-  }
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'bulk_attendance',
-    entityType: 'session_record',
-    entityId: `bulk_${records[0]?.date || 'date'}`,
-    entityName: `رصد حضور جماعي (${records.length} طالب)`,
-    newValue: { count: records.length, date: records[0]?.date },
-  });
-}
-
-export async function saveSpellingLesson(
-  lesson: SpellingLesson,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'spelling_lessons', lesson.id);
-  const cleanLesson = sanitizeFirestoreData(lesson);
-  await setDoc(ref, cleanLesson, { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'lesson',
-    entityId: lesson.id,
-    entityName: `الدرس ${lesson.lessonNumber}: ${lesson.title}`,
-    newValue: cleanLesson,
-  });
-}
-
-export async function deleteSpellingLesson(
-  lessonId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'spelling_lessons', lessonId);
-  const existing = await getDoc(ref);
-  if (existing.exists()) {
-    const data = existing.data();
-    await deleteDoc(ref);
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'lesson',
-      entityId: lessonId,
-      entityName: data.title,
-    });
-  }
-}
-
-export async function saveEducationalPlanWeek(
-  week: EducationalPlanWeek,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'educational_plan', week.id);
-  await setDoc(ref, sanitizeFirestoreData(week), { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'plan',
-    entityId: week.id,
-    entityName: `الأسبوع ${week.weekNumber}: ${week.educationalGoal || week.motto}`,
-    newValue: week,
-  });
-}
-
-export async function saveBulkEducationalPlanWeeks(
-  weeks: EducationalPlanWeek[],
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  for (const week of weeks) {
-    const ref = doc(db, 'educational_plan', week.id);
-    await setDoc(ref, sanitizeFirestoreData(week), { merge: true });
-  }
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'plan',
-    entityId: `bulk_${Date.now()}`,
-    entityName: `تحديث دفعة أسابيع خطة تربوية (${weeks.length} أسبوع)`,
-    notes: `تم حفظ/استيراد ${weeks.length} أسبوع للخطة التربوية بنجاح`,
-  });
-}
-
-export async function deleteEducationalPlanWeek(
-  weekId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'educational_plan', weekId);
-  await deleteDoc(ref);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'plan',
-    entityId: weekId,
-    entityName: `أسبوع خطة تربوية: ${weekId}`,
-  });
-}
-
-export async function deleteBulkEducationalPlanWeeks(
-  weekIds: string[],
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  if (!weekIds || weekIds.length === 0) return;
-  for (const weekId of weekIds) {
-    const ref = doc(db, 'educational_plan', weekId);
-    await deleteDoc(ref).catch(() => {});
-  }
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'plan',
-    entityId: `bulk_del_${Date.now()}`,
-    entityName: `حذف جماعي لأسابيع الخطة (${weekIds.length} أسبوع)`,
-    notes: `تم حذف ${weekIds.length} أسبوع من الخطة بنجاح`,
-  });
-}
-
-// -------------------------------------------------------------
-// SEASONAL PROGRAMS CRUD OPERATIONS
-// -------------------------------------------------------------
-export async function saveSeasonalProgram(
-  program: SeasonalProgram,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'seasonal_programs', program.id);
-  const cleanProgram = sanitizeFirestoreData(program);
-  await setDoc(ref, cleanProgram, { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'program',
-    entityId: program.id,
-    entityName: `برنامج موسمي: ${program.title}`,
-    newValue: cleanProgram,
-  });
-}
-
-export async function deleteSeasonalProgram(
-  programId: string,
-  programTitle: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'seasonal_programs', programId);
-  await deleteDoc(ref);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'program',
-    entityId: programId,
-    entityName: `برنامج موسمي: ${programTitle}`,
-  });
-}
-
-export async function saveSeasonalActivity(
-  activity: SeasonalActivity,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'seasonal_activities', activity.id);
-  const cleanActivity = sanitizeFirestoreData(activity);
-  await setDoc(ref, cleanActivity, { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'activity',
-    entityId: activity.id,
-    entityName: `نشاط موسمي: ${activity.title}`,
-    newValue: cleanActivity,
-  });
-}
-
-export async function deleteSeasonalActivity(
-  activityId: string,
-  activityTitle: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'seasonal_activities', activityId);
-  await deleteDoc(ref);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'activity',
-    entityId: activityId,
-    entityName: `نشاط موسمي: ${activityTitle}`,
-  });
-}
-
-export async function saveSeasonalParticipation(
-  participation: SeasonalParticipation,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'seasonal_participations', participation.id);
-  await setDoc(ref, sanitizeFirestoreData(participation), { merge: true });
-}
-
-export async function deleteSeasonalParticipation(
-  participationId: string
-): Promise<void> {
-  const ref = doc(db, 'seasonal_participations', participationId);
-  await deleteDoc(ref);
-}
-
-export async function saveAcademicConfig(
-  config: AcademicYearConfig,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'academic_years', config.id);
-  const cleanConfig = sanitizeFirestoreData({
-    ...config,
-    updatedAt: new Date().toISOString(),
-  });
-  await setDoc(ref, cleanConfig, { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'system',
-    entityId: config.id,
-    entityName: config.name,
-    newValue: cleanConfig,
-  });
-}
-
-export async function saveReportLog(log: ReportLog): Promise<void> {
-  const ref = doc(db, 'report_logs', log.id);
-  const cleanLog = sanitizeFirestoreData(log);
-  await setDoc(ref, cleanLog, { merge: true });
-}
-
-export async function changeUserPassword(
-  userId: string,
-  newPlainPass: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const newHash = await hashPassword(newPlainPass);
-  
-  await updateDoc(doc(db, 'platform_users', userId), {
-    passwordHash: newHash,
-    mustChangePassword: false,
-    updatedAt: new Date().toISOString(),
-  }).catch(() => {});
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'password_change',
-    entityType: 'auth',
-    entityId: userId,
-    entityName: `تغيير كلمة مرور للمستخدم ${userId}`,
-  });
-}
-
-export async function saveBadgeToDb(
-  badge: StudentBadge,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'badges', badge.id);
-  const cleanBadge = sanitizeFirestoreData(badge);
-  await setDoc(ref, cleanBadge, { merge: true });
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'create',
-    entityType: 'badge',
-    entityId: badge.id,
-    entityName: `وسام ${badge.badgeType} للطالب ${badge.studentName}`,
-    newValue: cleanBadge,
-  });
-}
-
-export async function deleteBadgeFromDb(
-  badgeId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'badges', badgeId);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    const data = snap.data();
-    await deleteDoc(ref);
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'badge',
-      entityId: badgeId,
-      entityName: `حذف وسام ${data?.badgeType} للطالب ${data?.studentName}`,
-      previousValue: data,
-    });
-  }
-}
-
-export async function saveRemedialPlanToDb(
-  plan: RemedialActionPlan,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'remedial_plans', plan.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
-
-  const payload = sanitizeFirestoreData({
-    ...plan,
-    updatedAt: new Date().toISOString(),
-    ...(isNew ? { createdAt: new Date().toISOString() } : {}),
-  });
-
-  await setDoc(ref, payload);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'intervention',
-    entityId: plan.id,
-    entityName: `خطة تدخل للطالب ${plan.studentName}: ${plan.title}`,
-    previousValue: isNew ? null : (snap.data() || null),
-    newValue: payload,
-  });
-}
-
-export async function resolveRemedialPlanInDb(
-  planId: string,
-  notes: string | undefined,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'remedial_plans', planId);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    const updatePayload: Record<string, any> = {
-      status: 'resolved',
-      updatedAt: new Date().toISOString(),
-    };
-    if (notes) {
-      updatePayload.notes = notes;
+  const u = typeof userOrId === 'object' ? (userOrId as any) : await UserRepository.getById(id);
+  if (u) {
+    await UserRepository.save({ ...u, isArchived: true, archiveReason: reason, archivedAt: new Date().toISOString() });
+    if (actor) {
+      recordAuditLog(actor, 'auth', id, 'ARCHIVE_USER', { reason }, u.tenantId);
     }
-    await updateDoc(ref, updatePayload);
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'intervention',
-      entityId: planId,
-      entityName: `إغلاق وتدارك خطة التدخل ${planId}`,
-      previousValue: snap.data(),
-      newValue: { ...snap.data(), ...updatePayload },
+  }
+}
+
+export async function restoreUser(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  const u = await UserRepository.getById(userId);
+  if (u) {
+    await UserRepository.save({ ...u, isArchived: false, archiveReason: undefined, archivedAt: undefined });
+    if (actor) {
+      recordAuditLog(actor, 'auth', userId, 'RESTORE_USER', {}, u.tenantId);
+    }
+  }
+}
+
+export async function permanentlyDeleteUser(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await UserRepository.delete(userId);
+  if (actor) {
+    recordAuditLog(actor, 'auth', userId, 'PERM_DELETE_USER', {}, undefined);
+  }
+}
+
+export async function archiveTeacherInDb(
+  teacherOrId: Teacher | User | string,
+  actorOrReason?: any,
+  reasonOrActor?: any
+): Promise<void> {
+  return archiveUser(teacherOrId, actorOrReason, reasonOrActor);
+}
+
+export async function restoreTeacherFromDb(teacherId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  return restoreUser(teacherId, actor);
+}
+
+export async function permanentlyDeleteTeacherFromDb(teacherId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  return permanentlyDeleteUser(teacherId, actor);
+}
+
+export async function archiveSupervisorInDb(
+  supervisorOrId: User | string,
+  actorOrReason?: any,
+  reasonOrActor?: any
+): Promise<void> {
+  return archiveUser(supervisorOrId, actorOrReason, reasonOrActor);
+}
+
+export async function restoreSupervisorFromDb(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  return restoreUser(userId, actor);
+}
+
+export async function permanentlyDeleteSupervisorFromDb(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  return permanentlyDeleteUser(userId, actor);
+}
+
+export async function deleteUser(userId: string, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await UserRepository.delete(userId);
+  if (actor) {
+    recordAuditLog(actor, 'auth', userId, 'DELETE_USER', {}, undefined);
+  }
+}
+
+export async function saveDailySessionRecord(record: DailySessionRecord, actor?: { id: string; name: string; role: any }): Promise<void> {
+  await DailyRecordRepository.save(record);
+  if (actor) {
+    recordAuditLog(actor, 'session_record', record.id, 'SAVE_DAILY_RECORD', { studentId: record.studentId, date: record.date }, record.tenantId);
+  }
+}
+
+export async function saveBulkAttendance(records: DailySessionRecord[], actor?: { id: string; name: string; role: any }): Promise<void> {
+  await DailyRecordRepository.bulkSave(records);
+  if (actor && records.length > 0) {
+    recordAuditLog(actor, 'session_record', 'bulk', 'BULK_ATTENDANCE', { count: records.length }, records[0].tenantId);
+  }
+}
+
+export async function saveSpellingLesson(lesson: SpellingLesson, _actor?: any): Promise<void> {
+  await AcademicRepository.saveSpellingLesson(lesson);
+}
+
+export async function deleteSpellingLesson(lessonId: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/spelling_lessons/${lessonId}`);
+}
+
+export async function saveEducationalPlanWeek(plan: EducationalPlanWeek, _actor?: any): Promise<void> {
+  await AcademicRepository.saveEducationalPlan(plan);
+}
+
+export async function saveBulkEducationalPlanWeeks(plans: EducationalPlanWeek[], _actor?: any): Promise<void> {
+  await apiClient.post('/educational_plan_weeks/bulk', { items: plans });
+}
+
+export async function deleteEducationalPlanWeek(id: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/educational_plan_weeks/${id}`);
+}
+
+export async function deleteBulkEducationalPlanWeeks(ids: string[], _actor?: any): Promise<void> {
+  for (const id of ids) {
+    await apiClient.delete(`/educational_plan_weeks/${id}`);
+  }
+}
+
+export async function saveSeasonalProgram(program: SeasonalProgram, _actor?: any): Promise<void> {
+  await AcademicRepository.saveSeasonalProgram(program);
+}
+
+export async function deleteSeasonalProgram(id: string, _titleOrActor?: any, _actor?: any): Promise<void> {
+  await AcademicRepository.deleteSeasonalProgram(id);
+}
+
+export async function saveSeasonalActivity(activity: SeasonalActivity, _actor?: any): Promise<void> {
+  await AcademicRepository.saveSeasonalActivity(activity);
+}
+
+export async function deleteSeasonalActivity(id: string, _titleOrActor?: any, _actor?: any): Promise<void> {
+  await AcademicRepository.deleteSeasonalActivity(id);
+}
+
+export async function saveSeasonalParticipation(part: SeasonalParticipation, _actor?: any): Promise<void> {
+  await AcademicRepository.saveSeasonalParticipation(part);
+}
+
+export async function deleteSeasonalParticipation(id: string, _actor?: any): Promise<void> {
+  await AcademicRepository.deleteSeasonalParticipation(id);
+}
+
+export async function saveAcademicConfig(config: AcademicYearConfig, _actor?: any): Promise<void> {
+  await TenantRepository.saveAcademicYear(config);
+}
+
+export async function saveReportLog(log: ReportLog, _actor?: any): Promise<void> {
+  await AdminRepository.saveReportLog(log);
+}
+
+export async function changeUserPassword(userId: string, newPass: string, _actor?: any): Promise<boolean> {
+  try {
+    await apiClient.post('/auth/update-password', { userId, newPassword: newPass });
+    return true;
+  } catch (e) {
+    console.error('Password change error:', e);
+    return false;
+  }
+}
+
+export async function saveBadgeToDb(badge: StudentBadge, _actor?: any): Promise<void> {
+  await AdminRepository.saveBadge(badge);
+}
+
+export async function deleteBadgeFromDb(id: string, _actor?: any): Promise<void> {
+  await AdminRepository.deleteBadge(id);
+}
+
+export async function saveRemedialPlanToDb(plan: RemedialActionPlan, _actor?: any): Promise<void> {
+  await AdminRepository.saveRemedialPlan(plan);
+}
+
+export async function resolveRemedialPlanInDb(id: string, notes?: string, _actor?: any): Promise<void> {
+  const existing = await apiClient.get<RemedialActionPlan>(`/remedial_plans/${id}`);
+  if (existing) {
+    await AdminRepository.saveRemedialPlan({
+      ...existing,
+      status: 'resolved',
+      notes: notes || existing.notes,
+      updatedAt: new Date().toISOString(),
     });
   }
 }
 
 export async function saveTenantToDb(
   tenant: MosqueComplexTenant,
-  actor: { id: string; name: string; role: any },
-  adminPlainPassword?: string
+  _actor?: any,
+  _initialPassword?: string
 ): Promise<void> {
-  const ref = doc(db, 'tenants', tenant.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
+  await TenantRepository.saveTenant(tenant);
+}
 
-  await setDoc(ref, sanitizeFirestoreData(tenant));
-
-  // Directly synchronize / provision the campus_admin user in platform_users (the source of truth)
-  try {
-    const phone = tenant.contactPhone || (tenant as any).supervisorPhone || (tenant as any).phone || '';
-    const cleanPhone = phone.replace(/[^\d+]/g, '').trim();
-
-    // Query for existing campus_admin for this tenant
-    const qAdmin = query(
-      collection(db, 'platform_users'),
-      where('tenantId', '==', tenant.id),
-      where('role', '==', 'campus_admin')
-    );
-    const snapAdmin = await getDocs(qAdmin);
-
-    const updatePayload: Record<string, any> = {
-      name: tenant.supervisorName || `مدير ${tenant.name}`,
-      fullName: tenant.supervisorName || `مدير ${tenant.name}`,
-      phone: phone || '',
-      loginIdentifier: cleanPhone || phone || `admin_${tenant.id}`,
-      email: tenant.email || undefined,
-      role: 'campus_admin',
-      staffRole: 'supervisor',
-      tenantId: tenant.id,
-      organizationId: tenant.organizationId || null,
-      isActive: tenant.isActive !== false,
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (adminPlainPassword) {
-      updatePayload.passwordHash = await hashPassword(adminPlainPassword);
-      updatePayload.mustChangePassword = false;
-    }
-
-    if (!snapAdmin.empty) {
-      // Update existing campus_admin in platform_users
-      const existingAdminDoc = snapAdmin.docs[0];
-      await setDoc(
-        doc(db, 'platform_users', existingAdminDoc.id),
-        sanitizeFirestoreData(updatePayload),
-        { merge: true }
-      );
-    } else {
-      // Create new campus_admin in platform_users
-      const adminDocId = `usr_adm_${tenant.id}`;
-      if (!updatePayload.passwordHash) {
-        updatePayload.passwordHash = await hashPassword('Admin@123456');
-      }
-      updatePayload.id = adminDocId;
-      updatePayload.createdAt = new Date().toISOString();
-      updatePayload.mustChangePassword = false;
-      updatePayload.customPermissions = [];
-
-      await setDoc(
-        doc(db, 'platform_users', adminDocId),
-        sanitizeFirestoreData(updatePayload),
-        { merge: true }
-      );
-    }
-  } catch (syncErr) {
-    console.warn('Notice synchronizing tenant admin in platform_users:', syncErr);
+export async function updateTenantAdminPasswordInDb(tenantId: string, newPass: string, _actor?: any): Promise<boolean> {
+  const users = await UserRepository.getAll(tenantId);
+  const admin = users.find((u) => u.role === 'admin' || u.role === 'campus_admin');
+  if (admin) {
+    return changeUserPassword(admin.id, newPass, _actor);
   }
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'tenant',
-    entityId: tenant.id,
-    entityName: `مجمع: ${tenant.name}`,
-    previousValue: isNew ? null : (snap.data() || null),
-    newValue: tenant,
-  });
+  return false;
 }
 
-export async function updateTenantAdminPasswordInDb(
-  tenantId: string,
-  newPlainPassword: string,
-  actor: { id: string; name: string; role: any }
-): Promise<boolean> {
-  try {
-    const cleanPass = newPlainPassword.trim();
-    if (!cleanPass) return false;
-
-    const newHash = await hashPassword(cleanPass);
-    const qAdmin = query(
-      collection(db, 'platform_users'),
-      where('tenantId', '==', tenantId),
-      where('role', '==', 'campus_admin')
-    );
-    const snapAdmin = await getDocs(qAdmin);
-
-    if (!snapAdmin.empty) {
-      for (const adminDoc of snapAdmin.docs) {
-        await updateDoc(doc(db, 'platform_users', adminDoc.id), {
-          passwordHash: newHash,
-          mustChangePassword: false,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    } else {
-      // Create admin document if missing
-      const adminDocId = `usr_adm_${tenantId}`;
-      await setDoc(
-        doc(db, 'platform_users', adminDocId),
-        sanitizeFirestoreData({
-          id: adminDocId,
-          role: 'campus_admin',
-          staffRole: 'supervisor',
-          tenantId: tenantId,
-          passwordHash: newHash,
-          isActive: true,
-          mustChangePassword: false,
-          updatedAt: new Date().toISOString(),
-        }),
-        { merge: true }
-      );
-    }
-
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'password_change',
-      entityType: 'auth',
-      entityId: `adm_${tenantId}`,
-      entityName: `تحديث كلمة مرور مدير المجمع (${tenantId}) في جدول المصادقة الرئيسي`,
-    });
-
-    return true;
-  } catch (err) {
-    console.error('Failed to update tenant admin password in db:', err);
-    return false;
-  }
+export async function deleteTenantFromDb(tenantId: string, _actor?: any): Promise<void> {
+  await TenantRepository.deleteTenant(tenantId);
 }
 
-export async function deleteTenantFromDb(
-  tenantId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  if (tenantId === 'al-furqan') {
-    throw new Error('لا يمكن حذف مجمع الفرقان النموذجي التجريبي حمايةً لمنصة التجربة.');
-  }
-  const ref = doc(db, 'tenants', tenantId);
-  const snap = await getDoc(ref);
-  const data = snap.exists() ? snap.data() : null;
-
-  await deleteDoc(ref);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'tenant',
-    entityId: tenantId,
-    entityName: `مجمع: ${data?.name || tenantId}`,
-    previousValue: data,
-    newValue: null,
-  });
+export async function saveStageToDb(stage: EducationalStage, _actor?: any): Promise<void> {
+  await TenantRepository.saveStage(stage);
 }
 
-export async function saveStageToDb(
-  stage: EducationalStage,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'educational_stages', stage.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
-
-  await setDoc(ref, sanitizeFirestoreData(stage));
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'stage',
-    entityId: stage.id,
-    entityName: `المرحلة: ${stage.name}`,
-    previousValue: isNew ? null : (snap.data() || null),
-    newValue: stage,
-  });
+export async function deleteStageFromDb(stageId: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/stages/${stageId}`);
 }
 
-export async function deleteStageFromDb(
-  stageId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'educational_stages', stageId);
-  const snap = await getDoc(ref);
-  const data = snap.exists() ? snap.data() : null;
-
-  await deleteDoc(ref);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'delete',
-    entityType: 'stage',
-    entityId: stageId,
-    entityName: `حذف المرحلة: ${data?.name || stageId}`,
-    previousValue: data,
-    newValue: null,
-  });
+export async function saveArchiveToDb(archive: AcademicTermArchive, _actor?: any): Promise<void> {
+  await AcademicRepository.saveArchive(archive);
 }
 
-export async function saveArchiveToDb(
-  archive: AcademicTermArchive,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'academic_archives', archive.id);
-  await setDoc(ref, archive);
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'archive_term',
-    entityType: 'archive',
-    entityId: archive.id,
-    entityName: `أرشيف ${archive.academicYear} - ${archive.termName}`,
-    newValue: {
-      id: archive.id,
-      academicYear: archive.academicYear,
-      termName: archive.termName,
-      totalStudents: archive.totalStudents,
-      overallMasteryRate: archive.overallMasteryRate,
-    },
-    notes: `أرشفة فترية شاملة وإغلاق الفصل للمجمع: ${archive.tenantName}`,
-  });
+export async function saveOrganizationToDb(org: Organization, _actor?: any): Promise<void> {
+  await AdminRepository.saveOrganization(org);
 }
 
-export async function saveOrganizationToDb(
-  org: Organization,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'organizations', org.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
-
-  await setDoc(ref, sanitizeFirestoreData({
-    ...org,
-    updatedAt: new Date().toISOString(),
-    ...(isNew ? { createdAt: new Date().toISOString() } : {}),
-  }));
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: isNew ? 'create' : 'update',
-    entityType: 'organization' as any,
-    entityId: org.id,
-    entityName: `الجمعية/المؤسسة: ${org.name}`,
-    previousValue: isNew ? null : (snap.data() || null),
-    newValue: org,
-  });
+export async function deleteOrganizationFromDb(id: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/organizations/${id}`);
 }
 
-export async function deleteOrganizationFromDb(
-  orgId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'organizations', orgId);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    const data = snap.data();
-    await deleteDoc(ref);
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'organization' as any,
-      entityId: orgId,
-      entityName: (data as any)?.name || orgId,
-      previousValue: data,
-    });
-  }
-}
-
-// -------------------------------------------------------------
-// Universal Quran Planning Engine Persistence & Subscriptions
-// -------------------------------------------------------------
-// P2: Quran Engine Cloud Firestore Subscriptions & Storage
-// (Firestore Cloud Database = Sole Source of Truth)
-// -------------------------------------------------------------
-
-export const LOCAL_STORAGE_KEY_QURAN_PLANS = 'quran_engine_student_plans_v1';
-export const LOCAL_STORAGE_KEY_STAGE_CONFIGS = 'quran_engine_stage_configs_v1';
-
-export function subscribeToQuranPlans(callback: (plans: StudentQuranPlan[]) => void): Unsubscribe {
-  return onSnapshot(
-    collection(db, 'quran_plans'),
-    (snapshot) => {
-      const plans: StudentQuranPlan[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as any;
-        if (
-          data &&
-          data.generatedPlan &&
-          Array.isArray(data.generatedPlan.dailyPlans) &&
-          data.generatedPlan.dailyPlans.length > 0
-        ) {
-          plans.push({ id: docSnap.id, ...(data as Omit<StudentQuranPlan, 'id'>) });
-        }
-      });
-      callback(plans);
-    },
-    (err) => {
-      console.warn('Quran plans subscription notice:', err.message);
-      callback([]);
-    }
-  );
-}
-
-export async function saveQuranPlanToDb(
-  plan: StudentQuranPlan,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  // Persist directly to Firestore (Sole source of truth)
-  const ref = doc(db, 'quran_plans', plan.id);
-  const cleanPlan = sanitizeFirestoreData(plan);
-  await setDoc(ref, cleanPlan, { merge: true });
-
-  // Record audit log
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'quran_plan' as any,
-      entityId: plan.id,
-      entityName: `خطة قرآنية للطالب: ${plan.studentId}`,
-      newValue: {
-        id: plan.id,
-        studentId: plan.studentId,
-        planType: plan.planType,
-        planVersion: plan.planVersion,
-        status: plan.status,
-      },
-    });
-  }
+export async function saveQuranPlanToDb(plan: StudentQuranPlan, _actor?: any): Promise<void> {
+  await AcademicRepository.saveQuranPlan(plan);
 }
 
 export async function getQuranPlansForStudentFromDb(studentId: string): Promise<StudentQuranPlan[]> {
-  try {
-    const q = query(collection(db, 'quran_plans'), where('studentId', '==', studentId));
-    const snap = await getDocs(q);
-    const plans: StudentQuranPlan[] = [];
-    snap.forEach((docSnap) => {
-      plans.push(normalizeStudentQuranPlan({ id: docSnap.id, ...(docSnap.data() as any) }));
-    });
-    return plans;
-  } catch (err) {
-    console.warn('Firestore query for student plans notice:', err);
-    return [];
-  }
+  const plans = await AcademicRepository.getQuranPlans();
+  return plans.filter((p) => p.studentId === studentId);
 }
 
-export async function deleteQuranPlanFromDb(
-  planId: string,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'quran_plans', planId);
-  await deleteDoc(ref);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'quran_plan' as any,
-      entityId: planId,
-      entityName: `حذف خطة قرآنية: ${planId}`,
-    });
-  }
+export async function deleteQuranPlanFromDb(planId: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/quran_plans/${planId}`);
 }
 
-export function subscribeToQuranStageConfigs(callback: (configs: StageQuranConfig[]) => void): Unsubscribe {
-  return onSnapshot(
-    collection(db, 'quran_stage_configs'),
-    (snapshot) => {
-      const configs: StageQuranConfig[] = [];
-      snapshot.forEach((docSnap) => {
-        configs.push({ id: docSnap.id, ...(docSnap.data() as Omit<StageQuranConfig, 'id'>) });
-      });
-      if (configs.length === 0) {
-        callback(DEFAULT_STAGE_CONFIGS);
-        return;
-      }
-      callback(configs);
-    },
-    (err) => {
-      console.warn('Quran stage configs subscription notice:', err.message);
-      callback(DEFAULT_STAGE_CONFIGS);
-    }
-  );
+export async function saveQuranStageConfigToDb(config: StageQuranConfig, _actor?: any): Promise<void> {
+  await AcademicRepository.saveStageQuranConfig(config);
 }
 
-export async function saveQuranStageConfigToDb(
-  config: StageQuranConfig,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'quran_stage_configs', config.id);
-  const cleanConfig = sanitizeFirestoreData(config);
-  await setDoc(ref, cleanConfig, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'stage_config' as any,
-      entityId: config.id,
-      entityName: `قالب خطة مرحلة: ${config.name}`,
-      newValue: cleanConfig,
-    });
-  }
+export async function deleteQuranStageConfigFromDb(id: string, _actor?: any): Promise<void> {
+  await apiClient.delete(`/quran_stage_configs/${id}`);
 }
 
-export async function deleteQuranStageConfigFromDb(
-  configId: string,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'quran_stage_configs', configId);
-  await deleteDoc(ref);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'stage_config' as any,
-      entityId: configId,
-      entityName: `حذف قالب خطة مرحلة: ${configId}`,
-    });
-  }
-}
-
-export async function resetQuranStageConfigsInDb(
-  actor?: { id: string; name: string; role: any }
-): Promise<StageQuranConfig[]> {
+export async function resetQuranStageConfigsInDb(_actor?: any): Promise<StageQuranConfig[]> {
   for (const cfg of DEFAULT_STAGE_CONFIGS) {
-    const ref = doc(db, 'quran_stage_configs', cfg.id);
-    await setDoc(ref, sanitizeFirestoreData(cfg), { merge: true });
+    await AcademicRepository.saveStageQuranConfig(cfg);
   }
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'stage_config' as any,
-      entityId: 'reset_default_configs',
-      entityName: 'استعادة قوالب المراحل الافتراضية',
-    });
-  }
-
   return DEFAULT_STAGE_CONFIGS;
 }
 
-// -------------------------------------------------------------
-// P4: Admissions & Registration Mutations
-// -------------------------------------------------------------
-
-export async function saveAdmissionsRequest(
-  request: RegistrationRequest,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'registration_requests', request.id);
-  const cleanRequest = sanitizeFirestoreData({
-    ...request,
-    updatedAt: new Date().toISOString(),
-    createdAt: request.createdAt || new Date().toISOString(),
-  });
-  await setDoc(ref, cleanRequest, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'create',
-      entityType: 'registration_request' as any,
-      entityId: request.id,
-      entityName: request.studentName,
-      newValue: cleanRequest,
-    });
-  }
+export async function saveAdmissionsRequest(req: RegistrationRequest, _actor?: any): Promise<void> {
+  await AdminRepository.saveRegistrationRequest(req);
 }
 
 export async function updateAdmissionsStatus(
-  requestId: string,
+  id: string,
   status: AdmissionStatus,
-  extras?: Partial<RegistrationRequest>,
-  actor?: { id: string; name: string; role: any }
+  extras?: { interviewNotes?: string; notes?: string } | string,
+  _actor?: any
 ): Promise<void> {
-  const ref = doc(db, 'registration_requests', requestId);
-  const snap = await getDoc(ref);
-  const previousValue = snap.exists() ? snap.data() : null;
-
-  const cleanUpdates = sanitizeFirestoreData({
-    status,
-    ...extras,
-    updatedAt: new Date().toISOString(),
-  });
-  await updateDoc(ref, cleanUpdates);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'registration_request' as any,
-      entityId: requestId,
-      entityName: previousValue?.studentName || requestId,
-      previousValue,
-      newValue: { status, ...extras },
+  const req = await apiClient.get<RegistrationRequest>(`/registration_requests/${id}`);
+  if (req) {
+    const notes = typeof extras === 'string' ? extras : extras?.notes || extras?.interviewNotes;
+    await AdminRepository.saveRegistrationRequest({
+      ...req,
+      status,
+      interviewNotes: notes || req.interviewNotes,
     });
   }
 }
 
-// -------------------------------------------------------------
-// P5: Financial Records Mutations
-// -------------------------------------------------------------
-
-export async function saveFinancialRecord(
-  record: StudentFinancialRecord,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'financial_records', record.id);
-  const isNew = !(await getDoc(ref)).exists();
-
-  const cleanRecord = sanitizeFirestoreData({
-    ...record,
-    updatedAt: new Date().toISOString(),
-    createdAt: record.createdAt || new Date().toISOString(),
-  });
-  await setDoc(ref, cleanRecord, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: isNew ? 'create' : 'update',
-      entityType: 'financial_record' as any,
-      entityId: record.id,
-      entityName: record.studentName,
-      newValue: cleanRecord,
-    });
-  }
+export async function saveFinancialRecord(rec: StudentFinancialRecord, _actor?: any): Promise<void> {
+  await apiClient.post('/student_financial_records', rec);
 }
 
 export async function recordFinancialPayment(
   recordId: string,
-  payment: PaymentTransaction,
-  actor?: { id: string; name: string; role: any }
+  tx: PaymentTransaction,
+  _actor?: any
 ): Promise<void> {
-  const ref = doc(db, 'financial_records', recordId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return;
+  const rec = await apiClient.get<StudentFinancialRecord>(`/student_financial_records/${recordId}`);
+  if (rec) {
+    const payments = [...(rec.payments || []), tx];
+    const paidAmount = payments.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const base = Number(rec.baseTuition) || 0;
+    const discount = Number(rec.discountAmount) || 0;
+    const scholarship = Number(rec.scholarshipAmount) || 0;
+    const netDue = Math.max(0, base - discount - scholarship);
+    const remainingAmount = Math.max(0, netDue - paidAmount);
+    const status: PaymentStatus = rec.isExempt || netDue === 0
+      ? 'exempted'
+      : remainingAmount === 0
+      ? 'fully_paid'
+      : paidAmount > 0
+      ? 'partially_paid'
+      : 'unpaid';
 
-  const current = snap.data() as StudentFinancialRecord;
-  const payments = current.payments ? [...current.payments, payment] : [payment];
-  const paidAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-  const netDue = (current.baseTuition || 0) - (current.discountAmount || 0);
-  const remainingAmount = Math.max(0, netDue - paidAmount);
-  const status: PaymentStatus = current.isExempt ? 'exempted' : remainingAmount === 0 ? 'fully_paid' : paidAmount > 0 ? 'partially_paid' : 'unpaid';
-
-  const cleanUpdates = sanitizeFirestoreData({
-    payments,
-    paidAmount,
-    remainingAmount,
-    status,
-    updatedAt: new Date().toISOString(),
-  });
-  await updateDoc(ref, cleanUpdates);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'financial_record' as any,
-      entityId: recordId,
-      entityName: current.studentName,
-      previousValue: { paidAmount: current.paidAmount, remainingAmount: current.remainingAmount },
-      newValue: { paidAmount, remainingAmount, payment },
+    await apiClient.post('/student_financial_records', {
+      ...rec,
+      payments,
+      paidAmount,
+      remainingAmount,
+      status,
+      updatedAt: new Date().toISOString(),
     });
   }
 }
 
-// -------------------------------------------------------------
-// P6: Association Nominations Mutations
-// -------------------------------------------------------------
+export async function saveRevenueItem(item: RevenueItem): Promise<void> {
+  await apiClient.post('/finance_revenues', item);
+}
 
-export async function saveAssociationNomination(
-  nomination: AssociationNomination,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'association_nominations', nomination.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
+export async function deleteRevenueItem(id: string): Promise<void> {
+  await apiClient.delete(`/finance_revenues/${id}`);
+}
 
-  const cleanNomination = sanitizeFirestoreData({
-    ...nomination,
-    createdAt: nomination.createdAt || new Date().toISOString(),
-  });
-  await setDoc(ref, cleanNomination, { merge: true });
+export async function saveExpenseItem(item: ExpenseItem): Promise<void> {
+  await apiClient.post('/finance_expenses', item);
+}
 
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: isNew ? 'create' : 'update',
-      entityType: 'association_nomination' as any,
-      entityId: nomination.id,
-      entityName: nomination.studentName,
-      newValue: cleanNomination,
-    });
-  }
+export async function deleteExpenseItem(id: string): Promise<void> {
+  await apiClient.delete(`/finance_expenses/${id}`);
+}
+
+export async function saveCustody(custody: Custody): Promise<void> {
+  await apiClient.post('/finance_custodies', custody);
+}
+
+export async function deleteCustody(id: string): Promise<void> {
+  await apiClient.delete(`/finance_custodies/${id}`);
+}
+
+export async function saveCustodyExpenseItem(item: CustodyExpenseItem): Promise<void> {
+  await apiClient.post('/finance_custody_expenses', item);
+}
+
+export async function deleteCustodyExpenseItem(custodyId: string, itemId: string): Promise<void> {
+  await apiClient.delete(`/finance_custody_expenses/${itemId}`);
+}
+
+export async function saveBudgetRequest(req: BudgetRequest): Promise<void> {
+  await apiClient.post('/finance_budget_requests', req);
+}
+
+export async function deleteBudgetRequest(id: string): Promise<void> {
+  await apiClient.delete(`/finance_budget_requests/${id}`);
+}
+
+export async function saveFinanceSettings(settings: FinanceSettingsData): Promise<void> {
+  await apiClient.post('/finance_settings', settings);
+}
+
+export async function saveAssociationNomination(nom: AssociationNomination, _actor?: any): Promise<void> {
+  await AdminRepository.saveAssociationNomination(nom);
 }
 
 export async function updateNominationStatus(
-  nominationId: string,
+  id: string,
   status: NominationStatus,
-  extras?: Partial<AssociationNomination>,
-  actor?: { id: string; name: string; role: any }
+  extras?: { supervisorNotes?: string } | string,
+  _actor?: any
 ): Promise<void> {
-  const ref = doc(db, 'association_nominations', nominationId);
-  const snap = await getDoc(ref);
-  const prev = snap.exists() ? snap.data() : null;
-
-  const cleanUpdates = sanitizeFirestoreData({
-    supervisorStatus: status,
-    ...extras,
-  });
-  await updateDoc(ref, cleanUpdates);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'association_nomination' as any,
-      entityId: nominationId,
-      entityName: prev?.studentName || nominationId,
-      previousValue: prev,
-      newValue: { supervisorStatus: status, ...extras },
+  const nom = await apiClient.get<AssociationNomination>(`/association_nominations/${id}`);
+  if (nom) {
+    const supervisorNotes = typeof extras === 'string' ? extras : extras?.supervisorNotes;
+    await AdminRepository.saveAssociationNomination({
+      ...nom,
+      supervisorStatus: status,
+      supervisorNotes: supervisorNotes || nom.supervisorNotes,
+      updatedAt: new Date().toISOString(),
     });
   }
 }
 
-// -------------------------------------------------------------
-// P7: Emergency Support Sessions Mutations
-// -------------------------------------------------------------
-
-export async function startSupportSession(
-  session: EmergencySupportSession,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'support_sessions', session.id);
-  const cleanSession = sanitizeFirestoreData({
-    ...session,
-    createdAt: new Date().toISOString(),
-    isActive: true,
-  });
-  await setDoc(ref, cleanSession, { merge: true });
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'create',
-    entityType: 'support_session' as any,
-    entityId: session.id,
-    entityName: `جلسة دعم فني طارئة للمجمع ${session.tenantId}`,
-    newValue: cleanSession,
-  });
+export async function startSupportSession(session: EmergencySupportSession, _actor?: any): Promise<void> {
+  await AdminRepository.saveSupportSession(session);
 }
 
-export async function endSupportSession(
-  sessionId: string,
-  actor: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'support_sessions', sessionId);
-  await updateDoc(ref, {
-    isActive: false,
-    endedAt: new Date().toISOString(),
-  });
-
-  await recordAuditLog({
-    userId: actor.id,
-    userName: actor.name,
-    userRole: actor.role,
-    action: 'update',
-    entityType: 'support_session' as any,
-    entityId: sessionId,
-    entityName: `إنهاء جلسة دعم فني: ${sessionId}`,
-    newValue: { isActive: false },
-  });
-}
-
-// -------------------------------------------------------------
-// P8: Track Definitions & Track Nominations Mutations
-// -------------------------------------------------------------
-
-export async function saveTrackDefinition(
-  track: TrackDefinition,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'track_definitions', track.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
-
-  const cleanTrack = sanitizeFirestoreData({
-    ...track,
-    updatedAt: new Date().toISOString(),
-  });
-  await setDoc(ref, cleanTrack, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: isNew ? 'create' : 'update',
-      entityType: 'track_definition' as any,
-      entityId: track.id,
-      entityName: track.name,
-      newValue: cleanTrack,
+export async function endSupportSession(id: string, _actor?: any): Promise<void> {
+  const session = await apiClient.get<EmergencySupportSession>(`/support_sessions/${id}`);
+  if (session) {
+    await AdminRepository.saveSupportSession({
+      ...session,
+      isActive: false,
     });
   }
 }
 
-export async function deleteTrackDefinition(
-  trackId: string,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'track_definitions', trackId);
-  const snap = await getDoc(ref);
-  const existingName = snap.exists() ? ((snap.data() as any)?.name || trackId) : trackId;
-  await deleteDoc(ref);
+export async function saveTrackDefinition(track: TrackDefinition, _actor?: any): Promise<void> {
+  await AdminRepository.saveTrackDefinition(track);
+}
 
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'track_definition' as any,
-      entityId: trackId,
-      entityName: existingName,
-      newValue: { deleted: true },
-    });
+export async function deleteTrackDefinition(id: string, _actor?: any): Promise<void> {
+  await AdminRepository.deleteTrackDefinition(id);
+}
+
+export async function deleteAllTrackDefinitions(tenantId?: string, _actor?: any): Promise<void> {
+  const tracks = await AdminRepository.getTrackDefinitions(tenantId);
+  for (const t of tracks) {
+    await AdminRepository.deleteTrackDefinition(t.id);
   }
 }
 
-export async function deleteAllTrackDefinitions(
-  tenantId?: string,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const colRef = collection(db, 'track_definitions');
-  const snap = await getDocs(colRef);
-  const batch = writeBatch(db);
-  let count = 0;
-  snap.forEach((d) => {
-    const data = d.data() as TrackDefinition;
-    if (!tenantId || !data.tenantId || data.tenantId === tenantId) {
-      batch.delete(d.ref);
-      count++;
-    }
-  });
-  if (count > 0) {
-    await batch.commit();
-  }
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'track_definition' as any,
-      entityId: 'all_tracks',
-      entityName: 'جميع المسارات التعليمية',
-      newValue: { deletedAll: true, count },
-    });
-  }
-}
-
-export async function saveTrackNomination(
-  nomination: TrackNomination,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'track_nominations', nomination.id);
-  const snap = await getDoc(ref);
-  const isNew = !snap.exists();
-
-  const cleanNomination = sanitizeFirestoreData({
-    ...nomination,
-    createdAt: nomination.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-  await setDoc(ref, cleanNomination, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: isNew ? 'create' : 'update',
-      entityType: 'track_nomination' as any,
-      entityId: nomination.id,
-      entityName: nomination.studentName,
-      newValue: cleanNomination,
-    });
-  }
+export async function saveTrackNomination(nom: TrackNomination, _actor?: any): Promise<void> {
+  await AdminRepository.saveTrackNomination(nom);
 }
 
 export async function updateTrackNominationStatus(
-  nominationId: string,
+  id: string,
   status: TrackNominationStatus,
   extras?: Partial<TrackNomination>,
-  actor?: { id: string; name: string; role: any }
+  _actor?: any
 ): Promise<void> {
-  const ref = doc(db, 'track_nominations', nominationId);
-  const snap = await getDoc(ref);
-  const prev = snap.exists() ? snap.data() : null;
-
-  const updatePayload: any = {
-    status,
-    updatedAt: new Date().toISOString(),
-    ...extras,
-  };
-
-  await updateDoc(ref, updatePayload);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'track_nomination' as any,
-      entityId: nominationId,
-      entityName: prev?.studentName || nominationId,
-      previousValue: prev,
-      newValue: updatePayload,
+  const nom = await apiClient.get<TrackNomination>(`/track_nominations/${id}`);
+  if (nom) {
+    await AdminRepository.saveTrackNomination({
+      ...nom,
+      status,
+      ...extras,
+      updatedAt: new Date().toISOString(),
     });
   }
 }
 
-export function subscribeToStaffAttendance(
-  tenantId: string,
-  callback: (records: AttendanceRecord[]) => void
-): Unsubscribe {
-  const q = query(collection(db, 'staff_attendance'), where('tenantId', '==', tenantId));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const records: AttendanceRecord[] = [];
-      const seen = new Set<string>();
-      const duplicatesToDelete: string[] = [];
-
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Omit<AttendanceRecord, 'id'>;
-        // Extract normalized YYYY-MM-DD date
-        const recordDate = data.date || (data.timestamp ? data.timestamp.slice(0, 10) : '');
-        // Unique identity of attendance per day: tenantId + userId + date
-        const key = recordDate 
-          ? `${data.tenantId || tenantId}_${data.userId}_${recordDate}`
-          : `${data.tenantId || tenantId}_${data.userId}_doc_${docSnap.id}`;
-
-        if (seen.has(key)) {
-          // Already have a record for this user on this specific date, mark duplicate document
-          duplicatesToDelete.push(docSnap.id);
-        } else {
-          seen.add(key);
-          records.push({
-            id: docSnap.id,
-            ...data,
-            date: recordDate || new Date().toISOString().slice(0, 10),
-          });
-        }
-      });
-
-      // Silently clean up redundant duplicate documents in the background
-      if (duplicatesToDelete.length > 0) {
-        duplicatesToDelete.forEach((dupId) => {
-          deleteStaffAttendanceRecord(dupId).catch((err) =>
-            console.warn('Notice cleaning duplicate attendance document:', dupId, err)
-          );
-        });
-      }
-
-      callback(records);
-    },
-    (error) => {
-      console.warn('Notice subscribing to staff attendance:', (error as any)?.message || error);
-      callback([]);
-    }
-  );
+export async function deleteStaffAttendanceRecord(recordId: string, _actor?: any): Promise<void> {
+  await AdminRepository.deleteStaffAttendance(recordId);
 }
 
-export async function deleteStaffAttendanceRecord(recordId: string): Promise<void> {
-  const ref = doc(db, 'staff_attendance', recordId);
-  await deleteDoc(ref);
+export async function saveStaffAttendanceRecord(record: AttendanceRecord, _actor?: any): Promise<AttendanceRecord> {
+  return AdminRepository.saveStaffAttendance(record);
 }
 
-export async function saveStaffAttendanceRecord(record: AttendanceRecord): Promise<AttendanceRecord> {
-  const ref = doc(db, 'staff_attendance', record.id);
-  const snap = await getDoc(ref);
-  
-  if (snap.exists()) {
-    // If it already exists, do NOT overwrite it! 
-    // This preserves the earliest check-in time of the day and prevents duplicates.
-    return snap.data() as AttendanceRecord;
-  }
-
-  // Ensure no fields have undefined values, as Firestore setDoc rejects undefined
-  const cleanData: Record<string, any> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (value !== undefined) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        const cleanSubObj: Record<string, any> = {};
-        for (const [subKey, subVal] of Object.entries(value)) {
-          if (subVal !== undefined) {
-            cleanSubObj[subKey] = subVal;
-          }
-        }
-        cleanData[key] = cleanSubObj;
-      } else {
-        cleanData[key] = value;
-      }
-    }
-  }
-  await setDoc(ref, cleanData, { merge: true });
-  return record;
-}
-
-// -------------------------------------------------------------
-// P10: MEETINGS & OFFICIAL MINUTES DATABASE OPERATIONS
-// -------------------------------------------------------------
-
-export function subscribeToMeetings(
-  tenantIdOrCallback: string | ((meetings: Meeting[]) => void),
-  optionalCallback?: (meetings: Meeting[]) => void
-): Unsubscribe {
-  let tenantId: string | undefined;
-  let callback: (meetings: Meeting[]) => void;
-
-  if (typeof tenantIdOrCallback === 'function') {
-    callback = tenantIdOrCallback;
-  } else {
-    tenantId = tenantIdOrCallback;
-    callback = optionalCallback || (() => {});
-  }
-
-  const q = tenantId
-    ? query(collection(db, 'meetings'), where('tenantId', '==', tenantId))
-    : collection(db, 'meetings');
-
-  return onSnapshot(
-    q as any,
-    (snapshot) => {
-      const meetings: Meeting[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        meetings.push({
-          id: docSnap.id,
-          ...data,
-        } as Meeting);
-      });
-      callback(meetings);
-    },
-    (error) => {
-      console.warn('Notice subscribing to meetings:', (error as any)?.message || error);
-      callback([]);
-    }
-  );
-}
-
-export async function saveMeetingToDb(
-  meeting: Meeting,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'meetings', meeting.id);
-  const cleanData = sanitizeFirestoreData(meeting);
-  await setDoc(ref, cleanData, { merge: true });
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'create',
-      entityType: 'program',
-      entityId: meeting.id,
-      entityName: `تسجيل اجتماع: ${meeting.title}`,
-      newValue: cleanData,
-      notes: `حالة الاجتماع: ${meeting.status}`,
-    });
-  }
+export async function saveMeetingToDb(meeting: Meeting, _actor?: any): Promise<void> {
+  await AdminRepository.saveMeeting(meeting);
 }
 
 export async function updateMeetingInDb(
-  id: string,
-  updates: Partial<Meeting>,
-  actor?: { id: string; name: string; role: any },
-  actionLabel: string = 'تعديل اجتماع'
+  meetingId: string,
+  data: Partial<Meeting>,
+  _actor?: any,
+  _actionLabel?: string
 ): Promise<void> {
-  const ref = doc(db, 'meetings', id);
-  const cleanUpdates = sanitizeFirestoreData({
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  });
-  await updateDoc(ref, cleanUpdates);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'update',
-      entityType: 'program',
-      entityId: id,
-      entityName: `${actionLabel} (${updates.title || id})`,
-      newValue: cleanUpdates,
-      notes: updates.status ? `الحالة: ${updates.status}` : undefined,
-    });
+  const current = await apiClient.get<Meeting>(`/meetings/${meetingId}`);
+  if (current) {
+    await AdminRepository.saveMeeting({ ...current, ...data, id: meetingId });
   }
 }
 
-export async function deleteMeetingFromDb(
-  id: string,
-  actor?: { id: string; name: string; role: any }
-): Promise<void> {
-  const ref = doc(db, 'meetings', id);
-  await deleteDoc(ref);
-
-  if (actor) {
-    await recordAuditLog({
-      userId: actor.id,
-      userName: actor.name,
-      userRole: actor.role,
-      action: 'delete',
-      entityType: 'program',
-      entityId: id,
-      entityName: `حذف سجل الاجتماع ${id}`,
-    });
-  }
+export async function deleteMeetingFromDb(meetingId: string, _actor?: any): Promise<void> {
+  await AdminRepository.deleteMeeting(meetingId);
 }
 
+export async function getFrontendConfig(configId: string): Promise<FrontendConfig | null> {
+  return AdminRepository.getFrontendConfig(configId);
+}
 
+export async function saveFrontendConfig(configId: string, config: Partial<FrontendConfig>): Promise<FrontendConfig> {
+  return AdminRepository.saveFrontendConfig(configId, config);
+}
 
+// Aliases matching AppContext db* conventions
+export const dbSaveStudent = saveStudent;
+export const dbDeleteStudent = deleteStudent;
+export const dbSaveHalaqah = saveHalaqah;
+export const dbDeleteHalaqah = deleteHalaqah;
+export const dbArchiveHalaqah = archiveHalaqah;
+export const dbRestoreHalaqah = restoreHalaqah;
+export const dbPermDeleteHalaqah = permanentlyDeleteArchivedHalaqah;
+export const dbSaveUser = saveUser;
+export const dbDeleteUser = deleteUser;
+export const dbArchiveTeacher = archiveTeacherInDb;
+export const dbRestoreTeacher = restoreTeacherFromDb;
+export const dbPermDeleteTeacher = permanentlyDeleteTeacherFromDb;
+export const dbArchiveSupervisor = archiveSupervisorInDb;
+export const dbRestoreSupervisor = restoreSupervisorFromDb;
+export const dbPermDeleteSupervisor = permanentlyDeleteSupervisorFromDb;
+export const dbSaveDailySessionRecord = saveDailySessionRecord;
+export const dbSaveBulkAttendance = saveBulkAttendance;
+export const dbSavePlanWeek = saveEducationalPlanWeek;
+export const dbSaveBulkPlanWeeks = saveBulkEducationalPlanWeeks;
+export const dbDeletePlanWeek = deleteEducationalPlanWeek;
+export const dbDeleteBulkPlanWeeks = deleteBulkEducationalPlanWeeks;
+export const dbSaveSeasonalProgram = saveSeasonalProgram;
+export const dbDeleteSeasonalProgram = deleteSeasonalProgram;
+export const dbSaveSeasonalActivity = saveSeasonalActivity;
+export const dbDeleteSeasonalActivity = deleteSeasonalActivity;
+export const dbSaveSeasonalParticipation = saveSeasonalParticipation;
+export const dbDeleteSeasonalParticipation = deleteSeasonalParticipation;
+export const dbSaveAcademicConfig = saveAcademicConfig;
+export const dbSaveReportLog = saveReportLog;
+export const dbSaveAdmissionsRequest = saveAdmissionsRequest;
+export const dbUpdateAdmissionsStatus = updateAdmissionsStatus;
+export const dbSaveFinancialRecord = saveFinancialRecord;
+export const dbRecordFinancialPayment = recordFinancialPayment;
+export const dbSaveRevenueItem = saveRevenueItem;
+export const dbDeleteRevenueItem = deleteRevenueItem;
+export const dbSaveExpenseItem = saveExpenseItem;
+export const dbDeleteExpenseItem = deleteExpenseItem;
+export const dbSaveCustody = saveCustody;
+export const dbDeleteCustody = deleteCustody;
+export const dbSaveCustodyExpenseItem = saveCustodyExpenseItem;
+export const dbDeleteCustodyExpenseItem = deleteCustodyExpenseItem;
+export const dbSaveBudgetRequest = saveBudgetRequest;
+export const dbDeleteBudgetRequest = deleteBudgetRequest;
+export const dbSaveFinanceSettings = saveFinanceSettings;
+export const dbSaveAssociationNomination = saveAssociationNomination;
+export const dbUpdateNominationStatus = updateNominationStatus;
+export const dbStartSupportSession = startSupportSession;
+export const dbEndSupportSession = endSupportSession;
+export const dbSaveTrackDefinition = saveTrackDefinition;
+export const dbDeleteTrackDefinition = deleteTrackDefinition;
+export const dbDeleteAllTrackDefinitions = deleteAllTrackDefinitions;
+export const dbSaveTrackNomination = saveTrackNomination;
+export const dbUpdateTrackNominationStatus = updateTrackNominationStatus;
+export const dbSaveMeetingToDb = saveMeetingToDb;
+export const dbUpdateMeetingInDb = updateMeetingInDb;
+export const dbDeleteMeetingFromDb = deleteMeetingFromDb;
 
+// Local storage key constants
+export const LOCAL_STORAGE_KEY_QURAN_PLANS = 'al_ghazzawi_quran_plans_v1';
+export const LOCAL_STORAGE_KEY_STAGE_CONFIGS = 'al_ghazzawi_stage_configs_v1';
 
+// Online classroom live state helpers
+export async function getOnlineSession(sessionId: string): Promise<any> {
+  return apiClient.get(`/online-sessions/${sessionId}`);
+}
+
+export async function saveOnlineSession(sessionId: string, sessionData: any): Promise<any> {
+  return apiClient.post(`/online-sessions/${sessionId}`, sessionData);
+}
+
+export function subscribeToOnlineSession(sessionId: string, callback: (data: any) => void): Unsubscribe {
+  let isSubscribed = true;
+  const poll = async () => {
+    try {
+      const data = await getOnlineSession(sessionId);
+      if (isSubscribed) {
+        callback(data);
+      }
+    } catch {
+      // Ignored
+    }
+  };
+  poll();
+  const timer = setInterval(poll, 3000);
+  return () => {
+    isSubscribed = false;
+    clearInterval(timer);
+  };
+}

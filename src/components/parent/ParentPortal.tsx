@@ -7,6 +7,7 @@ import { normalizeStudentQuranPlan } from '../../quran/utils/planNormalizer';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
 import { SEED_BARAEM_STUDENTS } from '../../data/studentsRoster';
 import { COMPREHENSIVE_HALAQAHS } from '../../data/multiStageRoster';
+import { safeStorage } from '../../lib/safeStorage';
 import {
   Search,
   BookOpen,
@@ -77,7 +78,7 @@ export const ParentPortal: React.FC = () => {
   // Synchronous resolution of user to guarantee immediate rendering without search barrier
   const effectiveUser = currentUser || (() => {
     try {
-      const saved = localStorage.getItem('al_ghazzawi_current_user_v3');
+      const saved = safeStorage.getItem('al_ghazzawi_current_user_v3') || safeStorage.getItem('al_ghazzawi_current_user_v4');
       if (saved && saved !== 'null') {
         const u = JSON.parse(saved);
         if (u && u.id) return u;

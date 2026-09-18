@@ -6,6 +6,7 @@ import { healthRouter } from './routes/healthRoutes';
 import { tenantRouter } from './routes/tenantRoutes';
 import { stageRouter } from './routes/stageRoutes';
 import { userRouter } from './routes/userRoutes';
+import { entityRouter } from './routes/entityRoutes';
 import { backupRestoreRouter } from './routes/backupRestoreRoutes';
 import { databaseBackupRouter } from './routes/databaseBackupRoutes';
 
@@ -19,7 +20,7 @@ export function createApp() {
   // Tenant Isolation Context
   app.use('/api', extractTenantContext);
 
-  // API Routes
+  // Dedicated API Routes
   app.use('/api/health', healthRouter);
   app.use('/api/tenants', tenantRouter);
   app.use('/api/stages', stageRouter);
@@ -27,6 +28,24 @@ export function createApp() {
   app.use('/api/admin/backup/restore', backupRestoreRouter);
   app.use('/api/admin/migration', backupRestoreRouter);
   app.use('/api/admin/backup/database', databaseBackupRouter);
+
+  // Generic Entity API Routes (Handles all 35 entities and aliases)
+  app.use('/api', entityRouter);
+
+  // Catch-all 404 JSON Handler for any unhandled /api requests
+  // Guarantees API requests NEVER fall through to Vite dev server or return HTML
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      ok: false,
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
+  app.all('/api', (req, res) => {
+    res.status(404).json({
+      ok: false,
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
 
   // Global Error Handler for API routes
   app.use('/api', errorHandler);

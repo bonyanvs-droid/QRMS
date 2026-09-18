@@ -1,5 +1,3 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import {
   DailyPrayerTimes,
   MosqueComplexTenant,
@@ -8,6 +6,8 @@ import {
   TenantPrayerConfig,
   TenantPrayerTimesDocument,
 } from '../types';
+import { apiClient } from '../lib/api/apiClient';
+import { safeStorage } from '../lib/safeStorage';
 
 // In-memory runtime cache: tenantId_year -> TenantPrayerTimesDocument
 const memoryPrayerCache: Map<string, TenantPrayerTimesDocument> = new Map();
@@ -96,7 +96,6 @@ export function getTodayDateStr(): string {
 
 /**
  * Algorithmic solar calculation fallback for Umm Al-Qura (Western / Central Saudi Arabia)
- * Used immediately if Firestore has not yet been synced or in offline scenarios.
  */
 export function calculateFallbackPrayerTimes(
   dateStr: string,
@@ -114,13 +113,10 @@ export function calculateFallbackPrayerTimes(
   const latRad = latitude * (Math.PI / 180);
 
   // Solar Noon (Dhuhr) in UTC+3 timezone (Riyadh / Makkah)
-  // Timezone standard meridian for UTC+3 is 45° E
   const timeZoneMeridian = 45;
   const solarNoonMinutes = 720 + (timeZoneMeridian - longitude) * 4 - EoT;
-
   const dhuhrMinutes = Math.round(solarNoonMinutes);
 
-  // Hour angle helper
   const hourAngle = (angleRad: number) => {
     const cosHA = (Math.sin(angleRad) - Math.sin(latRad) * Math.sin(declination)) /
                   (Math.cos(latRad) * Math.cos(declination));
@@ -129,24 +125,20 @@ export function calculateFallbackPrayerTimes(
     return Math.acos(cosHA);
   };
 
-  // Sunrise / Sunset: sun altitude = -0.833°
   const sunRadiusAngle = -0.833 * (Math.PI / 180);
-  const haSun = hourAngle(sunRadiusAngle) * (180 / Math.PI) * 4; // in minutes
+  const haSun = hourAngle(sunRadiusAngle) * (180 / Math.PI) * 4;
 
   const sunriseMinutes = Math.round(solarNoonMinutes - haSun);
   const maghribMinutes = Math.round(solarNoonMinutes + haSun);
 
-  // Fajr: Umm Al-Qura uses 18.5° below horizon
   const fajrAngle = -18.5 * (Math.PI / 180);
   const haFajr = hourAngle(fajrAngle) * (180 / Math.PI) * 4;
   const fajrMinutes = Math.round(solarNoonMinutes - haFajr);
 
-  // Asr: Shafi'i / Hanbali shadow length = 1
   const asrAlt = Math.atan(1 / (1 + Math.tan(Math.abs(latRad - declination))));
   const haAsr = hourAngle(asrAlt) * (180 / Math.PI) * 4;
   const asrMinutes = Math.round(solarNoonMinutes + haAsr);
 
-  // Isha: Umm Al-Qura standard is 90 minutes after Maghrib
   const ishaMinutes = maghribMinutes + 90;
 
   const toTimeStr = (mins: number) => {
@@ -168,7 +160,7 @@ export function calculateFallbackPrayerTimes(
 }
 
 /**
- * Retrieve prayer times document from cache or Firestore for a given tenant and year.
+ * Retrieve prayer times document from cache or PostgreSQL backend for a given tenant and year.
  */
 export async function getTenantPrayerTimesDoc(
   tenantId: string,
@@ -183,7 +175,7 @@ export async function getTenantPrayerTimesDoc(
 
   // 2. LocalStorage cache
   try {
-    const rawLocal = localStorage.getItem(`qrms_prayer_times_${cacheKey}`);
+    const rawLocal = safeStorage.getItem(`qrms_prayer_times_${cacheKey}`);
     if (rawLocal) {
       const parsed = JSON.parse(rawLocal) as TenantPrayerTimesDocument;
       if (parsed && parsed.timingsByDate) {
@@ -195,29 +187,27 @@ export async function getTenantPrayerTimesDoc(
     console.warn('LocalStorage prayer cache read notice:', e);
   }
 
-  // 3. Firestore
+  // 3. PostgreSQL backend API
   try {
-    const docRef = doc(db, 'prayer_times', cacheKey);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const data = snap.data() as TenantPrayerTimesDocument;
+    const data = await apiClient.get<TenantPrayerTimesDocument>(`/prayer_times/${cacheKey}`);
+    if (data) {
       memoryPrayerCache.set(cacheKey, data);
       try {
-        localStorage.setItem(`qrms_prayer_times_${cacheKey}`, JSON.stringify(data));
-      } catch (e) {
-        // quota exceeded or private mode, ignore
+        safeStorage.setItem(`qrms_prayer_times_${cacheKey}`, JSON.stringify(data));
+      } catch {
+        // ignore
       }
       return data;
     }
   } catch (err) {
-    console.warn('Firestore prayer_times fetch notice:', err);
+    console.warn('Prayer times fetch notice:', err);
   }
 
   return null;
 }
 
 /**
- * Fetch and sync a full year (or active months) from Aladhan API and persist in Firestore
+ * Fetch and sync a full year from Aladhan API and persist in PostgreSQL
  */
 export async function syncAndSavePrayerTimes(
   tenant: MosqueComplexTenant,
@@ -241,7 +231,7 @@ export async function syncAndSavePrayerTimes(
     }
 
     const timingsByDate: Record<string, DailyPrayerTimes> = {};
-    const monthsData = json.data; // object with keys 1..12 or array
+    const monthsData = json.data;
 
     const monthKeys = Object.keys(monthsData);
     for (const mKey of monthKeys) {
@@ -298,14 +288,14 @@ export async function syncAndSavePrayerTimes(
       adjustments: tenant.prayerConfig?.adjustments,
     };
 
-    // Save to Firestore
-    await setDoc(doc(db, 'prayer_times', docId), docData, { merge: true });
+    // Save to PostgreSQL backend
+    await apiClient.post('/prayer_times', docData);
 
     // Update Memory and LocalStorage cache
     memoryPrayerCache.set(docId, docData);
     try {
-      localStorage.setItem(`qrms_prayer_times_${docId}`, JSON.stringify(docData));
-    } catch (e) {
+      safeStorage.setItem(`qrms_prayer_times_${docId}`, JSON.stringify(docData));
+    } catch {
       // ignore
     }
 
@@ -318,8 +308,6 @@ export async function syncAndSavePrayerTimes(
 
 /**
  * Get prayer times for a specific date (defaults to today)
- * Uses cached Firestore document if available, with smooth fallback to astronomical calculations.
- * Always applies configured manual minute adjustments.
  */
 export function getPrayerTimesForDateSync(
   tenant: MosqueComplexTenant | null | undefined,
@@ -343,7 +331,7 @@ export function getPrayerTimesForDateSync(
   // 2. LocalStorage cache
   if (!baseTimings) {
     try {
-      const raw = localStorage.getItem(`qrms_prayer_times_${cacheKey}`);
+      const raw = safeStorage.getItem(`qrms_prayer_times_${cacheKey}`);
       if (raw) {
         const parsed = JSON.parse(raw) as TenantPrayerTimesDocument;
         if (parsed.timingsByDate && parsed.timingsByDate[date]) {
@@ -351,7 +339,7 @@ export function getPrayerTimesForDateSync(
           memoryPrayerCache.set(cacheKey, parsed);
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   }

@@ -46,7 +46,9 @@ import {
   ShieldCheck,
   Building2,
   LogOut,
+  LogIn,
 } from 'lucide-react';
+import { safeStorage } from './lib/safeStorage';
 
 // AGENT_WRITE_TEST: verified cloud filesystem sync - QRMS Platform
 // Wrapper for Tenant Route parameter e.g. /t/:tenantSlug
@@ -66,9 +68,63 @@ const TenantRouteWrapper: React.FC = () => {
   return <TenantPublicPage />;
 };
 
+const AdminAuthGateway: React.FC = () => {
+  const { enterDemoSession, activeTenant } = useApp();
+  const [showLoginModal, setShowLoginModal] = useState(true);
+  const navigate = useNavigate();
+
+  const handleDemoAdmin = async () => {
+    await enterDemoSession(activeTenant?.id || 'al-furqan', 'campus_admin');
+    navigate('/admin/reports_settings');
+  };
+
+  return (
+    <div className="min-h-[75vh] flex flex-col items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 text-center space-y-6">
+        <div className="w-16 h-16 mx-auto bg-emerald-50 dark:bg-emerald-950/50 rounded-2xl flex items-center justify-center text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800 shadow-xs">
+          <Shield className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">لوحة تحكم إدارة المجمع القرآني</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {activeTenant?.name || 'منظومة إدارة المجمعات القرآنية (QRMS)'}
+          </p>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            يلزم تسجيل الدخول بصلاحيات الإدارة للوصول إلى لوحة التحكم وإعدادات التقارير
+          </p>
+        </div>
+
+        <div className="space-y-3 pt-2">
+          <button
+            onClick={() => setShowLoginModal(true)}
+            className="w-full py-3.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-colors text-sm flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>تسجيل الدخول إلى لوحة الإدارة</span>
+          </button>
+
+          <button
+            onClick={handleDemoAdmin}
+            className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl shadow-xs transition-colors text-xs flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>تجربة فورية كمدير مجمع (دخول مباشر)</span>
+          </button>
+        </div>
+      </div>
+
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        adminOnly={true}
+      />
+    </div>
+  );
+};
+
 const MainLayout: React.FC = () => {
   useEffect(() => {
-    const isDark = localStorage.getItem('school_screen_dark_mode') === 'true';
+    const isDark = safeStorage.getItem('school_screen_dark_mode') === 'true';
     if (isDark) {
       document.documentElement.classList.add('dark');
     } else {
@@ -137,7 +193,7 @@ const MainLayout: React.FC = () => {
   // Synchronous resolution of user to guarantee immediate route protection & prevent race conditions
   const effectiveUser = currentUser || (() => {
     try {
-      const saved = localStorage.getItem('al_ghazzawi_current_user_v4');
+      const saved = safeStorage.getItem('al_ghazzawi_current_user_v4');
       if (saved && saved !== 'null') {
         const u = JSON.parse(saved);
         if (u && u.id) return u;
@@ -504,7 +560,7 @@ const MainLayout: React.FC = () => {
               effectiveUser ? (
                 <AdminDashboard />
               ) : (
-                <Navigate to={campusFallback} replace />
+                <AdminAuthGateway />
               )
             }
           />
@@ -514,7 +570,7 @@ const MainLayout: React.FC = () => {
               effectiveUser ? (
                 <AdminDashboard />
               ) : (
-                <Navigate to={campusFallback} replace />
+                <AdminAuthGateway />
               )
             }
           />

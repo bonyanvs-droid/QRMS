@@ -272,6 +272,7 @@ import {
   DEMO_NOMINATIONS,
   DEMO_BADGES,
 } from '../data/demoFixtures';
+import { safeStorage } from '../lib/safeStorage';
 
 export interface AppContextType {
   currentUser: User | null;
@@ -581,6 +582,23 @@ export function getTenantStorageKey(tenantId: string | null | undefined, baseKey
   return `schoolscreen_tenant_${tid}_${baseKey}`;
 }
 
+export function safeStorageGet<T>(key: string, fallback: T): T {
+  try {
+    const saved = safeStorage.getItem(key);
+    if (!saved || saved === 'undefined' || saved === 'null' || saved.trim() === '') {
+      return fallback;
+    }
+    const parsed = JSON.parse(saved);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (err) {
+    console.warn(`[SafeStorage] Corrupted JSON in key "${key}", using fallback:`, err);
+    try {
+      safeStorage.removeItem(key);
+    } catch (_) {}
+    return fallback;
+  }
+}
+
 export function readTenantStorage<T>(tenantId: string | null | undefined, baseKey: string, legacyKey: string, defaultValue: T): T {
   // Operational data must NOT be cached in localStorage - Cloud Firestore is the single source of truth
   if (isOperationalStorageKey(baseKey)) {
@@ -588,17 +606,21 @@ export function readTenantStorage<T>(tenantId: string | null | undefined, baseKe
   }
   try {
     const tenantKey = getTenantStorageKey(tenantId, baseKey);
-    const tenantVal = localStorage.getItem(tenantKey);
-    if (tenantVal) {
-      return JSON.parse(tenantVal);
-    }
-    const legacyVal = localStorage.getItem(legacyKey);
-    if (legacyVal) {
-      const parsed = JSON.parse(legacyVal);
+    const tenantVal = safeStorage.getItem(tenantKey);
+    if (tenantVal && tenantVal !== 'undefined' && tenantVal !== 'null') {
       try {
-        localStorage.setItem(tenantKey, legacyVal);
+        return JSON.parse(tenantVal);
       } catch (_) {}
-      return parsed;
+    }
+    const legacyVal = safeStorage.getItem(legacyKey);
+    if (legacyVal && legacyVal !== 'undefined' && legacyVal !== 'null') {
+      try {
+        const parsed = JSON.parse(legacyVal);
+        try {
+          safeStorage.setItem(tenantKey, legacyVal);
+        } catch (_) {}
+        return parsed;
+      } catch (_) {}
     }
   } catch (e) {
     console.warn(`Error reading tenant storage for ${baseKey}:`, e);
@@ -611,17 +633,17 @@ export function writeTenantStorage<T>(tenantId: string | null | undefined, baseK
   if (isOperationalStorageKey(baseKey)) {
     try {
       const tenantKey = getTenantStorageKey(tenantId, baseKey);
-      localStorage.removeItem(tenantKey);
-      localStorage.removeItem(legacyKey);
+      safeStorage.removeItem(tenantKey);
+      safeStorage.removeItem(legacyKey);
     } catch (_) {}
     return;
   }
   try {
     const tenantKey = getTenantStorageKey(tenantId, baseKey);
     const serialized = JSON.stringify(value);
-    localStorage.setItem(tenantKey, serialized);
+    safeStorage.setItem(tenantKey, serialized);
     if (!tenantId || tenantId === (INITIAL_TENANTS[0]?.id) || tenantId === 'tenant_ghazzawi') {
-      localStorage.setItem(legacyKey, serialized);
+      safeStorage.setItem(legacyKey, serialized);
     }
   } catch (e) {
     console.warn(`Error writing tenant storage for ${baseKey}:`, e);
@@ -630,9 +652,9 @@ export function writeTenantStorage<T>(tenantId: string | null | undefined, baseK
 
 export function purgeOperationalLocalStorage(): void {
   try {
+    const allKeys = safeStorage.getAllKeys();
     const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
+    for (const key of allKeys) {
       if (!key) continue;
       const lower = key.toLowerCase();
       if (
@@ -664,7 +686,7 @@ export function purgeOperationalLocalStorage(): void {
         }
       }
     }
-    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    keysToRemove.forEach((k) => safeStorage.removeItem(k));
   } catch (e) {
     console.warn('Notice clearing operational localStorage:', e);
   }
@@ -746,36 +768,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const DEFAULT_STAGE_LOGO = '/76101.png';
 
   const [mosqueLogoUrl, setMosqueLogoUrlState] = useState<string | null>(() => {
-    return localStorage.getItem(STORAGE_KEYS.MOSQUE_LOGO) || DEFAULT_MOSQUE_LOGO;
+    return safeStorage.getItem(STORAGE_KEYS.MOSQUE_LOGO) || DEFAULT_MOSQUE_LOGO;
   });
 
   const [stageLogoUrl, setStageLogoUrlState] = useState<string | null>(() => {
-    return localStorage.getItem(STORAGE_KEYS.STAGE_LOGO) || DEFAULT_STAGE_LOGO;
+    return safeStorage.getItem(STORAGE_KEYS.STAGE_LOGO) || DEFAULT_STAGE_LOGO;
   });
 
   const setMosqueLogoUrl = (url: string | null) => {
     setMosqueLogoUrlState(url);
     if (url) {
-      localStorage.setItem(STORAGE_KEYS.MOSQUE_LOGO, url);
+      safeStorage.setItem(STORAGE_KEYS.MOSQUE_LOGO, url);
     } else {
-      localStorage.removeItem(STORAGE_KEYS.MOSQUE_LOGO);
+      safeStorage.removeItem(STORAGE_KEYS.MOSQUE_LOGO);
     }
   };
 
   const setStageLogoUrl = (url: string | null) => {
     setStageLogoUrlState(url);
     if (url) {
-      localStorage.setItem(STORAGE_KEYS.STAGE_LOGO, url);
+      safeStorage.setItem(STORAGE_KEYS.STAGE_LOGO, url);
     } else {
-      localStorage.removeItem(STORAGE_KEYS.STAGE_LOGO);
+      safeStorage.removeItem(STORAGE_KEYS.STAGE_LOGO);
     }
   };
 
   const resetLogos = () => {
     setMosqueLogoUrlState(DEFAULT_MOSQUE_LOGO);
     setStageLogoUrlState(DEFAULT_STAGE_LOGO);
-    localStorage.removeItem(STORAGE_KEYS.MOSQUE_LOGO);
-    localStorage.removeItem(STORAGE_KEYS.STAGE_LOGO);
+    safeStorage.removeItem(STORAGE_KEYS.MOSQUE_LOGO);
+    safeStorage.removeItem(STORAGE_KEYS.STAGE_LOGO);
   };
 
   // Connectivity state
@@ -797,31 +819,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>([]);
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    return saved ? JSON.parse(saved) : null;
+    return safeStorageGet<User | null>(STORAGE_KEYS.CURRENT_USER, null);
   });
 
   // P3 States: Multi-Tenancy, Stages, and Archives
   const [tenants, setTenants] = useState<MosqueComplexTenant[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.TENANTS);
-    return saved ? JSON.parse(saved) : INITIAL_TENANTS;
+    return safeStorageGet<MosqueComplexTenant[]>(STORAGE_KEYS.TENANTS, INITIAL_TENANTS);
   });
 
   // P9: Organizations & Charity State
   const [organizations, setOrganizations] = useState<Organization[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ORGANIZATIONS);
-    return saved ? JSON.parse(saved) : INITIAL_ORGANIZATIONS;
+    return safeStorageGet<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, INITIAL_ORGANIZATIONS);
   });
 
   const [activeTenantId, setActiveTenantIdState] = useState<string>(() => {
     try {
-      const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      if (savedUser) {
-        const u = JSON.parse(savedUser);
-        if (u?.tenantId) return u.tenantId;
-      }
+      const savedUser = safeStorageGet<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+      if (savedUser?.tenantId) return savedUser.tenantId;
     } catch {}
-    return localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT) || (INITIAL_TENANTS[0]?.id);
+    return safeStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT) || (INITIAL_TENANTS[0]?.id);
   });
 
   // Operational states strictly live in memory and sync directly with Cloud Firestore
@@ -935,15 +951,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [students, setStudents] = useState<Student[]>([]);
 
   const [spellingLessons, setSpellingLessons] = useState<SpellingLesson[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SPELLING);
-    return saved ? JSON.parse(saved) : INITIAL_SPELLING_LESSONS;
+    return safeStorageGet<SpellingLesson[]>(STORAGE_KEYS.SPELLING, INITIAL_SPELLING_LESSONS);
   });
 
   const [sessionRecords, setSessionRecords] = useState<DailySessionRecord[]>([]);
 
   const [educationalPlan, setEducationalPlan] = useState<EducationalPlanWeek[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.PLAN);
-    return saved ? JSON.parse(saved) : INITIAL_EDUCATIONAL_PLAN;
+    return safeStorageGet<EducationalPlanWeek[]>(STORAGE_KEYS.PLAN, INITIAL_EDUCATIONAL_PLAN);
   });
 
   const [seasonalPrograms, setSeasonalPrograms] = useState<SeasonalProgram[]>(() => INITIAL_SEASONAL_PROGRAMS);
@@ -951,13 +965,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [seasonalParticipations, setSeasonalParticipations] = useState<SeasonalParticipation[]>(() => INITIAL_SEASONAL_PARTICIPATIONS);
 
   const [academicConfig, setAcademicConfig] = useState<AcademicYearConfig>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ACADEMIC);
-    return saved ? JSON.parse(saved) : INITIAL_ACADEMIC_YEAR;
+    return safeStorageGet<AcademicYearConfig>(STORAGE_KEYS.ACADEMIC, INITIAL_ACADEMIC_YEAR);
   });
 
   const [reportLogs, setReportLogs] = useState<ReportLog[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.REPORTS);
-    return saved ? JSON.parse(saved) : INITIAL_REPORT_LOGS;
+    return safeStorageGet<ReportLog[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORT_LOGS);
   });
 
   const [badges, setBadges] = useState<StudentBadge[]>([]);
@@ -965,13 +977,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [remedialPlans, setRemedialPlans] = useState<RemedialActionPlan[]>([]);
 
   const [stages, setStages] = useState<EducationalStage[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.STAGES);
-    return saved ? JSON.parse(saved) : INITIAL_STAGES;
+    return safeStorageGet<EducationalStage[]>(STORAGE_KEYS.STAGES, INITIAL_STAGES);
   });
 
   const [archives, setArchives] = useState<AcademicTermArchive[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ARCHIVES);
-    return saved ? JSON.parse(saved) : INITIAL_ARCHIVES;
+    return safeStorageGet<AcademicTermArchive[]>(STORAGE_KEYS.ARCHIVES, INITIAL_ARCHIVES);
   });
 
   // P4: Admissions Requests State
@@ -1041,8 +1051,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [quranPlans, setQuranPlans] = useState<StudentQuranPlan[]>([]);
 
   const [quranStageConfigs, setQuranStageConfigs] = useState<StageQuranConfig[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY_STAGE_CONFIGS);
-    return saved ? JSON.parse(saved) : DEFAULT_STAGE_CONFIGS;
+    return safeStorageGet<StageQuranConfig[]>(LOCAL_STORAGE_KEY_STAGE_CONFIGS, DEFAULT_STAGE_CONFIGS);
   });
 
   // Operational State Memory Reset for switching accounts or roles
@@ -1088,8 +1097,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Quran Integration & Mushaf Profiles Configuration
   const [integrationConfig, setIntegrationConfig] = useState<IntegrationConfig>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.INTEGRATION_CONFIG);
-    return saved ? JSON.parse(saved) : DEFAULT_INTEGRATION_CONFIGS.development;
+    return safeStorageGet<IntegrationConfig>(STORAGE_KEYS.INTEGRATION_CONFIG, DEFAULT_INTEGRATION_CONFIGS.development);
   });
 
   const integrationManager = useMemo(() => {
@@ -1117,7 +1125,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [integrationConfig]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(integrationConfig));
+    safeStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(integrationConfig));
   }, [integrationConfig]);
 
   const activeTenant = useMemo(() => {
@@ -1143,12 +1151,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // If logged in as campus_admin or teacher, lock to their assigned tenantId to prevent cross-tenant data leak
     if (currentUser?.tenantId && currentUser.role !== 'system_admin' && (currentUser.role as any) !== 'admin') {
       setActiveTenantIdState(currentUser.tenantId);
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, currentUser.tenantId);
+      safeStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, currentUser.tenantId);
       resetOperationalMemory();
       return;
     }
     setActiveTenantIdState(tenantId);
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, tenantId);
+    safeStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, tenantId);
     resetOperationalMemory();
   }, [currentUser, resetOperationalMemory]);
 
@@ -1159,42 +1167,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Synchronize non-operational auth and system config with local storage
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
     } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      safeStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     }
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SPELLING, JSON.stringify(spellingLessons));
+    safeStorage.setItem(STORAGE_KEYS.SPELLING, JSON.stringify(spellingLessons));
   }, [spellingLessons]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PLAN, JSON.stringify(educationalPlan));
+    safeStorage.setItem(STORAGE_KEYS.PLAN, JSON.stringify(educationalPlan));
   }, [educationalPlan]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ACADEMIC, JSON.stringify(academicConfig));
+    safeStorage.setItem(STORAGE_KEYS.ACADEMIC, JSON.stringify(academicConfig));
   }, [academicConfig]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportLogs));
+    safeStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reportLogs));
   }, [reportLogs]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
+    safeStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
   }, [tenants]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.STAGES, JSON.stringify(stages));
+    safeStorage.setItem(STORAGE_KEYS.STAGES, JSON.stringify(stages));
   }, [stages]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ARCHIVES, JSON.stringify(archives));
+    safeStorage.setItem(STORAGE_KEYS.ARCHIVES, JSON.stringify(archives));
   }, [archives]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ORGANIZATIONS, JSON.stringify(organizations));
+    safeStorage.setItem(STORAGE_KEYS.ORGANIZATIONS, JSON.stringify(organizations));
   }, [organizations]);
 
   // Derived current role
@@ -1899,10 +1907,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 1. Establish tenant boundary synchronously
       setActiveTenantIdState(targetTenantId);
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, targetTenantId);
+      safeStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, targetTenantId);
 
       // 2. Synchronously write user session to prevent race conditions during immediate redirect
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
       setCurrentUser(user);
 
       // Ensure user is in users list so they appear in Permissions & Roles management
@@ -1947,7 +1955,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDemoBlockedNotice(null);
       setCurrentUser(null);
       setShowPasswordChangeModal(false);
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      safeStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       resetOperationalMemory();
       purgeOperationalLocalStorage();
       setActiveTenantIdState(INITIAL_TENANTS[0]?.id || '');
@@ -1957,8 +1965,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const tenantToPreserve = currentUser?.tenantId || activeTenantId || (INITIAL_TENANTS[0]?.id);
     setCurrentUser(null);
     setShowPasswordChangeModal(false);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, tenantToPreserve);
+    safeStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    safeStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, tenantToPreserve);
 
     // 2. Retain active campus tenant context
     setActiveTenantIdState(tenantToPreserve);
@@ -1989,7 +1997,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDemoBlockedNotice(null);
     setCurrentUser(null);
     setShowPasswordChangeModal(false);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    safeStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     resetOperationalMemory();
     purgeOperationalLocalStorage();
     setActiveTenantIdState(INITIAL_TENANTS[0]?.id || '');
@@ -3324,9 +3332,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const exists = prev.some((t) => t.id === tenant.id);
         const next = exists ? prev.map((t) => (t.id === tenant.id ? tenant : t)) : [...prev, tenant];
         try {
-          localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(next));
+          safeStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(next));
         } catch (e) {
-          console.warn('Failed to cache tenants in localStorage:', e);
+          console.warn('Failed to cache tenants in safeStorage:', e);
         }
         return next;
       });
@@ -4287,7 +4295,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       };
       setIntegrationConfig(nextConfig);
-      localStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
+      safeStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
 
       // Strictly record system audit log
       await recordAuditLog({
@@ -4315,7 +4323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       };
       setIntegrationConfig(nextConfig);
-      localStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
+      safeStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
 
       // Strictly record system audit log
       await recordAuditLog({
@@ -4343,7 +4351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       };
       setIntegrationConfig(nextConfig);
-      localStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
+      safeStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(nextConfig));
 
       // Strictly record system audit log
       await recordAuditLog({
@@ -4382,7 +4390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
           updatedAt: new Date().toISOString(),
         };
-        localStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(next));
+        safeStorage.setItem(STORAGE_KEYS.INTEGRATION_CONFIG, JSON.stringify(next));
         return next;
       });
       return result;
@@ -4881,7 +4889,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReportLogs(INITIAL_REPORT_LOGS);
     setBadges(INITIAL_BADGES);
     setRemedialPlans(INITIAL_REMEDIAL_PLANS);
-    localStorage.clear();
+    safeStorage.clear();
   }, []);
 
   return (

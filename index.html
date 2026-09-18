@@ -3,6 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        // 1. Safe in-memory storage fallback if localStorage is blocked (e.g. cross-origin iframe in Firefox)
+        try {
+          var test = '__probe__';
+          window.localStorage.setItem(test, test);
+          window.localStorage.removeItem(test);
+        } catch (e) {
+          var mem = {};
+          var mockStorage = {
+            getItem: function(k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+            setItem: function(k, v) { mem[k] = String(v); },
+            removeItem: function(k) { delete mem[k]; },
+            clear: function() { mem = {}; },
+            key: function(i) { return Object.keys(mem)[i] || null; },
+            get length() { return Object.keys(mem).length; }
+          };
+          try { Object.defineProperty(window, 'localStorage', { value: mockStorage, configurable: true, writable: true }); } catch (_) {}
+          try { Object.defineProperty(window, 'sessionStorage', { value: mockStorage, configurable: true, writable: true }); } catch (_) {}
+        }
+
+        // 2. Unregister any stale Service Worker and clear CacheStorage in dev/iframe
+        if ('serviceWorker' in navigator) {
+          try {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var i = 0; i < regs.length; i++) {
+                regs[i].unregister();
+              }
+            }).catch(function() {});
+          } catch (_) {}
+        }
+        if ('caches' in window) {
+          try {
+            caches.keys().then(function(names) {
+              for (var i = 0; i < names.length; i++) {
+                caches.delete(names[i]);
+              }
+            }).catch(function() {});
+          } catch (_) {}
+        }
+      })();
+    </script>
     <title>نظام إدارة المجمعات القرآنية – Quranic Centers Management System</title>
     <meta name="description" content="نظام إدارة المجمعات القرآنية وحلقات التحفيظ والمخرجات التعليمية والتربوية – Quranic Centers Management System" />
     <meta property="og:title" content="نظام إدارة المجمعات القرآنية – Quranic Centers Management System" />

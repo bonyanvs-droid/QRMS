@@ -38,6 +38,7 @@ import { TenantSwitcher } from './TenantSwitcher';
 import { resolveContextIdentity } from '../../lib/identityResolver';
 import { generateGeneralParentsGroupReport } from '../../utils/reportGenerator';
 import { calculateAggregateMetrics } from '../../utils/statusCalculator';
+import { safeStorage } from '../../lib/safeStorage';
 
 import { GlobalSidebar } from './GlobalSidebar';
 
@@ -103,16 +104,16 @@ export const Header: React.FC<HeaderProps> = ({
   const [showLogoModal, setShowLogoModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('school_screen_dark_mode') === 'true';
+    return safeStorage.getItem('school_screen_dark_mode') === 'true';
   });
 
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('school_screen_dark_mode', 'true');
+      safeStorage.setItem('school_screen_dark_mode', 'true');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('school_screen_dark_mode', 'false');
+      safeStorage.setItem('school_screen_dark_mode', 'false');
     }
   }, [isDarkMode]);
   const [mobileAdminExpanded, setMobileAdminExpanded] = useState(() => {
@@ -149,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
   // Synchronous resolution of user to guarantee immediate reflection
   const effectiveUser = currentUser || (() => {
     try {
-      const saved = localStorage.getItem('al_ghazzawi_current_user_v3');
+      const saved = safeStorage.getItem('al_ghazzawi_current_user_v3') || safeStorage.getItem('al_ghazzawi_current_user_v4');
       if (saved && saved !== 'null') {
         const u = JSON.parse(saved);
         if (u && u.id) return u;

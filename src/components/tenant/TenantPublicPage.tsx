@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { MosqueComplexTenant, FrontendConfig, SectionVisibility } from '../../types';
-import { db } from '../../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { getFrontendConfig } from '../../lib/dbService';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { getRolePortalRoute } from '../../lib/roleRoutes';
 import { MosqueLogo } from '../common/logos/MosqueLogo';
@@ -19,6 +18,7 @@ import {
 } from '../../data/demoFixtures';
 import { TenantAdMarquee, TenantBanners } from './TenantFrontendWidgets';
 import { TenantPrayerTimesCard } from './TenantPrayerTimesCard';
+import { safeStorage } from '../../lib/safeStorage';
 import {
   BookOpen,
   Calendar,
@@ -107,7 +107,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
   // Synchronous resolution of user to guarantee immediate reflection
   const effectiveUser = currentUser || (() => {
     try {
-      const saved = localStorage.getItem('al_ghazzawi_current_user_v4') || localStorage.getItem('qrms_current_user');
+      const saved = safeStorage.getItem('al_ghazzawi_current_user_v4') || safeStorage.getItem('qrms_current_user');
       if (saved && saved !== 'null') {
         const u = JSON.parse(saved);
         if (u && u.id) return u;
@@ -133,9 +133,9 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
     }
     const tId = tenant.id;
     if (tId) {
-      getDoc(doc(db, 'frontendConfigs', tId)).then((snap) => {
-        if (snap.exists()) {
-          setFrontConfig(snap.data() as FrontendConfig);
+      getFrontendConfig(tId).then((data) => {
+        if (data) {
+          setFrontConfig(data);
         }
       }).catch((err) => console.warn('Error fetching frontend config:', err));
     }

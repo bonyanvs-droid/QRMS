@@ -1,5 +1,6 @@
 import React, { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home, ChevronDown, ChevronUp } from 'lucide-react';
+import { safeStorage } from '../../lib/safeStorage';
 
 interface Props {
   children: ReactNode;
@@ -50,6 +51,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
     }
   };
 
+  private handleClearStorageAndReload = () => {
+    try {
+      safeStorage.clear();
+      sessionStorage.clear();
+    } catch {}
+    window.location.hash = '#/';
+    window.location.reload();
+  };
+
   public render() {
     if (this.state.hasError) {
       const title = this.props.fallbackTitle || 'حدث خطأ غير متوقع أثناء عرض هذا القسم';
@@ -88,6 +98,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
             >
               <Home className="w-4 h-4 text-slate-500" />
               <span>العودة للرئيسية</span>
+            </button>
+            <button
+              onClick={this.handleClearStorageAndReload}
+              className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all border border-rose-200 flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>مسح الذاكرة المؤقتة وإعادة التحميل</span>
             </button>
             <button
               onClick={() => this.setState((prev) => ({ showDetails: !prev.showDetails }))}

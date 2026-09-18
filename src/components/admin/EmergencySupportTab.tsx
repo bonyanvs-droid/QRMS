@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { EmergencySupportSession } from '../../types';
+import { safeStorage } from '../../lib/safeStorage';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -29,7 +30,7 @@ export const EmergencySupportTab: React.FC = () => {
   } = useApp();
 
   const [supportSessionsHistory, setSupportSessionsHistory] = useState<EmergencySupportSession[]>(() => {
-    const saved = localStorage.getItem('al_ghazzawi_support_sessions_v1');
+    const saved = safeStorage.getItem('al_ghazzawi_support_sessions_v1');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -45,7 +46,7 @@ export const EmergencySupportTab: React.FC = () => {
       setSupportSessionsHistory((prev) => {
         const filtered = prev.filter((s) => s.id !== activeSupportSession.id);
         const updated = [activeSupportSession, ...filtered];
-        localStorage.setItem('al_ghazzawi_support_sessions_v1', JSON.stringify(updated));
+        safeStorage.setItem('al_ghazzawi_support_sessions_v1', JSON.stringify(updated));
         return updated;
       });
     }

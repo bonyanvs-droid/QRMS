@@ -18,6 +18,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { safeStorage } from '../../lib/safeStorage';
 
 export interface OrthographyItem {
   id?: string;
@@ -149,7 +150,7 @@ export const SpellingInteractiveBoard: React.FC = () => {
     );
 
   const [categories, setCategories] = useState<OrthographyCategory[]>(() => {
-    const saved = localStorage.getItem('qrms_orthography_categories');
+    const saved = safeStorage.getItem('qrms_orthography_categories');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -194,7 +195,7 @@ export const SpellingInteractiveBoard: React.FC = () => {
   // Save to localStorage whenever categories change
   const saveCategoriesToStorage = (updated: OrthographyCategory[]) => {
     setCategories(updated);
-    localStorage.setItem('qrms_orthography_categories', JSON.stringify(updated));
+    safeStorage.setItem('qrms_orthography_categories', JSON.stringify(updated));
   };
 
   const currentCategory =

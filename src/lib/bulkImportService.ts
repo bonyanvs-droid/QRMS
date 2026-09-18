@@ -1,14 +1,10 @@
-import {
-  writeBatch,
-  doc,
-} from 'firebase/firestore';
-import { db } from './firebase';
 import { hashPasswordWithSalt } from './authService';
-import { sanitizeFirestoreData, recordAuditLog } from './auditService';
+import { recordAuditLog } from './auditService';
 import {
   BulkImportDataset,
 } from '../utils/bulkImportParser';
 import { Halaqah, Student, Teacher, User, MosqueComplexTenant } from '../types';
+import { apiClient } from './api/apiClient';
 
 export interface BulkImportProgress {
   phase: 'idle' | 'validating' | 'stages' | 'halaqahs' | 'staff' | 'parents' | 'students' | 'auth_sync' | 'completed' | 'error';
@@ -50,7 +46,7 @@ export interface BulkImportResult {
 }
 
 /**
- * Execute batched import of entire dataset into Firestore
+ * Execute batched import of entire dataset into PostgreSQL
  */
 export async function executeBulkImport(
   targetTenant: MosqueComplexTenant,
@@ -90,7 +86,7 @@ export async function executeBulkImport(
   };
 
   try {
-    updateProgress('validating', 1, 'جاري تهيئة الاتصال والتحقق من الهيكل...', 10);
+    updateProgress('validating', 1, 'جاري تهيئة الاتصال بقاعدة بيانات PostgreSQL والتحقق من الهيكل...', 10);
 
     // 1. Process & Save Staff (Teachers & Supervisors)
     updateProgress('staff', 2, 'جاري تأسيس حسابات المعلمين والمشرفين...', 25);
@@ -98,250 +94,224 @@ export async function executeBulkImport(
     const teacherNameToIdMap = new Map<string, string>();
     const teacherPhoneToIdMap = new Map<string, string>();
 
-    // Chunk staff writes in Firestore batches of 50
-    const staffChunks = chunkArray(dataset.staff, 50);
-    for (const chunk of staffChunks) {
-      const batch = writeBatch(db);
+    const usersToInsert: any[] = [];
 
-      for (const s of chunk) {
-        const isSupervisor = s.role === 'supervisor';
-        const staffId = isSupervisor
-          ? `sup_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-          : `tch_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    for (const s of dataset.staff) {
+      const isSupervisor = s.role === 'supervisor';
+      const staffId = isSupervisor
+        ? `sup_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+        : `tch_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-        const userId = `usr_${staffId}`;
+      const userId = `usr_${staffId}`;
 
-        if (s.name) teacherNameToIdMap.set(s.name.trim(), staffId);
-        if (s.phone) teacherPhoneToIdMap.set(s.phone.trim(), staffId);
+      if (s.name) teacherNameToIdMap.set(s.name.trim(), staffId);
+      if (s.phone) teacherPhoneToIdMap.set(s.phone.trim(), staffId);
 
-        // Teacher / Supervisor doc in `teachers`
-        const staffDoc: Partial<Teacher> = {
-          id: staffId,
-          name: s.name,
-          phone: s.phone,
-          halaqahId: '',
-          halaqahName: s.assignedHalaqahs?.join(', ') || '',
-          studentsCount: 0,
-          staffRole: isSupervisor ? 'supervisor' : 'teacher',
-          tenantId,
-          isActive: true,
-          assignedStageIds: [],
-          assignedHalaqahIds: [],
-        };
-        batch.set(doc(db, 'teachers', staffId), sanitizeFirestoreData(staffDoc), { merge: true });
+      // Platform User doc for PostgreSQL users table
+      const userDoc: Partial<User> = {
+        id: userId,
+        name: s.name,
+        fullName: s.name,
+        phone: s.phone,
+        nationalId: s.nationalId || '',
+        loginIdentifier: s.phone || s.nationalId || userId,
+        email: s.email || undefined,
+        role: s.role,
+        staffRole: isSupervisor ? 'supervisor' : 'teacher',
+        tenantId,
+        organizationId: targetTenant.organizationId || undefined,
+        passwordHash: defaultHash,
+        isActive: true,
+        mustChangePassword: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      usersToInsert.push(userDoc);
 
-        // Platform User doc for Authentication
-        const userDoc: Partial<User> = {
-          id: userId,
-          name: s.name,
-          fullName: s.name,
-          phone: s.phone,
-          nationalId: s.nationalId || '',
-          loginIdentifier: s.phone || s.nationalId || userId,
-          email: s.email || undefined,
-          role: s.role,
-          staffRole: isSupervisor ? 'supervisor' : 'teacher',
-          tenantId,
-          organizationId: targetTenant.organizationId || undefined,
-          passwordHash: defaultHash,
-          isActive: true,
-          mustChangePassword: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        batch.set(doc(db, 'platform_users', userId), sanitizeFirestoreData(userDoc), { merge: true });
-
-        if (isSupervisor) {
-          stats.supervisorsCreated++;
-        } else {
-          stats.teachersCreated++;
-        }
-        stats.usersCreated++;
-
-        credentials.push({
-          name: s.name,
-          role: isSupervisor ? 'مشرف تربوي' : 'معلم حلقات',
-          phone: s.phone || 'غير مسجل',
-          plainPassword: defaultPassword,
-          halaqahOrDetails: s.assignedHalaqahs?.join(', ') || 'كافة الحلقات',
-        });
+      if (isSupervisor) {
+        stats.supervisorsCreated++;
+      } else {
+        stats.teachersCreated++;
       }
+      stats.usersCreated++;
 
-      await batch.commit();
+      credentials.push({
+        name: s.name,
+        role: isSupervisor ? 'مشرف تربوي' : 'معلم حلقات',
+        phone: s.phone || 'غير مسجل',
+        plainPassword: defaultPassword,
+        halaqahOrDetails: s.assignedHalaqahs?.join(', ') || 'كافة الحلقات',
+      });
+    }
+
+    if (usersToInsert.length > 0) {
+      await apiClient.post('/users/bulk', { items: usersToInsert });
     }
 
     // 2. Process & Save Halaqahs
     updateProgress('halaqahs', 3, 'جاري تأسيس الحلقات والفصول وتوزيع المناهج...', 45);
 
     const halaqahNameToIdMap = new Map<string, string>();
-    const halaqahChunks = chunkArray(dataset.halaqahs, 50);
+    const halaqahsToInsert: any[] = [];
 
-    for (const chunk of halaqahChunks) {
-      const batch = writeBatch(db);
+    for (const h of dataset.halaqahs) {
+      const halaqahId = `hal_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      halaqahNameToIdMap.set(h.name.trim(), halaqahId);
 
-      for (const h of chunk) {
-        const halaqahId = `hal_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        halaqahNameToIdMap.set(h.name.trim(), halaqahId);
+      let teacherId = '';
+      let teacherName = h.teacherName || '';
 
-        // Resolve teacher
-        let teacherId = '';
-        let teacherName = h.teacherName || '';
-
-        if (h.teacherPhone && teacherPhoneToIdMap.has(h.teacherPhone)) {
-          teacherId = teacherPhoneToIdMap.get(h.teacherPhone)!;
-        } else if (h.teacherName && teacherNameToIdMap.has(h.teacherName.trim())) {
-          teacherId = teacherNameToIdMap.get(h.teacherName.trim())!;
-        }
-
-        const halDoc: Partial<Halaqah> = {
-          id: halaqahId,
-          name: h.name,
-          grade: h.grade || 'صف أول',
-          targetSurah: h.targetSurah || 'الغاشية',
-          stageId: h.stageId || 'baraem',
-          tenantId,
-          teacherId: teacherId || '',
-          teacherName: teacherName || '',
-          location: 'المسجد الرئيسي',
-          daysPerWeek: 4,
-          isActive: true,
-          activeTrackIds: ['track_quran', 'track_spelling', 'track_virtues'],
-        };
-
-        batch.set(doc(db, 'halaqahs', halaqahId), sanitizeFirestoreData(halDoc), { merge: true });
-        stats.halaqahsCreated++;
+      if (h.teacherPhone && teacherPhoneToIdMap.has(h.teacherPhone)) {
+        teacherId = teacherPhoneToIdMap.get(h.teacherPhone)!;
+      } else if (h.teacherName && teacherNameToIdMap.has(h.teacherName.trim())) {
+        teacherId = teacherNameToIdMap.get(h.teacherName.trim())!;
       }
 
-      await batch.commit();
+      const halDoc: Partial<Halaqah> = {
+        id: halaqahId,
+        name: h.name,
+        grade: h.grade || 'صف أول',
+        targetSurah: h.targetSurah || 'الغاشية',
+        stageId: h.stageId || 'baraem',
+        tenantId,
+        teacherId: teacherId || '',
+        teacherName: teacherName || '',
+        location: 'المسجد الرئيسي',
+        daysPerWeek: 4,
+        isActive: true,
+        activeTrackIds: ['track_quran', 'track_spelling', 'track_virtues'],
+      };
+
+      halaqahsToInsert.push(halDoc);
+      stats.halaqahsCreated++;
+    }
+
+    if (halaqahsToInsert.length > 0) {
+      await apiClient.post('/halaqahs/bulk', { items: halaqahsToInsert });
     }
 
     // 3. Process & Save Parents
     updateProgress('parents', 4, 'جاري تسجيل أولياء الأمور وتجهيز بوابات المتابعة...', 65);
 
     const parentPhoneToIdMap = new Map<string, string>();
-    const parentChunks = chunkArray(dataset.parents, 50);
+    const parentsToInsert: any[] = [];
 
-    for (const chunk of parentChunks) {
-      const batch = writeBatch(db);
+    for (const p of dataset.parents) {
+      const parentId = `prt_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const userId = `usr_${parentId}`;
+      parentPhoneToIdMap.set(p.phone, parentId);
 
-      for (const p of chunk) {
-        const parentId = `prt_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const userId = `usr_${parentId}`;
-        parentPhoneToIdMap.set(p.phone, parentId);
+      const userDoc: Partial<User> = {
+        id: userId,
+        name: p.name,
+        fullName: p.name,
+        phone: p.phone,
+        nationalId: p.nationalId || '',
+        loginIdentifier: p.phone || p.nationalId || userId,
+        role: 'parent',
+        tenantId,
+        organizationId: targetTenant.organizationId || undefined,
+        passwordHash: defaultHash,
+        isActive: true,
+        mustChangePassword: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      parentsToInsert.push(userDoc);
 
-        // User authentication for Parent Portal
-        const userDoc: Partial<User> = {
-          id: userId,
-          name: p.name,
-          fullName: p.name,
-          phone: p.phone,
-          nationalId: p.nationalId || '',
-          loginIdentifier: p.phone || p.nationalId || userId,
-          role: 'parent',
-          tenantId,
-          organizationId: targetTenant.organizationId || undefined,
-          passwordHash: defaultHash,
-          isActive: true,
-          mustChangePassword: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        batch.set(doc(db, 'platform_users', userId), sanitizeFirestoreData(userDoc), { merge: true });
+      stats.parentsCreated++;
+      stats.usersCreated++;
 
-        stats.parentsCreated++;
-        stats.usersCreated++;
+      credentials.push({
+        name: p.name,
+        role: 'ولي أمر',
+        phone: p.phone,
+        plainPassword: defaultPassword,
+        halaqahOrDetails: `الأبناء: ${p.studentNames.join(', ') || 'طالب'}`,
+      });
+    }
 
-        credentials.push({
-          name: p.name,
-          role: 'ولي أمر',
-          phone: p.phone,
-          plainPassword: defaultPassword,
-          halaqahOrDetails: `الأبناء: ${p.studentNames.join(', ') || 'طالب'}`,
-        });
-      }
-
-      await batch.commit();
+    if (parentsToInsert.length > 0) {
+      await apiClient.post('/users/bulk', { items: parentsToInsert });
     }
 
     // 4. Process & Save Students
     updateProgress('students', 5, 'جاري تسكين الطلاب وتوزيعهم على الحلقات والمسارات...', 85);
 
-    const studentChunks = chunkArray(dataset.students, 50);
+    const studentsToInsert: any[] = [];
+    const studentUsersToInsert: any[] = [];
 
-    for (const chunk of studentChunks) {
-      const batch = writeBatch(db);
+    for (const st of dataset.students) {
+      const studentId = `std_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const userId = `usr_${studentId}`;
+      const isActivitiesOnly = st.registrationType === 'activities_only';
 
-      for (const st of chunk) {
-        const studentId = `std_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const userId = `usr_${studentId}`;
-
-        const isActivitiesOnly = st.registrationType === 'activities_only';
-
-        // Match halaqah (only if not activities_only)
-        let halaqahId = '';
-        if (!isActivitiesOnly) {
-          if (st.halaqahName && halaqahNameToIdMap.has(st.halaqahName.trim())) {
-            halaqahId = halaqahNameToIdMap.get(st.halaqahName.trim())!;
-          } else if (dataset.halaqahs.length > 0) {
-            halaqahId = halaqahNameToIdMap.values().next().value || '';
-          }
+      let halaqahId = '';
+      if (!isActivitiesOnly) {
+        if (st.halaqahName && halaqahNameToIdMap.has(st.halaqahName.trim())) {
+          halaqahId = halaqahNameToIdMap.get(st.halaqahName.trim())!;
+        } else if (dataset.halaqahs.length > 0) {
+          halaqahId = halaqahNameToIdMap.values().next().value || '';
         }
-
-        const studentDoc: Partial<Student> = {
-          id: studentId,
-          fullName: st.name,
-          name: st.name,
-          nationalId: st.nationalId || '',
-          grade: (st.grade as any) || 'صف أول',
-          halaqahId: halaqahId || '',
-          halaqahName: isActivitiesOnly ? '' : (st.halaqahName || ''),
-          teacherId: '',
-          teacherName: '',
-          stageId: st.stageId || 'baraem',
-          registrationType: st.registrationType || 'full_package',
-          registrationTypeLabel: st.registrationTypeLabel || 'باقة الاشتراك الكامل',
-          parentName: st.parentName || undefined,
-          parentPhone: st.parentPhone || '',
-          guardianRelationship: (st.parentRelationship as any) || 'أب',
-          tenantId,
-          currentSurah: isActivitiesOnly ? '' : (st.currentSurah || 'الفاتحة'),
-          currentAyah: isActivitiesOnly ? 0 : (st.currentAyah || 1),
-          minimumTargetSurah: isActivitiesOnly ? '' : 'الغاشية',
-          currentSpellingLessonId: 'lesson_1',
-          currentSpellingScore: 100,
-          status: 'on_track',
-          attendanceStreak: 0,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        };
-
-        batch.set(doc(db, 'students', studentId), sanitizeFirestoreData(studentDoc), { merge: true });
-
-        // Student User profile for student portal
-        const userDoc: Partial<User> = {
-          id: userId,
-          name: st.name,
-          fullName: st.name,
-          phone: st.parentPhone || '',
-          nationalId: st.nationalId || '',
-          loginIdentifier: st.nationalId || `std_${studentId}`,
-          studentId,
-          halaqahId: halaqahId || undefined,
-          role: 'student',
-          tenantId,
-          organizationId: targetTenant.organizationId || undefined,
-          passwordHash: defaultHash,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        batch.set(doc(db, 'platform_users', userId), sanitizeFirestoreData(userDoc), { merge: true });
-
-        stats.studentsCreated++;
-        stats.usersCreated++;
       }
 
-      await batch.commit();
+      const studentDoc: Partial<Student> = {
+        id: studentId,
+        fullName: st.name,
+        name: st.name,
+        nationalId: st.nationalId || '',
+        grade: (st.grade as any) || 'صف أول',
+        halaqahId: halaqahId || '',
+        halaqahName: isActivitiesOnly ? '' : (st.halaqahName || ''),
+        teacherId: '',
+        teacherName: '',
+        stageId: st.stageId || 'baraem',
+        registrationType: st.registrationType || 'full_package',
+        registrationTypeLabel: st.registrationTypeLabel || 'باقة الاشتراك الكامل',
+        parentName: st.parentName || undefined,
+        parentPhone: st.parentPhone || '',
+        guardianRelationship: (st.parentRelationship as any) || 'أب',
+        tenantId,
+        currentSurah: isActivitiesOnly ? '' : (st.currentSurah || 'الفاتحة'),
+        currentAyah: isActivitiesOnly ? 0 : (st.currentAyah || 1),
+        minimumTargetSurah: isActivitiesOnly ? '' : 'الغاشية',
+        currentSpellingLessonId: 'lesson_1',
+        currentSpellingScore: 100,
+        status: 'on_track',
+        attendanceStreak: 0,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+      };
+      studentsToInsert.push(studentDoc);
+
+      const userDoc: Partial<User> = {
+        id: userId,
+        name: st.name,
+        fullName: st.name,
+        phone: st.parentPhone || '',
+        nationalId: st.nationalId || '',
+        loginIdentifier: st.nationalId || `std_${studentId}`,
+        studentId,
+        halaqahId: halaqahId || undefined,
+        role: 'student',
+        tenantId,
+        organizationId: targetTenant.organizationId || undefined,
+        passwordHash: defaultHash,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      studentUsersToInsert.push(userDoc);
+
+      stats.studentsCreated++;
+      stats.usersCreated++;
+    }
+
+    if (studentsToInsert.length > 0) {
+      await apiClient.post('/students/bulk', { items: studentsToInsert });
+    }
+    if (studentUsersToInsert.length > 0) {
+      await apiClient.post('/users/bulk', { items: studentUsersToInsert });
     }
 
     // 5. Audit Log Entry
@@ -354,7 +324,7 @@ export async function executeBulkImport(
       action: 'create',
       entityType: 'tenant',
       entityId: tenantId,
-      entityName: `استيراد شامل لبيانات مجمع (${tenantName})`,
+      entityName: `استيراد شامل لبيانات مجمع (${tenantName}) في PostgreSQL`,
       newValue: {
         stats,
         totalItems: dataset.summary.totalStudents + dataset.summary.totalTeachers + dataset.summary.totalHalaqahs,
@@ -387,13 +357,4 @@ export async function executeBulkImport(
       errors,
     };
   }
-}
-
-// Utility: split array into chunks
-function chunkArray<T>(items: T[], chunkSize: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    result.push(items.slice(i, i + chunkSize));
-  }
-  return result;
 }

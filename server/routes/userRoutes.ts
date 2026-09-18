@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getUsersByTenant, getUserById } from '../services/userService';
 import { requireTenantContext } from '../middleware/tenantContext';
+import { upsert, deleteRecord, bulkUpsert } from '../services/entityService';
 
 export const userRouter = Router();
 
@@ -40,6 +41,63 @@ userRouter.get('/:id', async (req, res, next) => {
     res.json({
       ok: true,
       data: user,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/users
+ * Saves or updates a user
+ */
+userRouter.post('/', async (req, res, next) => {
+  try {
+    const saved = await upsert('users', req.body, req.tenantId);
+    res.json({
+      ok: true,
+      data: saved,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/users/bulk
+ * Saves multiple users
+ */
+userRouter.post('/bulk', async (req, res, next) => {
+  try {
+    const items = req.body.items || req.body.records || (Array.isArray(req.body) ? req.body : []);
+    const result = await bulkUpsert('users', items, req.tenantId);
+    res.json({
+      ok: true,
+      count: result.count,
+      data: result.items,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/users/:id
+ * Deletes a user
+ */
+userRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const deleted = await deleteRecord('users', req.params.id, req.tenantId);
+    if (!deleted) {
+      res.status(404).json({
+        ok: false,
+        error: 'User not found or could not be deleted',
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      message: `User ${req.params.id} deleted successfully`,
     });
   } catch (err) {
     next(err);

@@ -1,8 +1,7 @@
-import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
-import { db } from './firebase';
 import { Student, DailySessionRecord, SpellingLesson, AcademicYearConfig } from '../types';
 import { calculateAggregateMetrics } from '../utils/statusCalculator';
 import { isCurrentSessionDemo } from './demoGuard';
+import { apiClient } from './api/apiClient';
 
 export interface PublicSummaryData {
   totalStudents: number;
@@ -31,35 +30,20 @@ export interface PublicSummaryData {
   updatedAt: string;
 }
 
-const PUBLIC_SUMMARY_DOC = 'current';
-
 /**
- * Subscribes to the public aggregated metrics document.
- * Safe for unauthenticated visitors - does not touch individual student PII or parent phones.
+ * Subscribes to the public aggregated metrics.
  */
 export function subscribeToPublicSummary(
   callback: (summary: PublicSummaryData) => void
-): Unsubscribe {
+): () => void {
   if (isCurrentSessionDemo()) {
     return () => {};
   }
-  const ref = doc(db, 'public_summary', PUBLIC_SUMMARY_DOC);
-  return onSnapshot(
-    ref,
-    (snap) => {
-      if (snap.exists()) {
-        callback(snap.data() as PublicSummaryData);
-      }
-    },
-    (err) => {
-      console.warn('Public summary subscription notice:', err.message);
-    }
-  );
+  return apiClient.subscribe<PublicSummaryData>('public_summary', callback);
 }
 
 /**
- * Recalculates and updates the public summary aggregate document.
- * Called when an admin or teacher updates students or session records.
+ * Recalculates and updates the public summary aggregate in PostgreSQL.
  */
 export async function updatePublicSummary(
   students: Student[],
@@ -82,9 +66,8 @@ export async function updatePublicSummary(
       gradeCounts,
       updatedAt: new Date().toISOString(),
     };
-    const ref = doc(db, 'public_summary', PUBLIC_SUMMARY_DOC);
-    await setDoc(ref, summaryData, { merge: true });
+    await apiClient.post('/public_summary', summaryData);
   } catch (error: any) {
-    console.warn('Notice updating public summary in Firestore:', error);
+    console.warn('Notice updating public summary in PostgreSQL:', error?.message || error);
   }
 }

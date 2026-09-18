@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Video, ExternalLink, Clock, Loader2, Check, Sparkles } from 'lucide-react';
 import { Halaqah, Student } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { subscribeToOnlineSession } from '../../lib/dbService';
+import { safeStorage } from '../../lib/safeStorage';
 
 interface Props {
   halaqah: Halaqah;
@@ -27,37 +27,16 @@ export function OnlineModeStudentWidget({ halaqah, student }: Props) {
     }
   }, [halaqah]);
 
-  // 1. Listen directly to real-time Halaqah document changes in Firestore
-  useEffect(() => {
-    if (!halaqah?.id) return;
-    const halaqahDocRef = doc(db, 'halaqahs', halaqah.id);
-    const unsubHalaqah = onSnapshot(halaqahDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data?.onlineConfig) {
-          setLiveOnlineConfig(data.onlineConfig);
-          if (data.onlineConfig.meetingUrl) {
-            setLiveMeetingUrl(data.onlineConfig.meetingUrl);
-          }
-        }
-      }
-    }, (err) => {
-      console.warn('Student widget halaqah listener notice:', err);
-    });
-
-    return () => unsubHalaqah();
-  }, [halaqah?.id]);
-
-  // 2. Listen to real-time Online Sessions & Teacher Presence
+  // Listen to real-time Online Sessions & Teacher Presence
   useEffect(() => {
     if (!halaqah?.id) return;
     const todayStr = new Date().toISOString().split('T')[0];
-    const sessionRef = doc(db, 'onlineSessions', `${halaqah.id}_${todayStr}`);
+    const sessionId = `${halaqah.id}_${todayStr}`;
     const localKey = `online_session_${halaqah.id}_${todayStr}`;
     
     // Check initial local cache
     try {
-      const cached = localStorage.getItem(localKey);
+      const cached = safeStorage.getItem(localKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed?.teacherOnline) {
@@ -69,47 +48,17 @@ export function OnlineModeStudentWidget({ halaqah, student }: Props) {
       }
     } catch {}
 
-    // Subscribe to session state to see if teacher joined or updated meetingUrl
-    const unsubscribe = onSnapshot(sessionRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const unsub = subscribeToOnlineSession(sessionId, (data) => {
+      if (data) {
         if (data.teacherOnline) {
           setTeacherOnline(true);
         }
         if (data.meetingUrl) {
           setLiveMeetingUrl(data.meetingUrl);
         }
-      } else {
-        try {
-          const cached = localStorage.getItem(localKey);
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            setTeacherOnline(!!parsed?.teacherOnline);
-            if (parsed?.meetingUrl) {
-              setLiveMeetingUrl(parsed.meetingUrl);
-            }
-          } else {
-            setTeacherOnline(false);
-          }
-        } catch {
-          setTeacherOnline(false);
-        }
       }
-    }, (err) => {
-      console.warn('Online session listener note:', err);
-      try {
-        const cached = localStorage.getItem(localKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          setTeacherOnline(!!parsed?.teacherOnline);
-          if (parsed?.meetingUrl) {
-            setLiveMeetingUrl(parsed.meetingUrl);
-          }
-        }
-      } catch {}
     });
 
-    // 3. Listen to cross-tab and local window events for immediate reactivity
     const handleLocalUpdate = (e: any) => {
       if (e?.detail?.halaqahId === halaqah.id) {
         if (e.detail.updates?.onlineConfig?.meetingUrl) {
@@ -123,7 +72,7 @@ export function OnlineModeStudentWidget({ halaqah, student }: Props) {
     window.addEventListener('halaqah_meeting_updated', handleLocalUpdate);
     
     return () => {
-      unsubscribe();
+      unsub();
       window.removeEventListener('halaqah_meeting_updated', handleLocalUpdate);
     };
   }, [halaqah?.id]);
@@ -140,90 +89,93 @@ export function OnlineModeStudentWidget({ halaqah, student }: Props) {
   const todayDay = now.getDay();
   const isScheduledToday = scheduleDays.includes(todayDay);
 
-  const [startHour, startMin] = (startTime || '16:00').split(':').map(Number);
-  const [endHour, endMin] = (endTime || '18:00').split(':').map(Number);
-  
-  const startObj = new Date();
-  startObj.setHours(startHour, startMin, 0, 0);
-  const startObjMinus15 = new Date(startObj.getTime() - 15 * 60000);
-  
-  const endObj = new Date();
-  endObj.setHours(endHour, endMin, 0, 0);
-  
-  const isWithinWindow = isScheduledToday && now >= startObjMinus15 && now <= endObj;
+  const [startH, startM] = (startTime || '16:00').split(':').map(Number);
+  const [endH, endM] = (endTime || '18:00').split(':').map(Number);
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  const isWithinTime = isScheduledToday && currentMinutes >= (startMinutes - 15) && currentMinutes <= (endMinutes + 15);
+  const isLive = teacherOnline || isWithinTime;
 
   const handleJoin = async () => {
     if (!effectiveMeetingUrl) return;
     setJoining(true);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Auto mark attendance for student on remote join
     try {
-      const dateStr = new Date().toISOString().split('T')[0];
-      bulkMarkAttendance(dateStr, academicConfig.currentWeek, halaqah.id, { [student.id]: 'present' });
-      window.open(effectiveMeetingUrl, '_blank');
+      const weekNumber = (academicConfig as any)?.currentWeekNumber || 1;
+      await bulkMarkAttendance(todayStr, weekNumber, halaqah.id, [student.id]);
     } catch (e) {
-      console.error(e);
+      console.warn('Auto attendance error:', e);
     }
-    setJoining(false);
+
+    setTimeout(() => {
+      setJoining(false);
+      window.open(effectiveMeetingUrl, '_blank', 'noopener,noreferrer');
+    }, 400);
   };
 
   return (
-    <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-300 rounded-2xl p-5 mb-6 shadow-sm relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-1.5 h-full bg-emerald-600"></div>
-      
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-md shrink-0">
-            <Video className="w-6 h-6" />
+    <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white rounded-2xl p-5 shadow-lg border border-emerald-500/30 mb-6 relative overflow-hidden backdrop-blur-sm">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
+        <div className="flex items-center gap-3.5">
+          <div className="relative">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isLive ? 'bg-emerald-400 text-slate-950 ring-4 ring-emerald-400/30 animate-pulse' : 'bg-white/10 text-emerald-300'}`}>
+              <Video className="w-6 h-6" />
+            </div>
+            {isLive && (
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-slate-900"></span>
+              </span>
+            )}
           </div>
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-black text-emerald-950 text-lg">الحلقة القرآنية الافتراضية (Online)</h3>
-              {teacherOnline ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-black bg-emerald-500 text-white px-2.5 py-0.5 rounded-full animate-pulse shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
-                  المعلم متصل الآن
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-white tracking-wide">الغرفة الافتراضية للحلقة (عن بُعد)</h3>
+              {isLive ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40">
+                  <Sparkles className="w-3 h-3 text-emerald-400" />
+                  <span>{teacherOnline ? 'المعلم متصل الآن' : 'وقت الحلقة'}</span>
                 </span>
-              ) : effectiveMeetingUrl ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-teal-100 text-teal-800 border border-teal-200 px-2.5 py-0.5 rounded-full">
-                  الرابط محدث ومتاح
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-white/10 text-slate-300">
+                  <Clock className="w-3 h-3" />
+                  <span>{startTime} - {endTime}</span>
                 </span>
-              ) : null}
+              )}
             </div>
-            <p className="text-xs text-emerald-800 flex items-center gap-2 mt-1 font-medium">
-              <Clock className="w-3.5 h-3.5 text-emerald-700" />
-              <span>الموعد: {startTime} - {endTime}</span>
-              {isWithinWindow && <span className="font-bold text-emerald-700">(وقت البث الحالي)</span>}
+            <p className="text-xs text-emerald-100/70 mt-0.5">
+              {halaqah.name} {halaqah.teacherName ? `• إشراف المعلم: ${halaqah.teacherName}` : ''}
             </p>
           </div>
         </div>
 
-        <div className="w-full md:w-auto">
-          {!effectiveMeetingUrl ? (
-            <div className="text-xs font-bold text-slate-600 bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-2xs">
-              لم يقم المعلم أو الإدارة بإضافة رابط البث حتى الآن.
-            </div>
-          ) : teacherOnline ? (
+        <div>
+          {effectiveMeetingUrl ? (
             <button
               onClick={handleJoin}
               disabled={joining}
-              className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white px-6 py-2.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
+              className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg transition-all active:scale-95 w-full sm:w-auto ${
+                isLive
+                  ? 'bg-emerald-400 hover:bg-emerald-300 text-slate-950 ring-2 ring-emerald-400/50 shadow-emerald-950/50 animate-bounce'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+              }`}
             >
-              {joining ? <Loader2 className="w-5 h-5 animate-spin" /> : <ExternalLink className="w-5 h-5" />}
-              <span>المعلم متصل • انضم للبث الآن</span>
+              {joining ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ExternalLink className="w-4 h-4" />
+              )}
+              <span>دخول حلقة البث المباشر</span>
             </button>
           ) : (
-            <div className="flex flex-col sm:flex-row items-center gap-2">
-              <span className="text-xs text-slate-600 font-bold bg-white/80 px-2.5 py-1 rounded-lg border border-slate-200">
-                بانتظار بدء المعلم للبث
-              </span>
-              <button
-                onClick={handleJoin}
-                disabled={joining}
-                className="w-full sm:w-auto bg-white border-2 border-emerald-500 hover:bg-emerald-50 text-emerald-800 px-5 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
-              >
-                {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4 text-emerald-700" />}
-                <span>دخول الغرفة (الرابط جاهز)</span>
-              </button>
-            </div>
+            <span className="text-xs text-slate-400 bg-white/5 px-3 py-2 rounded-lg inline-block">
+              بانتظار إضافة المعلم لرابط الاجتماع
+            </span>
           )}
         </div>
       </div>

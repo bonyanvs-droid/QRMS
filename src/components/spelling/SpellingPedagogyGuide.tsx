@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { safeStorage } from '../../lib/safeStorage';
 
 export interface MethodologyStep {
   id: string;
@@ -193,7 +194,7 @@ export const SpellingPedagogyGuide: React.FC = () => {
   const [activeTopic, setActiveTopic] = useState<'methodology' | 'mistakes' | 'levels' | 'qa'>('methodology');
 
   const [guideData, setGuideData] = useState<PedagogyGuideData>(() => {
-    const saved = localStorage.getItem('qrms_pedagogy_guide_data');
+    const saved = safeStorage.getItem('qrms_pedagogy_guide_data');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -206,7 +207,7 @@ export const SpellingPedagogyGuide: React.FC = () => {
 
   const saveGuideToStorage = (updated: PedagogyGuideData) => {
     setGuideData(updated);
-    localStorage.setItem('qrms_pedagogy_guide_data', JSON.stringify(updated));
+    safeStorage.setItem('qrms_pedagogy_guide_data', JSON.stringify(updated));
   };
 
   const handleRestoreDefaults = () => {

@@ -85,6 +85,8 @@ export interface DbTableMapping {
   report_logs: ReportLog;
   academic_archives: AcademicTermArchive;
   support_sessions: EmergencySupportSession;
+  migration_runs: any;
+  migration_logs: any;
 }
 
 export type DbTableName = keyof DbTableMapping;

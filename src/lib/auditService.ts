@@ -1,6 +1,5 @@
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
 import { AuditLog, UserRole } from '../types';
+import { apiClient } from './api/apiClient';
 
 export interface CreateAuditLogParams {
   userId: string;
@@ -16,8 +15,7 @@ export interface CreateAuditLogParams {
 }
 
 /**
- * Recursively cleans any object or array to strip keys with `undefined` values,
- * ensuring Firestore never rejects documents with "Unsupported field value: undefined".
+ * Recursively cleans any object or array to strip keys with `undefined` values.
  */
 export function sanitizeFirestoreData<T>(val: T): T {
   if (val === undefined) {
@@ -46,21 +44,44 @@ export function sanitizeFirestoreData<T>(val: T): T {
 import { isCurrentSessionDemo } from './demoGuard';
 
 /**
- * Appends an immutable record to the audit trail in Firestore.
+ * Appends an immutable record to the audit trail in PostgreSQL.
  */
-export async function recordAuditLog(params: CreateAuditLogParams): Promise<void> {
+export async function recordAuditLog(
+  actorOrParams: CreateAuditLogParams | { id: string; name: string; role: any },
+  entityType?: AuditLog['entityType'] | string,
+  entityId?: string,
+  action?: string,
+  details?: any,
+  tenantId?: string
+): Promise<void> {
   if (isCurrentSessionDemo()) {
     return;
   }
   try {
-    const rawData = {
-      ...params,
-      timestamp: new Date().toISOString(),
-    };
-    const logData = sanitizeFirestoreData(rawData);
-    const newDocRef = doc(collection(db, 'audit_logs'));
-    await setDoc(newDocRef, logData, { merge: true });
+    let logPayload: any;
+    if ('userId' in actorOrParams) {
+      logPayload = {
+        id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        ...actorOrParams,
+        timestamp: new Date().toISOString(),
+      };
+    } else {
+      logPayload = {
+        id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        userId: actorOrParams.id,
+        userName: actorOrParams.name,
+        userRole: actorOrParams.role,
+        action: action || 'UPDATE',
+        entityType: entityType || 'system',
+        entityId: entityId || '',
+        entityName: typeof details === 'string' ? details : JSON.stringify(details || {}),
+        tenantId,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    await apiClient.post('/audit_logs', logPayload);
   } catch (error: any) {
-    console.warn('Audit log write notice:', error);
+    console.warn('Audit log write notice:', error?.message || error);
   }
 }

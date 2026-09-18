@@ -21,8 +21,6 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { FrontendConfig, BannerItem, AdItem, SectionVisibility } from '../../types';
@@ -32,6 +30,7 @@ import {
   extractYouTubeId,
   getYouTubeThumbnail,
 } from '../../lib/storageService';
+import { getFrontendConfig, saveFrontendConfig } from '../../lib/dbService';
 
 const DEFAULT_SECTIONS: SectionVisibility[] = [
   { id: 'banners', label: 'البانرات الرئيسية العريضة (Banners)', isVisible: true, order: 1 },
@@ -136,10 +135,8 @@ export default function FrontendManagementTab() {
     const fetchConfig = async () => {
       setLoading(true);
       try {
-        const docRef = doc(db, 'frontendConfigs', configId);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data() as FrontendConfig;
+        const data = await getFrontendConfig(configId);
+        if (data) {
           // Merge sections with defaults to ensure all sections exist with updated labels
           const defaultMap = new Map(DEFAULT_SECTIONS.map((s) => [s.id, s]));
           const existingSections = data.sections || [];
@@ -167,7 +164,7 @@ export default function FrontendManagementTab() {
           setConfig({
             ...data,
             banners: data.banners || [],
-            announcements: data.announcements || data.ads || [],
+            announcements: data.announcements || (data as any).ads || [],
             sections: normalizedSections,
           });
         } else {
@@ -214,7 +211,7 @@ export default function FrontendManagementTab() {
     setSaving(true);
     setSaveSuccess(false);
     try {
-      await setDoc(doc(db, 'frontendConfigs', configId), config, { merge: true });
+      await saveFrontendConfig(configId, config);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
     } catch (e) {
@@ -234,7 +231,7 @@ export default function FrontendManagementTab() {
         const updated = config.banners.map((b) => (b.id === bannerId ? { ...b, imageUrl: url } : b));
         setConfig({ ...config, banners: updated });
         try {
-          await setDoc(doc(db, 'frontendConfigs', configId), { ...config, banners: updated }, { merge: true });
+          await saveFrontendConfig(configId, { ...config, banners: updated });
         } catch (saveErr) {
           console.error('Auto save error:', saveErr);
         }
@@ -257,7 +254,7 @@ export default function FrontendManagementTab() {
         const updated = config.announcements.map((a) => (a.id === adId ? { ...a, mediaUrl: url } : a));
         setConfig({ ...config, announcements: updated });
         try {
-          await setDoc(doc(db, 'frontendConfigs', configId), { ...config, announcements: updated }, { merge: true });
+          await saveFrontendConfig(configId, { ...config, announcements: updated });
         } catch (saveErr) {
           console.error('Auto save error:', saveErr);
         }

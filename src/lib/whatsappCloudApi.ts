@@ -1,4 +1,5 @@
 import { WhatsAppApiConfig } from '../types';
+import { safeStorage } from './safeStorage';
 
 export const DEFAULT_WHATSAPP_CONFIG: WhatsAppApiConfig = {
   enabled: false,
@@ -18,7 +19,7 @@ const STORAGE_KEY = 'baraem_whatsapp_config_v2';
 
 export function getStoredWhatsAppConfig(): WhatsAppApiConfig {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = safeStorage.getItem(STORAGE_KEY);
     if (raw) {
       return { ...DEFAULT_WHATSAPP_CONFIG, ...JSON.parse(raw) };
     }
@@ -32,7 +33,7 @@ export const getWhatsAppConfig = getStoredWhatsAppConfig;
 
 export function saveWhatsAppConfig(config: WhatsAppApiConfig): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    safeStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   } catch (err) {
     console.error('Error saving WhatsApp config:', err);
   }

@@ -1,17 +1,4 @@
 import {
-  collection,
-  doc,
-  setDoc,
-  getDoc,
-  getDocs,
-  deleteDoc,
-  onSnapshot,
-  query,
-  where,
-  Unsubscribe,
-} from 'firebase/firestore';
-import { db } from './firebase';
-import {
   RevenueItem,
   ExpenseItem,
   Custody,
@@ -19,8 +6,9 @@ import {
   BudgetRequest,
   FinanceSettingsData,
 } from '../types';
-import { sanitizeFirestoreData } from './auditService';
-import { isCurrentSessionDemo } from './demoGuard';
+import { FinanceRepository } from './repositories/financeRepository';
+
+export type Unsubscribe = () => void;
 
 // Default initial finance settings
 export const DEFAULT_FINANCE_SETTINGS: Omit<FinanceSettingsData, 'tenantId'> = {
@@ -62,38 +50,13 @@ export function subscribeToFinanceSettings(
   tenantId: string,
   callback: (settings: FinanceSettingsData) => void
 ): Unsubscribe {
-  if (isCurrentSessionDemo()) {
-    callback({ tenantId, ...DEFAULT_FINANCE_SETTINGS });
-    return () => {};
-  }
-  const docRef = doc(db, 'finance_settings', tenantId || 'default');
-  return onSnapshot(docRef, (snap) => {
-    if (snap.exists()) {
-      callback({ tenantId, ...(snap.data() as any) });
-    } else {
-      callback({ tenantId, ...DEFAULT_FINANCE_SETTINGS });
-    }
-  }, (err) => {
-    console.warn('Notice subscribing to finance settings:', (err as any)?.message || err);
-    callback({ tenantId, ...DEFAULT_FINANCE_SETTINGS });
-  });
-}
-
-async function safeWriteFinance(writeFn: () => Promise<void>): Promise<void> {
-  if (isCurrentSessionDemo()) return;
-  try {
-    await writeFn();
-  } catch (error: any) {
-    console.warn('Finance write error:', error);
-    throw error;
-  }
+  return FinanceRepository.subscribeFinanceSettings((settings) => {
+    callback(settings || { tenantId, ...DEFAULT_FINANCE_SETTINGS });
+  }, tenantId);
 }
 
 export async function saveFinanceSettings(settings: FinanceSettingsData): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, 'finance_settings', settings.tenantId || 'default');
-    await setDoc(docRef, sanitizeFirestoreData(settings), { merge: true });
-  });
+  await FinanceRepository.saveFinanceSettings(settings);
 }
 
 // ----------------------------------------------------
@@ -103,31 +66,18 @@ export function subscribeToRevenues(
   tenantId: string,
   callback: (items: RevenueItem[]) => void
 ): Unsubscribe {
-  const q = query(collection(db, 'revenues'), where('tenantId', '==', tenantId || 'default'));
-  return onSnapshot(q, (snapshot) => {
-    const list: RevenueItem[] = [];
-    snapshot.forEach((d) => {
-      list.push({ id: d.id, ...(d.data() as any) });
-    });
-    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    callback(list);
-  }, (err) => {
-    console.warn('Notice subscribing to revenues:', (err as any)?.message || err);
-    callback([]);
-  });
+  return FinanceRepository.subscribeRevenues((items) => {
+    const sorted = [...items].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    callback(sorted);
+  }, tenantId);
 }
 
 export async function saveRevenueItem(item: RevenueItem): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, 'revenues', item.id);
-    await setDoc(docRef, sanitizeFirestoreData(item), { merge: true });
-  });
+  await FinanceRepository.saveRevenue(item);
 }
 
 export async function deleteRevenueItem(id: string): Promise<void> {
-  await safeWriteFinance(async () => {
-    await deleteDoc(doc(db, 'revenues', id));
-  });
+  await FinanceRepository.deleteRevenue(id);
 }
 
 // ----------------------------------------------------
@@ -137,31 +87,18 @@ export function subscribeToExpenses(
   tenantId: string,
   callback: (items: ExpenseItem[]) => void
 ): Unsubscribe {
-  const q = query(collection(db, 'expenses'), where('tenantId', '==', tenantId || 'default'));
-  return onSnapshot(q, (snapshot) => {
-    const list: ExpenseItem[] = [];
-    snapshot.forEach((d) => {
-      list.push({ id: d.id, ...(d.data() as any) });
-    });
-    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    callback(list);
-  }, (err) => {
-    console.warn('Notice subscribing to expenses:', (err as any)?.message || err);
-    callback([]);
-  });
+  return FinanceRepository.subscribeExpenses((items) => {
+    const sorted = [...items].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    callback(sorted);
+  }, tenantId);
 }
 
 export async function saveExpenseItem(item: ExpenseItem): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, 'expenses', item.id);
-    await setDoc(docRef, sanitizeFirestoreData(item), { merge: true });
-  });
+  await FinanceRepository.saveExpense(item);
 }
 
 export async function deleteExpenseItem(id: string): Promise<void> {
-  await safeWriteFinance(async () => {
-    await deleteDoc(doc(db, 'expenses', id));
-  });
+  await FinanceRepository.deleteExpense(id);
 }
 
 // ----------------------------------------------------
@@ -171,62 +108,36 @@ export function subscribeToCustodies(
   tenantId: string,
   callback: (items: Custody[]) => void
 ): Unsubscribe {
-  const q = query(collection(db, 'custodies'), where('tenantId', '==', tenantId || 'default'));
-  return onSnapshot(q, (snapshot) => {
-    const list: Custody[] = [];
-    snapshot.forEach((d) => {
-      list.push({ id: d.id, ...(d.data() as any) });
-    });
-    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(list);
-  }, (err) => {
-    console.warn('Notice subscribing to custodies:', (err as any)?.message || err);
-    callback([]);
-  });
+  return FinanceRepository.subscribeCustodies((items) => {
+    const sorted = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(sorted);
+  }, tenantId);
 }
 
 export async function saveCustody(custody: Custody): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, 'custodies', custody.id);
-    await setDoc(docRef, sanitizeFirestoreData(custody), { merge: true });
-  });
+  await FinanceRepository.saveCustody(custody);
 }
 
 export async function deleteCustody(id: string): Promise<void> {
-  await safeWriteFinance(async () => {
-    await deleteDoc(doc(db, 'custodies', id));
-  });
+  await FinanceRepository.deleteCustody(id);
 }
 
 export function subscribeToCustodyExpenses(
   custodyId: string,
   callback: (items: CustodyExpenseItem[]) => void
 ): Unsubscribe {
-  const q = query(collection(db, `custodies/${custodyId}/expenses`));
-  return onSnapshot(q, (snapshot) => {
-    const list: CustodyExpenseItem[] = [];
-    snapshot.forEach((d) => {
-      list.push({ id: d.id, ...(d.data() as any) });
-    });
-    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    callback(list);
-  }, (err) => {
-    console.warn('Notice subscribing to custody expenses:', (err as any)?.message || err);
-    callback([]);
-  });
+  return FinanceRepository.subscribeCustodyExpenses((items) => {
+    const sorted = [...items].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    callback(sorted);
+  }, custodyId);
 }
 
 export async function saveCustodyExpenseItem(item: CustodyExpenseItem): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, `custodies/${item.custodyId}/expenses`, item.id);
-    await setDoc(docRef, sanitizeFirestoreData(item), { merge: true });
-  });
+  await FinanceRepository.saveCustodyExpense(item);
 }
 
-export async function deleteCustodyExpenseItem(custodyId: string, itemId: string): Promise<void> {
-  await safeWriteFinance(async () => {
-    await deleteDoc(doc(db, `custodies/${custodyId}/expenses`, itemId));
-  });
+export async function deleteCustodyExpenseItem(_custodyId: string, itemId: string): Promise<void> {
+  await FinanceRepository.deleteCustodyExpense(itemId);
 }
 
 // ----------------------------------------------------
@@ -236,29 +147,16 @@ export function subscribeToBudgetRequests(
   tenantId: string,
   callback: (items: BudgetRequest[]) => void
 ): Unsubscribe {
-  const q = query(collection(db, 'budget_requests'), where('tenantId', '==', tenantId || 'default'));
-  return onSnapshot(q, (snapshot) => {
-    const list: BudgetRequest[] = [];
-    snapshot.forEach((d) => {
-      list.push({ id: d.id, ...(d.data() as any) });
-    });
-    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(list);
-  }, (err) => {
-    console.warn('Notice subscribing to budget requests:', (err as any)?.message || err);
-    callback([]);
-  });
+  return FinanceRepository.subscribeBudgetRequests((items) => {
+    const sorted = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(sorted);
+  }, tenantId);
 }
 
 export async function saveBudgetRequest(req: BudgetRequest): Promise<void> {
-  await safeWriteFinance(async () => {
-    const docRef = doc(db, 'budget_requests', req.id);
-    await setDoc(docRef, sanitizeFirestoreData(req), { merge: true });
-  });
+  await FinanceRepository.saveBudgetRequest(req);
 }
 
 export async function deleteBudgetRequest(id: string): Promise<void> {
-  await safeWriteFinance(async () => {
-    await deleteDoc(doc(db, 'budget_requests', id));
-  });
+  await FinanceRepository.deleteBudgetRequest(id);
 }

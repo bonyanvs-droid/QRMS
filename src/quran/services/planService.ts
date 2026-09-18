@@ -5,6 +5,7 @@ import { QuranRevisionPlanningEngine } from './revisionEngine';
 import { PlanRecalculationService } from './recalculationService';
 import { StudentQuranPlan } from '../types/plan';
 import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../models/stageConfig';
+import { safeStorage } from '../../lib/safeStorage';
 
 export interface PlanStudentDemo {
   id: string;
@@ -45,18 +46,16 @@ const LOCAL_STORAGE_KEY_PLANS = 'quran_engine_student_plans_v1';
 const LOCAL_STORAGE_KEY_STAGES = 'quran_engine_stage_configs_v1';
 
 function safeGetItem(key: string): string | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
-    return window.localStorage.getItem(key);
+    return safeStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
 function safeSetItem(key: string, value: string): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    window.localStorage.setItem(key, value);
+    safeStorage.setItem(key, value);
   } catch {
     // Ignore storage quota or disabled errors
   }

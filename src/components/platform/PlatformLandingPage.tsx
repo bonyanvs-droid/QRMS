@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { safeStorage } from '../../lib/safeStorage';
 import {
   BookOpen,
   Sparkles,
@@ -39,8 +40,7 @@ import { MosqueLogo } from '../common/logos/MosqueLogo';
 import { MosqueComplexTenant, UserRole, FrontendConfig } from '../../types';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { useApp } from '../../context/AppContext';
-import { db } from '../../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { getFrontendConfig } from '../../lib/dbService';
 import { TenantAdMarquee, TenantBanners } from '../tenant/TenantFrontendWidgets';
 import { getRolePortalRoute } from '../../lib/roleRoutes';
 
@@ -66,16 +66,16 @@ export const PlatformLandingPage: React.FC<PlatformLandingPageProps> = ({
 
   const [frontConfig, setFrontConfig] = React.useState<FrontendConfig | null>(null);
   React.useEffect(() => {
-    getDoc(doc(db, 'frontendConfigs', 'platform')).then(snap => {
-      if (snap.exists()) {
-        setFrontConfig(snap.data() as FrontendConfig);
+    getFrontendConfig('platform').then(data => {
+      if (data) {
+        setFrontConfig(data);
       }
     }).catch((err) => console.warn('Error fetching platform config:', err));
   }, []);
 
   const effectiveUser = currentUser || (() => {
     try {
-      const saved = localStorage.getItem('al_ghazzawi_current_user_v4') || localStorage.getItem('qrms_current_user');
+      const saved = safeStorage.getItem('al_ghazzawi_current_user_v4') || safeStorage.getItem('qrms_current_user');
       if (saved && saved !== 'null') {
         const u = JSON.parse(saved);
         if (u && u.id) return u;

@@ -40,6 +40,7 @@ export interface User {
   nationalId?: string; // National ID (login identifier for students)
   loginIdentifier?: string; // Unified login identifier (nationalId for students, phone for adults)
   password?: string;
+  plainPassword?: string;
   passwordHash?: string;
   role: UserRole;
   halaqahId?: string;

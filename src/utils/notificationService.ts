@@ -1,3 +1,5 @@
+import { safeStorage } from '../lib/safeStorage';
+
 /**
  * Browser Web Notifications and Daily Drill Reminder Service
  */
@@ -12,7 +14,7 @@ const SETTINGS_KEY = 'al_ghazzawi_notification_settings_v1';
 
 export function getNotificationSettings(): NotificationSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = safeStorage.getItem(SETTINGS_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {
     // fallback
@@ -25,14 +27,14 @@ export function getNotificationSettings(): NotificationSettings {
 }
 
 export function saveNotificationSettings(settings: NotificationSettings): void {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  safeStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
 /**
  * Requests Notification permission from the browser
  */
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  if (!('Notification' in window)) {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'denied';
   }
   try {
