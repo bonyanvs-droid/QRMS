@@ -64,9 +64,20 @@ export const SupervisorDashboard: React.FC = () => {
   const [selectedScopeType, setSelectedScopeType] = useState<SupervisorType>(initialScopeType);
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'attendance' | 'students' | 'spelling' | 'educational' | 'interventions' | 'nominations' | 'halaqahs'
-  >('overview');
+  type SupTab =
+    | 'overview' | 'attendance' | 'students' | 'spelling'
+    | 'educational' | 'interventions' | 'nominations' | 'halaqahs';
+  const VALID_TABS: SupTab[] = [
+    'overview', 'attendance', 'students', 'spelling',
+    'educational', 'interventions', 'nominations', 'halaqahs',
+  ];
+  const initialTab: SupTab = (() => {
+    // HashRouter: query lives inside the hash — "#/supervisor?tab=students"
+    const hashQuery = window.location.hash.split('?')[1] || '';
+    const t = new URLSearchParams(hashQuery).get('tab');
+    return VALID_TABS.includes(t as SupTab) ? (t as SupTab) : 'overview';
+  })();
+  const [activeTab, setActiveTab] = useState<SupTab>(initialTab);
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedHalaqahId, setSelectedHalaqahId] = useState<string>('all');
