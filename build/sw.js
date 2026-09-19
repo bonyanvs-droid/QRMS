@@ -90,7 +90,7 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
     "url": "index.html",
-    "revision": "240a0b23f42501845fa1c69f66b292a5"
+    "revision": "5f08050b232b64ac4f1f03367b1c78dd"
   }, {
     "url": "baraem-logo.png",
     "revision": "4bf6076164ca208370920aac94f60872"
@@ -122,10 +122,10 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/vendor-common-C1kVHX9k.js",
     "revision": null
   }, {
-    "url": "assets/index-DTCaE5f5.css",
+    "url": "assets/index-GKRQFFM9.js",
     "revision": null
   }, {
-    "url": "assets/index-BI45GE2F.js",
+    "url": "assets/index-DTCaE5f5.css",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",

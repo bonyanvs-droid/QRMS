@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { usePWA } from '../../hooks/usePWA';
+import { useApp } from '../../context/AppContext';
 import { Download, WifiOff, X, Smartphone, CheckCircle } from 'lucide-react';
 
 export const PWAInstallBanner: React.FC = () => {
   const { isInstallable, isInstalled, isOffline, installApp } = usePWA();
+  const { activeTenant, mosqueLogoUrl } = useApp();
+  const appName = activeTenant?.name || 'المنصة';
+  const appIcon = activeTenant?.logoUrl || mosqueLogoUrl || '/pwa-192x192.png';
   const [dismissed, setDismissed] = useState(false);
   const [showIosGuide, setShowIosGuide] = useState(false);
 
@@ -33,11 +37,11 @@ export const PWAInstallBanner: React.FC = () => {
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-emerald-700/80 p-1 flex items-center justify-center shrink-0 border border-emerald-500/30">
-                <img src="/pwa-192x192.png" alt="أيقونة المنصة" className="w-full h-full object-contain rounded" />
+                <img src={appIcon} alt={`أيقونة ${appName}`} className="w-full h-full object-contain rounded" />
               </div>
               <div>
                 <p className="font-bold text-emerald-100 flex items-center gap-1.5">
-                  <span>تثبيت تطبيق المنصة على هاتفك</span>
+                  <span>تثبيت تطبيق {appName} على هاتفك</span>
                   <span className="text-[10px] bg-emerald-700 text-emerald-200 px-1.5 py-0.5 rounded font-mono">PWA</span>
                 </p>
                 <p className="text-[11px] text-emerald-300">

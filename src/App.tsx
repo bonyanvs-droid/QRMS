@@ -22,6 +22,7 @@ import { CharityHQDashboard } from './components/admin/CharityHQDashboard';
 import { LoginModal } from './components/auth/LoginModal';
 import { getRolePortalRoute } from './lib/roleRoutes';
 import { hasPermission } from './lib/permissions';
+import { usePwaBranding } from './hooks/usePwaBranding';
 import { PWAInstallBanner } from './components/common/PWAInstallBanner';
 import { DemoBanner } from './components/common/DemoBanner';
 import { PasswordChangeModal } from './components/common/PasswordChangeModal';
@@ -149,10 +150,14 @@ const MainLayout: React.FC = () => {
     educationalPlan,
     academicConfig,
     halaqahs,
+    mosqueLogoUrl,
   } = useApp();
 
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Dynamic tenant-branded PWA identity (manifest/favicon/theme swap)
+  usePwaBranding(activeTenant, mosqueLogoUrl);
 
   // Permission-driven route guard — same source as sidebar navigation
   const canAccess = (perms: string | string[]): boolean => {
