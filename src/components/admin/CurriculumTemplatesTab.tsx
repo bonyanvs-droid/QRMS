@@ -7,7 +7,6 @@ import {
   Edit2,
   Trash2,
   RotateCcw,
-  Sparkles,
   Layers,
   Calendar,
   Award,
@@ -33,7 +32,7 @@ import { StageConfigModal } from '../quran/StageConfigModal';
 import { BadgesManagementModal } from '../teacher/BadgesManagementModal';
 import { BADGE_DEFINITIONS } from '../../utils/badgeSystem';
 
-import { ErrorBoundary } from '../common/ErrorBoundary';
+
 import { TemplatePlanPreviewModal } from './TemplatePlanPreviewModal';
 
 const formatMemorizationPace = (amount: number = 1, unitType: string = 'line'): string => {
