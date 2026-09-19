@@ -133,7 +133,7 @@ export const DemoLoginModal: React.FC<DemoLoginModalProps> = ({ isOpen, onClose 
     >
       <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-linear-to-r from-emerald-900 via-emerald-800 to-teal-900 text-white p-5 flex items-start justify-between">
+        <div className="bg-linear-to-r from-emerald-900 via-emerald-800 to-teal-900 text-white p-3.5 sm:p-5 flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">
@@ -145,11 +145,11 @@ export const DemoLoginModal: React.FC<DemoLoginModalProps> = ({ isOpen, onClose 
                 <span>محمي من التعديل 100%</span>
               </span>
             </div>
-            <h3 className="text-lg font-bold font-serif text-white">
+            <h3 className="text-sm sm:text-lg font-bold font-serif text-white">
               تسجيل الدخول التجريبي لمجمع الفرقان
             </h3>
-            <p className="text-xs text-emerald-100/90 mt-0.5">
-              اختر أي دور لتجربة المنصة واستعراض الواجهات وصلاحياتها مباشرة وبدون كلمة مرور:
+            <p className="text-[10px] sm:text-xs text-emerald-100/90 mt-0.5">
+              اختر أي دور لتجربة المنصة<span className="hidden sm:inline"> واستعراض الواجهات وصلاحياتها مباشرة وبدون كلمة مرور</span>:
             </p>
           </div>
           <button

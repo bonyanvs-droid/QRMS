@@ -29,22 +29,22 @@ export const StudentCumulativeHistoryModal: React.FC<StudentCumulativeHistoryMod
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-      <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between pb-4 border-b border-slate-100 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-100 text-indigo-900">
-              <History className="w-6 h-6 text-indigo-700" />
+            <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-indigo-100 text-indigo-900 shrink-0">
+              <History className="w-4 h-4 sm:w-6 sm:h-6 text-indigo-700" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-black text-slate-900">{student.name}</h3>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 line-clamp-2">{student.name}</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
                   {student.grade}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                السجل التراكمي وتاريخ الإنجاز عبر الفصول والسنوات الدراسية
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5">
+                السجل التراكمي<span className="hidden sm:inline"> وتاريخ الإنجاز عبر الفصول والسنوات الدراسية</span>
               </p>
             </div>
           </div>

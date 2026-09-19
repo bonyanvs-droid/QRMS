@@ -381,30 +381,30 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
       <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 flex flex-col max-h-[92vh]">
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white p-5 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-700/60 border border-emerald-500/40 flex items-center justify-center text-amber-300 shadow-inner">
-              <BookOpen className="w-6 h-6" />
+        <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white p-3 sm:p-5 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-700/60 border border-emerald-500/40 flex items-center justify-center text-amber-300 shadow-inner shrink-0">
+              <BookOpen className="w-4 h-4 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-lg font-black tracking-tight">{student.fullName}</h3>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white/10 text-emerald-200 border border-white/15">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-lg font-black tracking-tight line-clamp-2">{student.fullName}</h3>
+                <span className="px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-white/10 text-emerald-200 border border-white/15">
                   {student.grade}
                 </span>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-800/80 text-emerald-100 border border-emerald-600/40">
+                <span className="px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-emerald-800/80 text-emerald-100 border border-emerald-600/40">
                   {halaqahs.find((h) => h.id === student.halaqahId)?.name || 'الحلقة'}
                 </span>
                 {activePlan && (
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                  <span className="hidden sm:inline-block px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
                     v{activePlan.planVersion || activePlan.version || 1}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-emerald-100/80 mt-1 flex items-center gap-2">
-                <span>المعلم: {teachers.find((t) => t.id === student.teacherId)?.name || 'معلم الحلقة'}</span>
-                <span>•</span>
-                <span>الخطة القرآنية العامة (Universal Quran Plan)</span>
+              <p className="text-[10px] sm:text-xs text-emerald-100/80 mt-0.5 sm:mt-1 flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <span className="hidden sm:inline">المعلم: {teachers.find((t) => t.id === student.teacherId)?.name || 'معلم الحلقة'}</span>
+                <span className="hidden sm:inline">•</span>
+                <span>الخطة القرآنية<span className="hidden sm:inline"> العامة (Universal Quran Plan)</span></span>
               </p>
             </div>
           </div>

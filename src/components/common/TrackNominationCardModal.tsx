@@ -33,12 +33,12 @@ export const TrackNominationCardModal: React.FC<TrackNominationCardModalProps> =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 print:shadow-none print:border-none print:p-0 print:max-w-none max-h-[92vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 space-y-4 sm:space-y-5 print:shadow-none print:border-none print:p-0 print:max-w-none max-h-[92vh] overflow-y-auto">
         {/* Header - Screen only */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
           <div className="flex items-center gap-2">
             <Award className="w-5 h-5 text-emerald-700" />
-            <h3 className="font-bold text-slate-900 text-base">
+            <h3 className="font-bold text-slate-900 text-sm sm:text-base line-clamp-2">
               {isPassed ? 'وثيقة الاعتماد والشهادة الرسمية' : 'بطاقة دخول اختبار المسار الرسمي'}
             </h3>
           </div>

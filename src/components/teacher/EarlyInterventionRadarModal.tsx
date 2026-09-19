@@ -168,18 +168,18 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
         {/* Header */}
         <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-rose-500 text-white shadow-xs">
-              <Activity className="w-6 h-6 animate-pulse" />
+            <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-rose-500 text-white shadow-xs shrink-0">
+              <Activity className="w-4 h-4 sm:w-6 sm:h-6 animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-black text-lg">رادار المتابعة الذكي والتدخل المبكر</h3>
+                <h3 className="font-black text-sm sm:text-lg line-clamp-2">رادار المتابعة الذكي والتدخل المبكر</h3>
                 <span className="text-xs bg-rose-500/30 text-rose-200 border border-rose-400/30 px-2.5 py-0.5 rounded-full font-bold">
                   {riskAnalyses.length} طلاب بحاجة لمساندة
                 </span>
               </div>
-              <p className="text-xs text-rose-200/80 mt-0.5">
-                اكتشاف الفجوات الأكاديمية ونقاط الضعف في الهجاء والحفظ مبكراً قبل أن تتراكم، واقتراح خطط علاجية فورية
+              <p className="text-[10px] sm:text-xs text-rose-200/80 mt-0.5">
+                اكتشاف الفجوات الأكاديمية مبكراً<span className="hidden sm:inline"> ونقاط الضعف في الهجاء والحفظ قبل أن تتراكم، واقتراح خطط علاجية فورية</span>
               </p>
             </div>
           </div>

@@ -117,24 +117,24 @@ export const SpellingAssessmentModal: React.FC<SpellingAssessmentModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 md:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150 my-auto flex flex-col max-h-[92vh]">
+      <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150 my-auto flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-700 text-white font-black text-lg flex items-center justify-center">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-700 text-white font-black text-sm sm:text-lg flex items-center justify-center shrink-0">
               {(student.fullName || student.name || 'ط').charAt(0)}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base md:text-lg font-bold text-slate-900">
+                <h3 className="text-sm sm:text-base md:text-lg font-bold text-slate-900 line-clamp-2">
                   جلسة تقييم واختبار الهجاء القرآني
                 </h3>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
                   {student.grade}
                 </span>
               </div>
-              <p className="text-xs text-slate-700 mt-0.5">
-                الطالب: <strong className="text-slate-900">{student.fullName}</strong> • {halaqah?.name} • المعلم: {teacher?.name}
+              <p className="text-[10px] sm:text-xs text-slate-700 mt-0.5">
+                الطالب: <strong className="text-slate-900">{student.fullName}</strong> • {halaqah?.name}<span className="hidden sm:inline"> • المعلم: {teacher?.name}</span>
               </p>
             </div>
           </div>

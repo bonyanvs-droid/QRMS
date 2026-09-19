@@ -373,20 +373,20 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 md:p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-2xl w-full p-5 md:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150 my-auto max-h-[92vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-700 text-white font-black text-base flex items-center justify-center">
+        <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-700 text-white font-black text-sm sm:text-base flex items-center justify-center shrink-0">
               {(student.fullName || student.name || 'ط').charAt(0)}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base md:text-lg font-bold text-slate-900">{student.fullName}</h3>
+                <h3 className="text-sm sm:text-base md:text-lg font-bold text-slate-900 line-clamp-2">{student.fullName}</h3>
                 <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200">
                   {student.grade}
                 </span>
               </div>
-              <p className="text-xs text-slate-700">
-                المستهدف: سورة {student.minimumTargetSurah} • الموضع الحالي: سورة {student.currentSurah}
+              <p className="text-[10px] sm:text-xs text-slate-700">
+                المستهدف: سورة {student.minimumTargetSurah}<span className="hidden sm:inline"> • الموضع الحالي: سورة {student.currentSurah}</span>
               </p>
             </div>
           </div>
