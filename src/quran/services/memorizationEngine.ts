@@ -45,6 +45,8 @@ export interface CreateMemorizationPlanParams {
    * prior memorization (before plan start). Defaults to ON for new plans.
    */
   autoMinorRevisionMode?: boolean;
+  /** Manual minor-revision range — used when autoMinorRevisionMode is false */
+  manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
 }
 
 export class QuranMemorizationPlanningEngine {
@@ -100,6 +102,17 @@ export class QuranMemorizationPlanningEngine {
         } catch {
           priorMemorizedVerses = [];
         }
+      }
+    } else if (params.manualRevisionRange) {
+      // Manual mode: seed the revision pool from the explicitly chosen range
+      try {
+        priorMemorizedVerses = await this.provider.getAyahsInRange(
+          params.manualRevisionRange.start,
+          params.manualRevisionRange.end,
+          params.direction
+        );
+      } catch {
+        priorMemorizedVerses = [];
       }
     }
 

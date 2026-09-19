@@ -136,6 +136,11 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
   const [setupWorkingDays, setSetupWorkingDays] = useState<number[]>([0, 1, 2, 3]);
   const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
+  // Manual minor-revision range (required when auto mode is off)
+  const [setupRevStartSurah, setSetupRevStartSurah] = useState<string>('الفاتحة');
+  const [setupRevStartAyah, setSetupRevStartAyah] = useState<number>(1);
+  const [setupRevEndSurah, setSetupRevEndSurah] = useState<string>('الناس');
+  const [setupRevEndAyah, setSetupRevEndAyah] = useState<number>(6);
   const [isSettingUp, setIsSettingUp] = useState<boolean>(false);
 
   // Stage config matched to the student's grade (used for setup defaults & read-only summary)
@@ -244,8 +249,12 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     try {
       // Resolve start and end positions
       const allSurahs = await provider.getSurahs();
-      const startSurahMeta = allSurahs.find((s) => s.name === setupStartSurah || s.name.replace(/^سورة\s+/, '') === setupStartSurah);
-      const endSurahMeta = allSurahs.find((s) => s.name === setupEndSurah || s.name.replace(/^سورة\s+/, '') === setupEndSurah);
+      const startSurahMeta = allSurahs.find(
+        (s) => s.arabicName === setupStartSurah || s.nameArabic === setupStartSurah || s.name === setupStartSurah
+      );
+      const endSurahMeta = allSurahs.find(
+        (s) => s.arabicName === setupEndSurah || s.nameArabic === setupEndSurah || s.name === setupEndSurah
+      );
 
       if (!startSurahMeta || !endSurahMeta) {
         throw new Error('يرجى التأكد من اختيار السور بشكل صحيح.');
@@ -261,6 +270,30 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         ayahNumber: Math.min(setupEndAyah, endSurahMeta.totalAyahs),
       };
 
+      // Manual minor-revision range — required when auto mode is off
+      let manualRevisionRange: { start: QuranPosition; end: QuranPosition } | undefined;
+      if (!setupAutoMinorRevision) {
+        const revStartMeta = allSurahs.find(
+          (s) => s.arabicName === setupRevStartSurah || s.nameArabic === setupRevStartSurah || s.name === setupRevStartSurah
+        );
+        const revEndMeta = allSurahs.find(
+          (s) => s.arabicName === setupRevEndSurah || s.nameArabic === setupRevEndSurah || s.name === setupRevEndSurah
+        );
+        if (!revStartMeta || !revEndMeta) {
+          throw new Error('يرجى تحديد نطاق المراجعة (البداية والنهاية) بشكل صحيح.');
+        }
+        manualRevisionRange = {
+          start: {
+            surahNumber: revStartMeta.number,
+            ayahNumber: Math.min(setupRevStartAyah, revStartMeta.totalAyahs),
+          },
+          end: {
+            surahNumber: revEndMeta.number,
+            ayahNumber: Math.min(setupRevEndAyah, revEndMeta.totalAyahs),
+          },
+        };
+      }
+
       await createStudentQuranPlan({
         student,
         customTargetStart: startPos,
@@ -272,6 +305,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         customConsolidationDays: setupConsolidationDays,
         customWorkingDays: setupWorkingDays,
         autoMinorRevisionMode: setupAutoMinorRevision,
+        manualRevisionRange,
       });
 
       setFeedbackMessage({
@@ -689,6 +723,86 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     className="w-4 h-4 accent-emerald-700 shrink-0"
                   />
                 </label>
+
+                {/* Manual minor-revision range — shown when auto mode is OFF */}
+                {!setupAutoMinorRevision && (
+                  <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5 space-y-3">
+                    <span className="text-[11px] font-bold text-amber-900 block">
+                      نطاق المراجعة اليدوي — حدد بداية ونهاية ما يراجعه الطالب
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
+                        <span className="text-[11px] font-bold text-amber-800 block">بداية المراجعة</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-0.5">السورة</label>
+                            <select
+                              value={setupRevStartSurah}
+                              onChange={(e) => {
+                                const ns = e.target.value;
+                                setSetupRevStartSurah(ns);
+                                const max = getSurahAyahsCount(ns);
+                                if (setupRevStartAyah > max) setSetupRevStartAyah(max);
+                              }}
+                              className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
+                            >
+                              {getSurahsByDirection(setupDirection).map((s) => (
+                                <option key={s.number} value={s.name}>
+                                  {s.number}. سورة {s.name} ({s.ayahsCount} آية)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <QuranAyahSelect
+                              id="setup_rev_start_ayah"
+                              surah={setupRevStartSurah}
+                              value={setupRevStartAyah}
+                              onChange={setSetupRevStartAyah}
+                              label="الآية"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
+                        <span className="text-[11px] font-bold text-amber-800 block">نهاية المراجعة</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-0.5">السورة</label>
+                            <select
+                              value={setupRevEndSurah}
+                              onChange={(e) => {
+                                const ns = e.target.value;
+                                setSetupRevEndSurah(ns);
+                                const max = getSurahAyahsCount(ns);
+                                if (setupRevEndAyah > max) setSetupRevEndAyah(max);
+                              }}
+                              className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
+                            >
+                              {getSurahsByDirection(setupDirection).map((s) => (
+                                <option key={s.number} value={s.name}>
+                                  {s.number}. سورة {s.name} ({s.ayahsCount} آية)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <QuranAyahSelect
+                              id="setup_rev_end_ayah"
+                              surah={setupRevEndSurah}
+                              value={setupRevEndAyah}
+                              onChange={setSetupRevEndAyah}
+                              label="الآية"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-amber-800/80">
+                      يُزرع هذا النطاق كمجموعة المراجعة الصغرى للطالب — مقدار المراجعة اليومية يُضبط من الحقل أعلاه.
+                    </p>
+                  </div>
+                )}
 
                 <div className="pt-3 flex justify-end">
                   <button

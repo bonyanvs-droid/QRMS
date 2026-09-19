@@ -59,6 +59,8 @@ export interface CreateRealStudentPlanParams {
   customWorkingDays?: number[];
   /** Auto Minor Revision — ON by default for new plans (pass false to opt out) */
   autoMinorRevisionMode?: boolean;
+  /** Manual revision range — used when autoMinorRevisionMode is false */
+  manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
   customTargetStart?: QuranPosition;
   customTargetEnd?: QuranPosition;
   provider: IQuranDataProvider;
@@ -288,6 +290,7 @@ export async function createRealStudentPlan(
     },
     autoMinorRevisionMode:
       params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true,
+    manualRevisionRange: params.manualRevisionRange,
   });
 
   // 7. Attach Real Student Metadata & Contextual Identifiers
