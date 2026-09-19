@@ -919,8 +919,8 @@ export function filterStudentsByScope(
         return allowedHalaqahs.includes(s.halaqahId);
       }
 
-      if (user.isAllHalaqahs) return true;
-      return false;
+      // No scope configured at all → unrestricted (never silently hide everything)
+      return true;
     });
   }
 
@@ -975,8 +975,8 @@ export function filterHalaqahsByScope(
         return allowedHalaqahs.includes(h.id);
       }
 
-      if (user.isAllHalaqahs) return true;
-      return false;
+      // No scope configured at all → unrestricted
+      return true;
     });
   }
 

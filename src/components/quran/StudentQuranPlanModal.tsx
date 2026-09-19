@@ -68,11 +68,16 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   } = useApp();
 
   // Teachers can view the plan but never modify it — editing requires manage_quran_plan
+  // within the student's actual scope (halaqah + stage → supervisor delegations enforced)
+  const studentHalaqah = student
+    ? halaqahs.find((h) => h.id === student.halaqahId)
+    : undefined;
+  const studentStageId = student?.stageId || studentHalaqah?.stageId;
   const canEditPlan = hasPermission(
     currentUser,
     'manage_quran_plan',
-    undefined,
-    undefined,
+    student?.halaqahId,
+    studentStageId,
     halaqahs,
     activeTenant
   );

@@ -10,6 +10,10 @@ import {
 } from '../../utils/trackAdapter';
 import { SupervisorType, SupervisorScope } from '../../types';
 import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
+import { filterStudentsByScope, filterHalaqahsByScope, hasPermission } from '../../lib/permissions';
+import { StudentQuranPlanModal } from '../quran/StudentQuranPlanModal';
+import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
+import { Student } from '../../types';
 import {
   ShieldCheck,
   BookOpen,
@@ -61,11 +65,14 @@ export const SupervisorDashboard: React.FC = () => {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'attendance' | 'spelling' | 'educational' | 'interventions' | 'nominations' | 'halaqahs'
+    'overview' | 'attendance' | 'students' | 'spelling' | 'educational' | 'interventions' | 'nominations' | 'halaqahs'
   >('overview');
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedHalaqahId, setSelectedHalaqahId] = useState<string>('all');
+  const [selectedStageFilter, setSelectedStageFilter] = useState<string>('all');
+  const [planModalStudent, setPlanModalStudent] = useState<Student | null>(null);
+  const [comprehensiveStudent, setComprehensiveStudent] = useState<Student | null>(null);
 
   const isAssociationActive = isModuleEnabled(activeTenant, 'association');
   const isSpellingActive = isModuleEnabled(activeTenant, 'spelling');
@@ -92,17 +99,45 @@ export const SupervisorDashboard: React.FC = () => {
     return students.filter((s) => !activeTenantId || s.tenantId === activeTenantId);
   }, [students, activeTenantId]);
 
-  // Filter halaqahs for active tenant & supervisor scope
-  const tenantHalaqahs = useMemo(() => {
-    const raw = halaqahs.filter((h) => !activeTenantId || h.tenantId === activeTenantId);
-    return filterHalaqahsForSupervisor(raw, effectiveScope);
-  }, [halaqahs, activeTenantId, effectiveScope]);
+  // Filter halaqahs for active tenant & supervisor scope — permission-driven
+  // (assignedStageIds / assignedHalaqahIds / supervisorScope / delegations)
+  const rawTenantHalaqahs = useMemo(() => {
+    return halaqahs.filter((h) => !activeTenantId || h.tenantId === activeTenantId);
+  }, [halaqahs, activeTenantId]);
 
-  // Filtered student list by halaqahs in scope
+  const tenantHalaqahs = useMemo(() => {
+    return filterHalaqahsByScope(rawTenantHalaqahs, currentUser);
+  }, [rawTenantHalaqahs, currentUser]);
+
+  // Filtered student list by the supervisor's actual permission scope
   const scopedStudents = useMemo(() => {
-    const halIds = new Set(tenantHalaqahs.map((h) => h.id));
-    return tenantStudents.filter((s) => halIds.has(s.halaqahId));
-  }, [tenantStudents, tenantHalaqahs]);
+    return filterStudentsByScope(tenantStudents, currentUser, rawTenantHalaqahs);
+  }, [tenantStudents, currentUser, rawTenantHalaqahs]);
+
+  // Students tab — search + halaqah + stage filters
+  const visibleStudents = useMemo(() => {
+    return scopedStudents.filter((s) => {
+      if (selectedHalaqahId !== 'all' && s.halaqahId !== selectedHalaqahId) return false;
+      const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
+      const stageId = s.stageId || halObj?.stageId;
+      if (selectedStageFilter !== 'all' && stageId !== selectedStageFilter) return false;
+      if (searchQuery) {
+        const q = searchQuery.trim();
+        return (
+          s.fullName.includes(q) ||
+          (s.halaqahName || halObj?.name || '').includes(q)
+        );
+      }
+      return true;
+    });
+  }, [scopedStudents, selectedHalaqahId, selectedStageFilter, searchQuery, rawTenantHalaqahs]);
+
+  const scopedStageIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of tenantHalaqahs) if (h.stageId) set.add(h.stageId);
+    for (const s of scopedStudents) if (s.stageId) set.add(s.stageId);
+    return Array.from(set);
+  }, [tenantHalaqahs, scopedStudents]);
 
   // Interventions / At-risk plans
   const atRiskPlans = useMemo(() => {
@@ -356,6 +391,18 @@ export const SupervisorDashboard: React.FC = () => {
           <span>الحضور الذكي بالموقع</span>
         </button>
 
+        <button
+          onClick={() => setActiveTab('students')}
+          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'students'
+              ? 'bg-emerald-700 text-white shadow-sm'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Users className="w-4 h-4 text-emerald-600" />
+          <span>الطلاب ({scopedStudents.length})</span>
+        </button>
+
         {/* Spelling Tab: available for General, Spelling, and Stage supervisors */}
         {(selectedScopeType === 'general_supervisor' ||
           selectedScopeType === 'spelling_supervisor' ||
@@ -439,6 +486,119 @@ export const SupervisorDashboard: React.FC = () => {
       {/* 3. TAB VIEWS */}
 
       {activeTab === 'attendance' && <SmartAttendanceWidget />}
+
+      {/* TAB: STUDENTS — scoped list with search + filters + quran plan actions */}
+      {activeTab === 'students' && (
+        <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+            <div>
+              <h3 className="text-base font-black text-slate-900">طلاب نطاق الإشراف ({visibleStudents.length})</h3>
+              <p className="text-xs text-slate-500 mt-0.5">جميع الطلاب ضمن مراحلك وحلقاتك المسندة — بحث وفلترة وإدارة الخطط</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute right-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="بحث باسم الطالب..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full sm:w-48 pr-9 pl-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <select
+                value={selectedHalaqahId}
+                onChange={(e) => setSelectedHalaqahId(e.target.value)}
+                className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold"
+              >
+                <option value="all">كل الحلقات</option>
+                {tenantHalaqahs.map((h) => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
+              <select
+                value={selectedStageFilter}
+                onChange={(e) => setSelectedStageFilter(e.target.value)}
+                className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold"
+              >
+                <option value="all">كل المراحل</option>
+                {scopedStageIds.map((sid) => (
+                  <option key={sid} value={sid}>
+                    {stages.find((st) => st.id === sid)?.name || sid}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="divide-y divide-slate-100 mt-2">
+            {visibleStudents.length === 0 && (
+              <div className="py-10 text-center text-sm text-slate-400 font-bold">
+                لا يوجد طلاب مطابقون داخل نطاق إشرافك
+              </div>
+            )}
+            {visibleStudents.map((s) => {
+              const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
+              const stageId = s.stageId || halObj?.stageId;
+              const canOpenPlan = hasPermission(
+                currentUser,
+                'view_quran',
+                s.halaqahId,
+                stageId,
+                rawTenantHalaqahs,
+                activeTenant
+              );
+              const canEdit = hasPermission(
+                currentUser,
+                'manage_quran_plan',
+                s.halaqahId,
+                stageId,
+                rawTenantHalaqahs,
+                activeTenant
+              );
+              return (
+                <div key={s.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-black text-sm text-slate-900">{s.fullName}</span>
+                      <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5">
+                        {s.grade}
+                      </span>
+                      {stageId && (
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-1.5 py-0.5">
+                          {stages.find((st) => st.id === stageId)?.name || stageId}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-bold mt-0.5 truncate">
+                      {halObj?.name || s.halaqahName || '—'} • المعلم: {s.teacherName || halObj?.teacherName || '—'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {canOpenPlan && (
+                      <button
+                        onClick={() => setPlanModalStudent(s)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+                        title={canEdit ? 'الخطة القرآنية — عرض وإدارة' : 'الخطة القرآنية — عرض فقط'}
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">الخطة القرآنية</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setComprehensiveStudent(s)}
+                      className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                      title="الخطة القرآنية الشاملة"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: OVERVIEW & SCOPED HALAQAHS GRID */}
       {activeTab === 'overview' && (
@@ -785,6 +945,20 @@ export const SupervisorDashboard: React.FC = () => {
             })}
           </div>
         </div>
+      )}
+
+      {/* Quran Plan Modals — gated internally by manage_quran_plan (edit) */}
+      <StudentQuranPlanModal
+        isOpen={Boolean(planModalStudent)}
+        student={planModalStudent}
+        onClose={() => setPlanModalStudent(null)}
+      />
+      {comprehensiveStudent && (
+        <ComprehensiveQuranPlanModal
+          student={comprehensiveStudent}
+          variant="teacher"
+          onClose={() => setComprehensiveStudent(null)}
+        />
       )}
     </div>
   );

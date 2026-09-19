@@ -21,6 +21,7 @@ import { SupervisorDashboard } from './components/supervisor/SupervisorDashboard
 import { CharityHQDashboard } from './components/admin/CharityHQDashboard';
 import { LoginModal } from './components/auth/LoginModal';
 import { getRolePortalRoute } from './lib/roleRoutes';
+import { hasPermission } from './lib/permissions';
 import { PWAInstallBanner } from './components/common/PWAInstallBanner';
 import { DemoBanner } from './components/common/DemoBanner';
 import { PasswordChangeModal } from './components/common/PasswordChangeModal';
@@ -147,10 +148,20 @@ const MainLayout: React.FC = () => {
     spellingLessons,
     educationalPlan,
     academicConfig,
+    halaqahs,
   } = useApp();
 
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Permission-driven route guard — same source as sidebar navigation
+  const canAccess = (perms: string | string[]): boolean => {
+    if (!currentUser) return false;
+    const list = Array.isArray(perms) ? perms : [perms];
+    return list.some((p) =>
+      hasPermission(currentUser, p, undefined, undefined, halaqahs, activeTenant)
+    );
+  };
   const [selectedStudentProfileId, setSelectedStudentProfileId] = useState<string | null>(null);
   const [platformLoginOpen, setPlatformLoginOpen] = useState(false);
   const [platformLoginAdminOnly, setPlatformLoginAdminOnly] = useState(false);
@@ -580,10 +591,11 @@ const MainLayout: React.FC = () => {
           <Route
             path="/spelling"
             element={
-              isModuleEnabled(activeTenant, 'spelling') ? (
+              isModuleEnabled(activeTenant, 'spelling') &&
+              canAccess(['view_spelling', 'manage_spelling', 'view_quran']) ? (
                 <SpellingBankView />
               ) : (
-                <Navigate to="/quran" replace />
+                <Navigate to={campusFallback} replace />
               )
             }
           />
@@ -595,10 +607,11 @@ const MainLayout: React.FC = () => {
           <Route
             path="/educational"
             element={
-              isModuleEnabled(activeTenant, 'educational') ? (
+              isModuleEnabled(activeTenant, 'educational') &&
+              canAccess(['view_educational', 'manage_educational', 'manage_programs']) ? (
                 <EducationalPlanView />
               ) : (
-                <Navigate to="/quran" replace />
+                <Navigate to={campusFallback} replace />
               )
             }
           />
@@ -607,7 +620,14 @@ const MainLayout: React.FC = () => {
           <Route
             path="/seasonal-programs"
             element={
-              currentUser ? (
+              currentUser &&
+              canAccess([
+                'view_seasonal',
+                'manage_seasonal',
+                'view_educational',
+                'manage_educational',
+                'manage_programs',
+              ]) ? (
                 <SeasonalProgramsView />
               ) : (
                 <Navigate to={campusFallback} replace />
@@ -618,7 +638,14 @@ const MainLayout: React.FC = () => {
           <Route
             path="/admin/seasonal-programs"
             element={
-              currentUser ? (
+              currentUser &&
+              canAccess([
+                'view_seasonal',
+                'manage_seasonal',
+                'view_educational',
+                'manage_educational',
+                'manage_programs',
+              ]) ? (
                 <SeasonalProgramsView />
               ) : (
                 <Navigate to={campusFallback} replace />
@@ -630,7 +657,8 @@ const MainLayout: React.FC = () => {
           <Route
             path="/reports"
             element={
-              isModuleEnabled(activeTenant, 'reports') && currentUser ? (
+              isModuleEnabled(activeTenant, 'reports') &&
+              canAccess(['view_reports', 'manage_reports']) ? (
                 <ReportsCenterView />
               ) : (
                 <Navigate to={campusFallback} replace />
@@ -642,7 +670,7 @@ const MainLayout: React.FC = () => {
           <Route
             path="/meetings"
             element={
-              currentUser ? (
+              canAccess(['view_meetings', 'manage_meetings']) ? (
                 <MeetingsManagementView />
               ) : (
                 <Navigate to={campusFallback} replace />
@@ -654,7 +682,8 @@ const MainLayout: React.FC = () => {
           <Route
             path="/admissions"
             element={
-              isModuleEnabled(activeTenant, 'admissions') && currentUser ? (
+              isModuleEnabled(activeTenant, 'admissions') &&
+              canAccess(['view_admissions', 'manage_admissions', 'manage_students']) ? (
                 <AdminDashboard initialTab="admissions" />
               ) : (
                 <Navigate to="/admin" replace />
@@ -665,7 +694,8 @@ const MainLayout: React.FC = () => {
           <Route
             path="/finances"
             element={
-              isModuleEnabled(activeTenant, 'finances') && currentUser ? (
+              isModuleEnabled(activeTenant, 'finances') &&
+              canAccess(['view_finance', 'manage_finance']) ? (
                 <AdminDashboard initialTab="finances" />
               ) : (
                 <Navigate to="/admin" replace />
@@ -676,7 +706,8 @@ const MainLayout: React.FC = () => {
           <Route
             path="/nominations"
             element={
-              isModuleEnabled(activeTenant, 'association') && currentUser ? (
+              isModuleEnabled(activeTenant, 'association') &&
+              canAccess(['view_nominations', 'manage_nominations', 'manage_quran']) ? (
                 <AdminDashboard initialTab="nominations" />
               ) : (
                 <Navigate to="/admin" replace />
@@ -687,7 +718,7 @@ const MainLayout: React.FC = () => {
           <Route
             path="/support"
             element={
-              currentUser ? (
+              canAccess(['view_support', 'manage_support']) ? (
                 <AdminDashboard initialTab="support" />
               ) : (
                 <Navigate to="/admin" replace />

@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
+import { filterHalaqahsByScope } from '../../lib/permissions';
 import { QuickRecordModal } from './QuickRecordModal';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
 import { OfficialPrintableReportModal } from '../common/OfficialPrintableReportModal';
@@ -144,7 +145,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
   // Filter halaqahs by stage (checks stageId directly or target grades)
   const visibleHalaqahs = useMemo(() => {
-    const baseHalaqahs = isTeacher ? teacherHalaqahs : tenantHalaqahs;
+    // Supervisor: only halaqahs inside his assigned scope (stages/halaqahs/delegations)
+    const scopedHalaqahs =
+      currentUser?.role === 'supervisor'
+        ? filterHalaqahsByScope(tenantHalaqahs, currentUser)
+        : tenantHalaqahs;
+    const baseHalaqahs = isTeacher ? teacherHalaqahs : scopedHalaqahs;
     if (selectedStageId === 'all') return baseHalaqahs;
     const stage = (stages || []).find((s) => s.id === selectedStageId);
     return baseHalaqahs.filter((h) => {
@@ -152,7 +158,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       if (stage?.targetGrades && stage.targetGrades.includes(h.grade as any)) return true;
       return false;
     });
-  }, [tenantHalaqahs, teacherHalaqahs, isTeacher, selectedStageId, stages]);
+  }, [tenantHalaqahs, teacherHalaqahs, isTeacher, selectedStageId, stages, currentUser]);
 
   // Handler for selecting an educational stage with auto-switching to matching halaqah
   const handleSelectStage = (stageId: string) => {
