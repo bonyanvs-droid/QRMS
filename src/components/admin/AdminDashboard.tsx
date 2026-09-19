@@ -2916,9 +2916,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
 
       {/* Student Edit Modal */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-2 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
               <h3 className="text-base font-bold text-slate-900">
                 {isNewStudent ? 'إضافة طالب جديد' : 'تعديل بيانات الطالب'}
               </h3>
@@ -2930,7 +2930,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
               </button>
             </div>
 
-            <form onSubmit={handleSaveStudent} className="mt-4 space-y-3.5 text-xs">
+            <form onSubmit={handleSaveStudent} className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5 text-xs">
               {/* Basic Fields: Name, Grade/Stage, Package, Status */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2">
@@ -3219,7 +3219,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 </>
               )}
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+              <div className="pt-3 pb-1 border-t border-slate-100 flex items-center justify-end gap-2 sticky bottom-0 bg-white -mx-5 px-5 -mb-4">
                 <button
                   type="button"
                   onClick={() => setEditingStudent(null)}

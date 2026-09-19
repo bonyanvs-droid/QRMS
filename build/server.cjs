@@ -515,157 +515,6 @@ async function getTenantByIdOrSlug(idOrSlug) {
   return executeQuerySingle(query, [idOrSlug]);
 }
 
-// server/routes/tenantRoutes.ts
-var tenantRouter = (0, import_express2.Router)();
-tenantRouter.get("/", async (req, res, next) => {
-  try {
-    const tenants = await getPublicTenants();
-    res.json({
-      ok: true,
-      count: tenants.length,
-      data: tenants
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-tenantRouter.get("/:idOrSlug", async (req, res, next) => {
-  try {
-    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
-    if (!tenant) {
-      res.status(404).json({
-        ok: false,
-        error: "Tenant not found"
-      });
-      return;
-    }
-    res.json({
-      ok: true,
-      data: tenant
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// server/routes/stageRoutes.ts
-var import_express3 = require("express");
-
-// server/services/stageService.ts
-async function getActiveStages() {
-  const query = `
-    SELECT *
-    FROM stages
-    WHERE is_active = TRUE
-    ORDER BY display_order ASC, name ASC
-  `;
-  return executeQuery(query);
-}
-async function getStageById(stageId) {
-  const query = `
-    SELECT *
-    FROM stages
-    WHERE id = $1
-    LIMIT 1
-  `;
-  return executeQuerySingle(query, [stageId]);
-}
-
-// server/routes/stageRoutes.ts
-var stageRouter = (0, import_express3.Router)();
-stageRouter.get("/", async (req, res, next) => {
-  try {
-    const stages = await getActiveStages();
-    res.json({
-      ok: true,
-      count: stages.length,
-      data: stages
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-stageRouter.get("/:id", async (req, res, next) => {
-  try {
-    const stage = await getStageById(req.params.id);
-    if (!stage) {
-      res.status(404).json({
-        ok: false,
-        error: "Educational stage not found"
-      });
-      return;
-    }
-    res.json({
-      ok: true,
-      data: stage
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// server/routes/userRoutes.ts
-var import_express4 = require("express");
-
-// server/services/userService.ts
-var SAFE_USER_SELECT = `
-  u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
-  u.national_id, u.login_identifier, u.role, u.staff_role, u.halaqah_id,
-  h.name AS halaqah_name,
-  u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
-  u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
-  u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
-  u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
-  u.is_archived, u.teacher_archived, u.supervisor_archived, u.archive_type,
-  u.archived_at, u.archived_by, u.archive_reason,
-  u.created_at, u.updated_at
-`;
-async function getUsersByTenant(tenantId, filters = {}) {
-  const conditions = ["u.tenant_id = $1"];
-  const params = [tenantId];
-  if (filters.isArchived === true) {
-    conditions.push("(u.is_archived = TRUE OR u.teacher_archived = TRUE OR u.supervisor_archived = TRUE)");
-  } else {
-    conditions.push("(u.is_archived = FALSE OR u.is_archived IS NULL)");
-  }
-  if (filters.role) {
-    params.push(filters.role);
-    conditions.push(`u.role = $${params.length}`);
-  }
-  const query = `
-    SELECT ${SAFE_USER_SELECT}
-    FROM users u
-    LEFT JOIN halaqahs h ON u.halaqah_id = h.id
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY u.name ASC
-  `;
-  return executeQuery(query, params);
-}
-async function getUserById(userId, tenantId) {
-  let query;
-  let params;
-  if (tenantId) {
-    query = `
-      SELECT ${SAFE_USER_SELECT}
-      FROM users u
-      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
-      WHERE u.id = $1 AND u.tenant_id = $2
-      LIMIT 1
-    `;
-    params = [userId, tenantId];
-  } else {
-    query = `
-      SELECT ${SAFE_USER_SELECT}
-      FROM users u
-      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
-      WHERE u.id = $1
-      LIMIT 1
-    `;
-    params = [userId];
-  }
-  return executeQuerySingle(query, params);
-}
-
 // server/services/entityService.ts
 var ENTITY_TABLE_CONFIGS = {
   organizations: {
@@ -2086,6 +1935,191 @@ async function deleteRecord(collectionName, id, tenantId) {
   const query = `DELETE FROM ${config2.tableName} WHERE ${conditions.join(" AND ")} RETURNING ${config2.primaryKey}`;
   const deleted = await executeQuerySingle(query, params);
   return !!deleted;
+}
+
+// server/routes/tenantRoutes.ts
+var tenantRouter = (0, import_express2.Router)();
+tenantRouter.get("/", async (req, res, next) => {
+  try {
+    const tenants = await getPublicTenants();
+    res.json({
+      ok: true,
+      count: tenants.length,
+      data: tenants
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+tenantRouter.get("/:idOrSlug", async (req, res, next) => {
+  try {
+    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
+    if (!tenant) {
+      res.status(404).json({
+        ok: false,
+        error: "Tenant not found"
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      data: tenant
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+tenantRouter.post("/", async (req, res, next) => {
+  try {
+    const payload = req.body;
+    if (!payload || typeof payload !== "object") {
+      res.status(400).json({ ok: false, error: "Invalid request body" });
+      return;
+    }
+    const saved = await upsert("tenants", payload, req.tenantId);
+    res.json({ ok: true, data: saved });
+  } catch (err) {
+    next(err);
+  }
+});
+tenantRouter.put("/:id", async (req, res, next) => {
+  try {
+    const payload = { ...req.body, id: req.params.id };
+    const saved = await upsert("tenants", payload, req.tenantId);
+    res.json({ ok: true, data: saved });
+  } catch (err) {
+    next(err);
+  }
+});
+tenantRouter.delete("/:id", async (req, res, next) => {
+  try {
+    const success = await deleteRecord("tenants", req.params.id, req.tenantId);
+    if (!success) {
+      res.status(404).json({ ok: false, error: "Tenant not found" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// server/routes/stageRoutes.ts
+var import_express3 = require("express");
+
+// server/services/stageService.ts
+async function getActiveStages() {
+  const query = `
+    SELECT *
+    FROM stages
+    WHERE is_active = TRUE
+    ORDER BY display_order ASC, name ASC
+  `;
+  return executeQuery(query);
+}
+async function getStageById(stageId) {
+  const query = `
+    SELECT *
+    FROM stages
+    WHERE id = $1
+    LIMIT 1
+  `;
+  return executeQuerySingle(query, [stageId]);
+}
+
+// server/routes/stageRoutes.ts
+var stageRouter = (0, import_express3.Router)();
+stageRouter.get("/", async (req, res, next) => {
+  try {
+    const stages = await getActiveStages();
+    res.json({
+      ok: true,
+      count: stages.length,
+      data: stages
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+stageRouter.get("/:id", async (req, res, next) => {
+  try {
+    const stage = await getStageById(req.params.id);
+    if (!stage) {
+      res.status(404).json({
+        ok: false,
+        error: "Educational stage not found"
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      data: stage
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// server/routes/userRoutes.ts
+var import_express4 = require("express");
+
+// server/services/userService.ts
+var SAFE_USER_SELECT = `
+  u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
+  u.national_id, u.login_identifier, u.role, u.staff_role, u.halaqah_id,
+  h.name AS halaqah_name,
+  u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
+  u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
+  u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
+  u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
+  u.is_archived, u.teacher_archived, u.supervisor_archived, u.archive_type,
+  u.archived_at, u.archived_by, u.archive_reason,
+  u.created_at, u.updated_at
+`;
+async function getUsersByTenant(tenantId, filters = {}) {
+  const conditions = ["u.tenant_id = $1"];
+  const params = [tenantId];
+  if (filters.isArchived === true) {
+    conditions.push("(u.is_archived = TRUE OR u.teacher_archived = TRUE OR u.supervisor_archived = TRUE)");
+  } else {
+    conditions.push("(u.is_archived = FALSE OR u.is_archived IS NULL)");
+  }
+  if (filters.role) {
+    params.push(filters.role);
+    conditions.push(`u.role = $${params.length}`);
+  }
+  const query = `
+    SELECT ${SAFE_USER_SELECT}
+    FROM users u
+    LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY u.name ASC
+  `;
+  return executeQuery(query, params);
+}
+async function getUserById(userId, tenantId) {
+  let query;
+  let params;
+  if (tenantId) {
+    query = `
+      SELECT ${SAFE_USER_SELECT}
+      FROM users u
+      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+      WHERE u.id = $1 AND u.tenant_id = $2
+      LIMIT 1
+    `;
+    params = [userId, tenantId];
+  } else {
+    query = `
+      SELECT ${SAFE_USER_SELECT}
+      FROM users u
+      LEFT JOIN halaqahs h ON u.halaqah_id = h.id
+      WHERE u.id = $1
+      LIMIT 1
+    `;
+    params = [userId];
+  }
+  return executeQuerySingle(query, params);
 }
 
 // server/routes/userRoutes.ts
