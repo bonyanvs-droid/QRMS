@@ -9,6 +9,10 @@ import {
 } from '../types/plan';
 import { StageQuranConfig, findStageConfigForStudent } from '../models/stageConfig';
 import { QuranMemorizationPlanningEngine } from './memorizationEngine';
+import {
+  resolveStudentWorkingDays,
+  getStudentPreferredWorkingDays,
+} from '../utils/studentSchedule';
 
 export interface StudentPositionResolutionResult {
   position: QuranPosition | null;
@@ -53,6 +57,8 @@ export interface CreateRealStudentPlanParams {
   customUnitType?: PlanningUnitType;
   customDirection?: PlanDirection;
   customWorkingDays?: number[];
+  /** Auto Minor Revision — ON by default for new plans (pass false to opt out) */
+  autoMinorRevisionMode?: boolean;
   customTargetStart?: QuranPosition;
   customTargetEnd?: QuranPosition;
   provider: IQuranDataProvider;
@@ -231,9 +237,16 @@ export async function createRealStudentPlan(
       direction
     );
 
-  // 5. Schedule & Dates
-  const workingDays =
+  // 5. Schedule & Dates — resolve per-student working days
+  // (subset of halaqah days; plan.schedule becomes the single source for
+  // recalculation, next-working-day, and future plan dates)
+  const halaqahWorkingDays =
     customWorkingDays || stageConfig.schedule.workingDays;
+  const studentDaysResolution = resolveStudentWorkingDays(
+    getStudentPreferredWorkingDays(student),
+    halaqahWorkingDays
+  );
+  const workingDays = studentDaysResolution.days;
   const holidays = academicConfig?.holidays || [];
 
   const startDate =
@@ -273,6 +286,8 @@ export async function createRealStudentPlan(
       workingDays,
       holidays,
     },
+    autoMinorRevisionMode:
+      params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true,
   });
 
   // 7. Attach Real Student Metadata & Contextual Identifiers

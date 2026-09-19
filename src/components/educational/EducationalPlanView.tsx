@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import {
   Calendar,
@@ -31,8 +32,11 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
+  Activity,
 } from 'lucide-react';
 import { EducationalPlanWeek, EducationalStage } from '../../types';
+import { hasPermission } from '../../lib/permissions';
+import { EarlyInterventionRadarModal } from '../teacher/EarlyInterventionRadarModal';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
 import { generatePrepWeekAnnouncement } from '../../utils/reportGenerator';
 import { StageHalaqahControlBar } from '../common/StageHalaqahControlBar';
@@ -72,7 +76,18 @@ export const EducationalPlanView: React.FC = () => {
     teachers,
     students,
     activeTenantId,
+    activeTenant,
   } = useApp();
+
+  const [searchParams] = useSearchParams();
+  const canViewRadar = hasPermission(
+    currentUser,
+    'view_intervention_radar',
+    undefined,
+    undefined,
+    halaqahs,
+    activeTenant
+  );
 
   const isAdmin = Boolean(
     currentUser && (
@@ -113,7 +128,9 @@ export const EducationalPlanView: React.FC = () => {
   });
 
   const [selectedHalaqahId, setSelectedHalaqahId] = useState<string>('');
-  const [activeViewMode, setActiveViewMode] = useState<'matrix' | 'cards' | 'overview'>('matrix');
+  const [activeViewMode, setActiveViewMode] = useState<'matrix' | 'cards' | 'overview' | 'radar'>(() =>
+    searchParams.get('view') === 'radar' && canViewRadar ? 'radar' : 'matrix'
+  );
   const [statusFilter, setStatusFilter] = useState<'all' | 'scheduled' | 'in_progress' | 'completed'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -572,6 +589,20 @@ export const EducationalPlanView: React.FC = () => {
               <Compass className="w-3.5 h-3.5" />
               <span>مؤشرات التنفيذ</span>
             </button>
+
+            {canViewRadar && (
+              <button
+                onClick={() => setActiveViewMode('radar')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeViewMode === 'radar'
+                    ? 'bg-white text-rose-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>رادار التدخل المبكر</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -699,6 +730,16 @@ export const EducationalPlanView: React.FC = () => {
       {/* 5. MAIN VIEW CONTENT */}
 
       {/* VIEW 1: MATRIX VIEW (The High Craft Matrix Table) */}
+      {/* Early Intervention Radar — permission-gated page section */}
+      {activeViewMode === 'radar' && canViewRadar && (
+        <EarlyInterventionRadarModal
+          embedded
+          isOpen={true}
+          onClose={() => setActiveViewMode('matrix')}
+          halaqahId={selectedHalaqahId || undefined}
+        />
+      )}
+
       {activeViewMode === 'matrix' && (
         <EducationalPlanMatrix
           weeks={stageFilteredPlan}

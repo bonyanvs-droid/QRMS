@@ -250,6 +250,13 @@ export interface StudentQuranPlan {
   revisionDailyPages?: number;
   consolidationDaysPerSurah?: number;
 
+  /**
+   * Automatic Minor Revision Mode — when true, the planning engine seeds the rolling
+   * revision cycle with the student's prior memorization (before plan start) and the
+   * revision range is auto-computed per day. Undefined on legacy plans = manual behavior.
+   */
+  autoMinorRevisionMode?: boolean;
+
   // Schedule
   schedule: WorkingDaysSchedule;
 

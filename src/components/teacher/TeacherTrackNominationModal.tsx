@@ -228,10 +228,14 @@ export const TeacherTrackNominationModal: React.FC<TeacherTrackNominationModalPr
               <Award className="w-6 h-6 text-amber-300" />
             </div>
             <div>
-              <h3 className="font-bold text-lg font-serif">ترشيحات واختبارات المسارات التعليمية</h3>
-              <p className="text-xs text-emerald-100">
+              <h3 className="font-bold text-base md:text-lg font-serif">
+                <span className="hidden sm:inline">ترشيحات واختبارات المسارات التعليمية</span>
+                <span className="sm:hidden">ترشيحات المسارات</span>
+              </h3>
+              <p className="hidden sm:block text-xs text-emerald-100">
                 حلقة: {halaqah?.name} • رفع وتتبع اختبارات وترشيحات الطلاب للجمعية
               </p>
+              <p className="sm:hidden text-[11px] text-emerald-100">حلقة: {halaqah?.name}</p>
             </div>
           </div>
           <button

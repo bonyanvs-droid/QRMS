@@ -24,12 +24,15 @@ interface EarlyInterventionRadarModalProps {
   isOpen: boolean;
   onClose: () => void;
   halaqahId?: string;
+  /** When true, renders the radar content inline as a page section (no fixed overlay). */
+  embedded?: boolean;
 }
 
 export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalProps> = ({
   isOpen,
   onClose,
   halaqahId,
+  embedded = false,
 }) => {
   const {
     students,
@@ -40,7 +43,13 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
     saveRemedialPlan,
     resolveRemedialPlan,
     currentUser,
+    halaqahs,
   } = useApp();
+
+  const isSpellingTrackEnabled = (halaqahIdVal: string | undefined) => {
+    const ids = halaqahs.find((h) => h.id === halaqahIdVal)?.activeTrackIds;
+    return !ids || ids.includes('track_spelling');
+  };
 
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterRisk, setFilterRisk] = useState<string>('all');
@@ -78,7 +87,7 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
     });
   }, [riskAnalyses, filterRisk, filterCategory, searchQuery]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !embedded) return null;
 
   const handleCreatePlan = async (item: EarlyWarningRiskAnalysis) => {
     const plan = createRemedialPlanFromAnalysis(
@@ -152,9 +161,10 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-6 max-h-[90vh]">
+  const content = (
+      <div className={embedded
+        ? 'bg-white w-full rounded-3xl border border-slate-200 overflow-hidden flex flex-col shadow-xs'
+        : 'bg-white w-full max-w-5xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-6 max-h-[90vh]'}>
         {/* Header */}
         <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -173,12 +183,14 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!embedded && (
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Toast */}
@@ -282,9 +294,13 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
                         </div>
                         <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
                           <span>السورة: {item.student.currentSurah} (آية {item.student.currentAyah})</span>
-                          <span>•</span>
-                          <span>إتقان الهجاء: {item.metrics.spellingMastery}%</span>
-                          <span>•</span>
+                          {isSpellingTrackEnabled(item.student.halaqahId) && (
+                            <>
+                              <span>•</span>
+                              <span>إتقان الهجاء: {item.metrics.spellingMastery}%</span>
+                              <span>•</span>
+                            </>
+                          )}
                           <span>المواظبة: {item.metrics.attendanceRate}%</span>
                         </div>
                       </div>
@@ -380,6 +396,13 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
           )}
         </div>
       </div>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+      {content}
     </div>
   );
 };

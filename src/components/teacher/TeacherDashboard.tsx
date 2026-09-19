@@ -4,6 +4,7 @@ import {
   Users,
   Sparkles,
   BookOpen,
+  RotateCcw,
   Calendar,
   CheckCircle2,
   AlertTriangle,
@@ -31,15 +32,14 @@ import {
   ShieldCheck,
   Phone,
   Clock,
+  Video,
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
 import { QuickRecordModal } from './QuickRecordModal';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
-import { DailyReminderWidget } from './DailyReminderWidget';
 import { OfficialPrintableReportModal } from '../common/OfficialPrintableReportModal';
 import { BadgesManagementModal } from './BadgesManagementModal';
-import { EarlyInterventionRadarModal } from './EarlyInterventionRadarModal';
 import { exportStudentsToExcel } from '../../utils/exportUtils';
 import {
   generateParentWeeklyReport,
@@ -47,16 +47,55 @@ import {
 } from '../../utils/reportGenerator';
 import { Student } from '../../types';
 import { StudentQuranPlanModal } from '../quran/StudentQuranPlanModal';
+import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { getAcademicOutcome } from '../../quran/services/outcomeService';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { calculateHalaqahTodaySession, formatHalaqahWeeklySummary } from '../../utils/scheduleCalculator';
 import { OnlineModeTeacherWidget } from './OnlineModeTeacherWidget';
 import { TeacherTrackNominationModal } from './TeacherTrackNominationModal';
-import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
 
 interface TeacherDashboardProps {
   onSelectStudentProfile?: (studentId: string) => void;
 }
+
+interface ToolModalProps {
+  title: string;
+  icon?: React.ReactNode;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}
+
+const ToolModal: React.FC<ToolModalProps> = ({ title, icon, onClose, children, wide }) => (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 md:p-4 overflow-y-auto"
+    onClick={onClose}
+  >
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className={`bg-white rounded-2xl w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} shadow-2xl border border-slate-200 my-auto`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="text-sm md:text-base font-black text-slate-900">{title}</h3>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="إغلاق النافذة"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="p-4 max-h-[75vh] overflow-y-auto">{children}</div>
+    </div>
+  </div>
+);
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStudentProfile }) => {
   const {
@@ -132,12 +171,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
   // Authoritative module checks for active tenant
   const isSpellingActive = isModuleEnabled(activeTenant, 'spelling');
+
+  // Per-halaqah track gating — undefined activeTrackIds = all tracks enabled (legacy default)
+  const isHalaqahTrackEnabled = (halaqahId: string | undefined, trackId: string) => {
+    const ids = halaqahs.find((h) => h.id === halaqahId)?.activeTrackIds;
+    return !ids || ids.includes(trackId);
+  };
   const isBadgesActive = isModuleEnabled(activeTenant, 'badges');
 
   // Modals
   const [badgesModalOpen, setBadgesModalOpen] = useState(false);
-  const [radarModalOpen, setRadarModalOpen] = useState(false);
   const [trackNominationModalOpen, setTrackNominationModalOpen] = useState(false);
+  const [virtualModalOpen, setVirtualModalOpen] = useState(false);
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [interventionModalOpen, setInterventionModalOpen] = useState(false);
+  const [reportsModalOpen, setReportsModalOpen] = useState(false);
   const [selectedNominationStudent, setSelectedNominationStudent] = useState<Student | null>(null);
 
   // Find active halaqah / teacher
@@ -160,6 +208,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [officialReportModalOpen, setOfficialReportModalOpen] = useState(false);
   const [selectedPlanStudent, setSelectedPlanStudent] = useState<Student | null>(null);
+  const [comprehensivePlanStudent, setComprehensivePlanStudent] = useState<Student | null>(null);
   const [reportData, setReportData] = useState<{
     title: string;
     content: string;
@@ -323,8 +372,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      <SmartAttendanceWidget />
+    <div className="space-y-4 pb-12">
+      {/* NO-SESSION ALERT — first element, shown only when no halaqah is scheduled today */}
+      {todaySession && !todaySession.isSessionDay && (
+        <div className="rounded-xl px-3.5 py-2.5 border bg-slate-50 border-slate-200 flex items-center gap-2.5 text-xs">
+          <Clock className="w-4 h-4 shrink-0 text-slate-400" />
+          <span className="font-bold text-slate-700">
+            ⚪ لا توجد حلقة مجدولة اليوم ({todaySession.dayName})
+          </span>
+          {activeHalaqah && (
+            <span className="hidden md:inline ms-auto text-[10px] text-slate-500 font-mono shrink-0">
+              {formatHalaqahWeeklySummary(activeHalaqah, prayerTimesToday)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Educational Stage & Halaqah Master Navigator (For Campus Admins, Supervisors & System Admins) */}
       {isLeader && (
@@ -661,349 +723,161 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       ) : (
         /* SINGLE HALAQAH VIEW */
         <>
-          {/* Halaqah & Teacher Header Banner */}
-          <div className="bg-white rounded-3xl p-5 md:p-6 border border-slate-200 shadow-xs">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div className="flex items-start md:items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-700 text-white font-black text-2xl flex items-center justify-center shadow-md shrink-0">
-                  {activeHalaqah?.name?.charAt(0) || 'ح'}
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-xl md:text-2xl font-black text-slate-900">{activeHalaqah?.name}</h2>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                      {activeStage?.name || 'مرحلة تعليمية'} • {activeHalaqah?.grade}
-                    </span>
-                    <span className="text-xs text-slate-700 font-medium">
-                      • المعلم المشرف: <strong>{activeTeacher?.name}</strong>
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-700 mt-1">
-                    الهدف المرجعي للحلقة:{' '}
-                    <strong className="text-emerald-800 font-semibold">
-                      {getAcademicOutcome({ tenant: activeTenant, customTargetSurah: activeHalaqah?.targetSurah })}
-                    </strong>{' '}
-                    • إجمالي الطلاب المسجلين: <strong>{halaqahStudents.length} طلاب</strong>
-                  </p>
-                </div>
+          {/* UNIFIED HALAQAH CONTAINER — identity + 4-day strip + session line + 6 tools */}
+          <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-xs space-y-4">
+            {/* Identity */}
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-emerald-700 text-white font-black text-xl flex items-center justify-center shadow-xs shrink-0">
+                {activeHalaqah?.name?.charAt(0) || 'ح'}
               </div>
-
-              <div className="flex flex-wrap items-center gap-2.5">
-                {isBadgesActive && (
-                  <button
-                    onClick={() => setBadgesModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
-                    title="إدارة ومنح وتتويج أوسمة الهجاء والحفظ للطلاب"
-                  >
-                    <Crown className="w-4 h-4 text-slate-950" />
-                    <span>الأوسمة والحوافز</span>
-                    {badges.filter((b) => halaqahStudents.some((s) => s.id === b.studentId)).length > 0 && (
-                      <span className="bg-white/90 text-slate-900 text-[10px] font-black px-1.5 py-0.2 rounded-full">
-                        {badges.filter((b) => halaqahStudents.some((s) => s.id === b.studentId)).length}
-                      </span>
-                    )}
-                  </button>
-                )}
-
-                <button
-                  onClick={() => setRadarModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 text-xs font-black rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="اكتشاف الطلاب المتعثرين مبكراً واقتراح خطط علاجية وتوجيه أولياء الأمور"
-                >
-                  <Activity className="w-4 h-4 text-rose-600" />
-                  <span>رادار التدخل المبكر</span>
-                  {needingIntervention.length > 0 && (
-                    <span className="bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
-                      {needingIntervention.length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => {
-                    setSelectedNominationStudent(null);
-                    setTrackNominationModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-300 text-xs font-black rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="ترشيح طلاب الحلقة لاختبارات المسارات والجمعية المعتمدة"
-                >
-                  <Award className="w-4 h-4 text-teal-700" />
-                  <span>ترشيحات المسارات</span>
-                  {halaqahNominations.length > 0 && (
-                    <span className="bg-teal-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
-                      {halaqahNominations.length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() =>
-                    exportStudentsToExcel(halaqahStudents, sessionRecords, spellingLessons, academicConfig, {
-                      halaqahName: activeHalaqah?.name,
-                    })
-                  }
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="تصدير بيانات الحلقة في ملف إكسل رسمي"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>تصدير كشف Excel</span>
-                </button>
-
-                <button
-                  onClick={() => setOfficialReportModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="معاينة وطباعة تقرير معتمد بالأختام والشعارات الرسمية"
-                >
-                  <Printer className="w-3.5 h-3.5 text-slate-700" />
-                  <span>طباعة كشف معتمد (PDF)</span>
-                </button>
-
-                <button
-                  onClick={handleOpenTeacherWeeklySummary}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5 text-amber-300" />
-                  <span>تصدير تقرير المعلم الأسبوعي 📲</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 4-Day Cycle Guide Strip */}
-            <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs bg-emerald-50/60 -mx-5 -mb-5 p-4 rounded-b-3xl">
-              <div className="flex items-center gap-2">
-                <span className="p-1 rounded-md bg-emerald-700 text-white font-bold text-[10px]">
-                  {isSpellingActive ? 'نظام الـ 4 أيام' : 'نظام الخطة القرآنية'}
-                </span>
-                <span className="text-slate-700">
-                  {isSpellingActive ? (
-                    <>
-                      <strong>اليوم 1:</strong> يوم الهجاء القرآني المخصص (شرح وتطبيق وتقييم) •{' '}
-                      <strong>الأيام 2-4:</strong> تسميع المحفوظ + <strong>10 دقائق هجاء إلزامية يومياً</strong>.
-                    </>
-                  ) : (
-                    <>
-                      <strong>المسار المعتمد:</strong> الحفظ الجديد والمراجعة اليومية وتثبيت المحفوظ وفق خطة المجمع الأكاديمية.
-                    </>
-                  )}
-                </span>
-              </div>
-              <span className="text-[11px] font-bold text-emerald-800 bg-white px-2.5 py-1 rounded-lg border border-emerald-200">
-                الأسبوع التشغيلي {academicConfig.currentWeek}
-              </span>
-            </div>
-          </div>
-
-          {/* TODAY SESSION STATUS & PRAYER-LINKED TIMING BAR */}
-          {todaySession && (
-            <div
-              className={`rounded-2xl p-4 border transition-all ${
-                todaySession.isSessionDay
-                  ? todaySession.attendanceWindowOpen
-                    ? 'bg-emerald-50/90 border-emerald-300 ring-2 ring-emerald-500/20 shadow-xs'
-                    : 'bg-white border-slate-200 shadow-2xs'
-                  : 'bg-slate-100/70 border-slate-200 opacity-90'
-              }`}
-            >
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                      todaySession.isSessionDay
-                        ? todaySession.attendanceWindowOpen
-                          ? 'bg-emerald-700 text-white shadow-2xs'
-                          : 'bg-emerald-100 text-emerald-800'
-                        : 'bg-slate-200 text-slate-500'
-                    }`}
-                  >
-                    <Clock className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-sm font-black text-slate-900">
-                        حالة جلسة اليوم ({todaySession.dayName})
-                      </h4>
-                      {todaySession.isSessionDay ? (
-                        <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                          منعقدة اليوم
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                          غير مجدولة اليوم
-                        </span>
-                      )}
-
-                      {todaySession.attendanceWindowOpen ? (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-700 text-white shadow-2xs">
-                          <span className="w-2 h-2 rounded-full bg-amber-300 animate-ping" />
-                          نافذة رصد الحضور مفتوحة الآن
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                          {todaySession.statusLabel}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2 text-xs text-slate-600 mt-1 flex-wrap font-mono">
-                      {todaySession.isSessionDay ? (
-                        <>
-                          <span className="font-bold text-emerald-950">
-                            الموعد الفعلي اليوم: {todaySession.startTimeFormatted} - {todaySession.endTimeFormatted}
-                          </span>
-                          <span className="text-slate-400 font-sans">•</span>
-                          <span className="text-slate-600 font-sans">
-                            {todaySession.timeDescription}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="font-sans">
-                          الجدول الأسبوعي المعتمد: {activeHalaqah ? formatHalaqahWeeklySummary(activeHalaqah, prayerTimesToday) : ''}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-start md:self-auto">
-                  <span className="text-[11px] text-slate-600 font-mono bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
-                    {activeHalaqah ? formatHalaqahWeeklySummary(activeHalaqah, prayerTimesToday) : ''}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <h2 className="text-lg md:text-xl font-black text-slate-900">{activeHalaqah?.name}</h2>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                    {activeStage?.name || 'مرحلة تعليمية'} • {activeHalaqah?.grade}
                   </span>
                 </div>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  المعلم المشرف: <strong className="text-slate-800">{activeTeacher?.name}</strong>
+                </p>
+                <p className="hidden sm:block text-xs text-slate-600 mt-0.5">
+                  الهدف المرجعي:{' '}
+                  <strong className="text-emerald-800 font-semibold">
+                    {getAcademicOutcome({ tenant: activeTenant, customTargetSurah: activeHalaqah?.targetSurah })}
+                  </strong>{' '}
+                  • {halaqahStudents.length} طالبًا مسجلًا
+                </p>
               </div>
             </div>
-          )}
 
-          {activeHalaqah && <OnlineModeTeacherWidget halaqah={activeHalaqah} students={halaqahStudents} />}
-
-          {/* DAILY REMINDER & NOTIFICATION WIDGET */}
-          <DailyReminderWidget
-            halaqahId={activeHalaqah?.id}
-            halaqahName={activeHalaqah?.name}
-          />
-
-          {/* SMART DECISION SUPPORT: "من يحتاجني اليوم؟" */}
-          <div className="bg-gradient-to-r from-amber-500/10 via-amber-50 to-orange-50 border border-amber-300/80 rounded-2xl p-5 shadow-xs">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-amber-500 text-slate-950">
-                  <Sparkles className="w-4 h-4" />
-                </span>
-                <h3 className="text-sm md:text-base font-black text-amber-950">
-                  المساعد الذكي للمعلم: «من يحتاجني اليوم؟»
-                </h3>
-              </div>
-              <span className="text-xs font-bold text-amber-900 bg-amber-200/80 px-2.5 py-0.5 rounded-full">
-                {needingIntervention.length} حالات تستوجب العناية
+            {/* Compact 4-day strip + scheduled-session line + week */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-[11px]">
+              <span className="text-slate-600 truncate">
+                <strong className="text-emerald-800">
+                  {isSpellingActive ? 'نظام الـ4 أيام' : 'الخطة القرآنية'}:
+                </strong>{' '}
+                {isSpellingActive
+                  ? 'يوم هجاء مخصص + تسميع المحفوظ مع 10 دقائق هجاء يومية'
+                  : 'حفظ جديد ومراجعة يومية وفق خطة المجمع الأكاديمية'}
               </span>
+              <div className="flex items-center gap-2 shrink-0">
+                {todaySession?.isSessionDay && (
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                    <Clock className="w-3 h-3" />
+                    {todaySession.startTimeFormatted} - {todaySession.endTimeFormatted}
+                    {todaySession.attendanceWindowOpen && ' • نافذة الرصد مفتوحة'}
+                  </span>
+                )}
+                <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                  أسبوع {academicConfig.currentWeek}
+                </span>
+              </div>
             </div>
 
-            {needingIntervention.length === 0 ? (
-              <div className="text-xs text-emerald-800 font-bold bg-white/80 p-3 rounded-xl border border-emerald-200 flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span>ما شاء الله! جميع طلاب الحلقة يسيرون بوتيرة ممتازة ومطابقة للخطة المقررة.</span>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-amber-200 overflow-hidden shadow-2xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-amber-100/60 border-b border-amber-200 text-amber-950 font-bold">
-                      <tr>
-                        <th className="p-3 w-16 text-center">الأولوية</th>
-                        <th className="p-3 min-w-[160px]">اسم الطالب والصف</th>
-                        <th className="p-3 min-w-[260px]">سبب الاحتياج والتشخيص التربوي</th>
-                        <th className="p-3 w-32 text-center">مستوى الهجاء</th>
-                        <th className="p-3 w-32 text-center">الحالة</th>
-                        <th className="p-3 w-28 text-center">الإجراء المباشر</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-amber-100">
-                      {needingIntervention.map(({ student, eval: ev }, idx) => (
-                        <tr
-                          key={student.id}
-                          className="hover:bg-amber-50/50 transition-colors"
-                        >
-                          <td className="p-3 text-center align-middle">
-                            <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs inline-flex items-center justify-center">
-                              {idx + 1}
-                            </span>
-                          </td>
-                          <td className="p-3 align-middle">
-                            <span className="font-bold text-slate-900 block text-xs">
-                              {student.fullName}
-                            </span>
-                            <span className="text-[11px] text-slate-500 block">
-                              {student.grade}
-                            </span>
-                          </td>
-                          <td className="p-3 align-middle text-slate-700 text-xs">
-                            {ev.reason}
-                          </td>
-                          <td className="p-3 text-center align-middle">
-                            <span className="text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 inline-block font-mono">
-                              {ev.spellingMasteryRate}% (درس {ev.actualLessonNum})
-                            </span>
-                          </td>
-                          <td className="p-3 text-center align-middle">
-                            <StatusBadge status={ev.status} label={ev.statusLabel} size="sm" />
-                          </td>
-                          <td className="p-3 text-center align-middle">
-                            <button
-                              onClick={() => setActiveStudentRecord(student)}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs whitespace-nowrap inline-flex items-center gap-1"
-                            >
-                              <span>جلسة دعم</span>
-                              <span>📝</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* QUICK ATTENDANCE BULK BAR */}
-          <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                <h4 className="text-sm font-bold text-slate-900">رصد الحضور السريع لجلسة اليوم</h4>
-              </div>
-              <p className="text-xs text-slate-700 mt-0.5">
-                الافتراضي: جميع الطلاب حاضرون. انقر على اسم الطالب لتحديد غيابه ثم احفظ.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {halaqahStudents.map((s) => {
-                const status = studentAttendanceMap[s.id] || 'present';
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => cycleAttendance(s.id)}
-                    className={`text-xs px-3 py-1.5 rounded-xl border font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                      status === 'absent'
-                        ? 'bg-rose-100 border-rose-400 text-rose-800 line-through'
-                        : status === 'late'
-                        ? 'bg-amber-100 border-amber-400 text-amber-900'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                    }`}
-                  >
-                    <span>{s.fullName.split(' ')[0]} {s.fullName.split(' ')[1] || ''}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/60 font-mono">
-                      {status === 'absent' ? 'غائب ✕' : status === 'late' ? 'متأخر ⏱️' : 'حاضر ✓'}
-                    </span>
-                  </button>
-                );
-              })}
+            {/* HALAQAH TOOLS GRID — 6 tools only */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                onClick={() => setAttendanceModalOpen(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                title="رصد حضور طلاب الحلقة لجلسة اليوم وحفظ الكشف"
+              >
+                <span className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-slate-800">
+                  <span className="hidden sm:inline">تحضير الطلاب</span>
+                  <span className="sm:hidden">التحضير</span>
+                </span>
+              </button>
 
               <button
-                onClick={handleSaveBulkAttendance}
-                className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                onClick={() => setInterventionModalOpen(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-amber-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                title="المساعد الذكي اليومي — الطلاب الذين يحتاجون اهتمامك اليوم"
               >
-                {attendanceSaved ? 'تم الحفظ بنجاح ✓' : 'حفظ كشف الحضور'}
+                <span className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-slate-800">
+                  <span className="hidden sm:inline">من يحتاجني اليوم؟</span>
+                  <span className="sm:hidden">من يحتاجني؟</span>
+                </span>
+                {needingIntervention.length > 0 && (
+                  <span className="ms-auto bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                    {needingIntervention.length}
+                  </span>
+                )}
+              </button>
+
+              {isBadgesActive && (
+                <button
+                  onClick={() => setBadgesModalOpen(true)}
+                  className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-amber-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                  title="إدارة ومنح وتتويج أوسمة الهجاء والحفظ للطلاب"
+                >
+                  <span className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                    <Crown className="w-4 h-4" />
+                  </span>
+                  <span className="text-xs font-bold text-slate-800">
+                    <span className="hidden sm:inline">الأوسمة والحوافز</span>
+                    <span className="sm:hidden">الأوسمة</span>
+                  </span>
+                  {badges.filter((b) => halaqahStudents.some((s) => s.id === b.studentId)).length > 0 && (
+                    <span className="ms-auto bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                      {badges.filter((b) => halaqahStudents.some((s) => s.id === b.studentId)).length}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  setSelectedNominationStudent(null);
+                  setTrackNominationModalOpen(true);
+                }}
+                className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-teal-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                title="ترشيح طلاب الحلقة لاختبارات المسارات والجمعية المعتمدة"
+              >
+                <span className="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                  <Award className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-slate-800">
+                  <span className="hidden sm:inline">ترشيحات المسارات</span>
+                  <span className="sm:hidden">الترشيحات</span>
+                </span>
+                {halaqahNominations.length > 0 && (
+                  <span className="ms-auto bg-teal-100 text-teal-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                    {halaqahNominations.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setReportsModalOpen(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                title="تصدير وطباعة وإرسال تقارير وكشوف الحلقة"
+              >
+                <span className="w-8 h-8 rounded-lg bg-slate-200 text-slate-600 flex items-center justify-center shrink-0">
+                  <Printer className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-slate-800">
+                  <span className="hidden sm:inline">التقارير والكشوف</span>
+                  <span className="sm:hidden">التقارير</span>
+                </span>
+              </button>
+
+              <button
+                onClick={() => setVirtualModalOpen(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
+                title="الغرفة الافتراضية للحلقة — رابط Meet / Zoom / Teams وبدء البث"
+              >
+                <span className="w-8 h-8 rounded-lg bg-emerald-800 text-emerald-200 flex items-center justify-center shrink-0">
+                  <Video className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-slate-800">
+                  <span className="hidden sm:inline">الحلقة الافتراضية</span>
+                  <span className="sm:hidden">الافتراضية</span>
+                </span>
               </button>
             </div>
           </div>
@@ -1051,6 +925,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredStudents.map(({ student, eval: ev }) => {
               const currentLesson = spellingLessons.find((l) => l.id === student.currentSpellingLessonId);
+              const studentTrackIds =
+                halaqahs.find((h) => h.id === student.halaqahId)?.activeTrackIds ||
+                ['track_quran', 'track_spelling', 'track_virtues'];
+              const studentSpellingEnabled = studentTrackIds.includes('track_spelling');
+              const studentQuranEnabled = studentTrackIds.includes('track_quran');
+              // Dynamic tracks: every enabled track without a builtin section gets its own row
+              const studentCustomTrackIds = studentTrackIds.filter(
+                (tid) => !['track_quran', 'track_spelling'].includes(tid)
+              );
+              const latestRevisionScore = sessionRecords
+                .filter(
+                  (r) => r.studentId === student.id && r.revision && typeof r.revision.score === 'number'
+                )
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]?.revision?.score;
               const studentPlan = getActiveStudentQuranPlan(student.id);
               const hasPlan = !!studentPlan;
               const studentNomination = (trackNominations || []).find((n) => n.studentId === student.id);
@@ -1106,8 +994,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
                     {/* Progress Indicators Bar */}
                     <div className="mt-4 space-y-2.5 bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs">
-                      {/* Spelling Progress */}
-                      {isSpellingActive && (
+                      {/* Spelling Progress — module + halaqah track gated */}
+                      {isSpellingActive && studentSpellingEnabled && (
                         <div>
                           <div className="flex items-center justify-between text-slate-700 mb-1">
                             <span className="flex items-center gap-1 font-semibold text-slate-800">
@@ -1125,22 +1013,79 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                         </div>
                       )}
 
-                      {/* Quran Progress */}
-                      <div>
-                        <div className="flex items-center justify-between text-slate-700 mb-1">
-                          <span className="flex items-center gap-1 font-semibold text-slate-800">
-                            <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                            <span>المحفوظ: سورة {student.currentSurah}</span>
-                          </span>
-                          <span className="font-black text-blue-800">{ev.memorizationProgressRate}%</span>
+                      {/* Quran Progress — halaqah track gated, split: memorization + revision */}
+                      {studentQuranEnabled && (
+                        <div className="space-y-2.5">
+                          <div>
+                            <div className="flex items-center justify-between text-slate-700 mb-1">
+                              <span className="flex items-center gap-1 font-semibold text-slate-800">
+                                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                                <span>الحفظ: سورة {student.currentSurah}</span>
+                              </span>
+                              <span className="font-black text-blue-800">{ev.memorizationProgressRate}%</span>
+                            </div>
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-blue-600 h-full rounded-full transition-all"
+                                style={{ width: `${Math.min(100, ev.memorizationProgressRate)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between text-slate-700 mb-1">
+                              <span className="flex items-center gap-1 font-semibold text-slate-800">
+                                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                                <span>المراجعة</span>
+                              </span>
+                              <span className="font-black text-amber-800">
+                                {latestRevisionScore !== undefined ? `${latestRevisionScore}%` : '—'}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-amber-500 h-full rounded-full transition-all"
+                                style={{ width: `${Math.min(100, latestRevisionScore || 0)}%` }}
+                              ></div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="bg-blue-600 h-full rounded-full transition-all"
-                            style={{ width: `${Math.min(100, ev.memorizationProgressRate)}%` }}
-                          ></div>
-                        </div>
-                      </div>
+                      )}
+
+                      {/* Dynamic enabled tracks — one row per track, latest recorded score */}
+                      {studentCustomTrackIds.map((tid) => {
+                        const trackDef = tracks.find((tr) => tr.id === tid);
+                        const latestScore = sessionRecords
+                          .filter(
+                            (r) =>
+                              r.studentId === student.id &&
+                              r.customTracks?.[tid] &&
+                              typeof r.customTracks[tid].score === 'number'
+                          )
+                          .sort(
+                            (a, b) =>
+                              new Date(b.date).getTime() - new Date(a.date).getTime()
+                          )[0]?.customTracks?.[tid]?.score;
+                        const label = (trackDef?.name || tid).replace(/^مسار\s*/, '');
+                        return (
+                          <div key={tid}>
+                            <div className="flex items-center justify-between text-slate-700 mb-1">
+                              <span className="flex items-center gap-1 font-semibold text-slate-800">
+                                <Layers className="w-3.5 h-3.5 text-violet-600" />
+                                <span>{label}</span>
+                              </span>
+                              <span className="font-black text-violet-800">
+                                {latestScore !== undefined ? `${latestScore}%` : '—'}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-violet-500 h-full rounded-full transition-all"
+                                style={{ width: `${Math.min(100, latestScore || 0)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Evaluation Reason Note */}
@@ -1156,7 +1101,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                       className="flex-1 inline-flex items-center justify-center gap-1 py-2 px-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                      <span>تسجيل جلسة 📝</span>
+                      <span>تسجيل إنجاز 📝</span>
                     </button>
 
                     <button
@@ -1175,6 +1120,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                       <BookOpen className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                       <span>الخطة القرآنية</span>
                       {!hasPlan && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
+                    </button>
+
+                    <button
+                      onClick={() => setComprehensivePlanStudent(student)}
+                      className="inline-flex items-center justify-center p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs border border-indigo-200 transition-colors cursor-pointer"
+                      title="عرض الخطة القرآنية الشاملة (من البداية إلى المستهدف)"
+                    >
+                      <Layers className="w-4 h-4 text-indigo-700" />
                     </button>
 
                     <button
@@ -1270,14 +1223,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
         halaqahId={activeHalaqah?.id}
       />
 
-      {/* P2: Early Intervention Radar Modal */}
-      <EarlyInterventionRadarModal
-        isOpen={radarModalOpen}
-        onClose={() => setRadarModalOpen(false)}
-        halaqahId={activeHalaqah?.id}
-      />
-
       {/* Individual Quran Plan Modal */}
+      {comprehensivePlanStudent && (
+        <ComprehensiveQuranPlanModal
+          student={comprehensivePlanStudent}
+          variant="teacher"
+          onClose={() => setComprehensivePlanStudent(null)}
+        />
+      )}
+
       <StudentQuranPlanModal
         isOpen={Boolean(selectedPlanStudent)}
         student={selectedPlanStudent}
@@ -1294,6 +1248,247 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
         preSelectedStudent={selectedNominationStudent}
         halaqahId={activeHalaqah?.id || ''}
       />
+
+      {/* Tool Modals — same widgets/components, presented in light modals */}
+      {virtualModalOpen && activeHalaqah && (
+        <ToolModal
+          title="الغرفة الافتراضية للحلقة"
+          icon={<Video className="w-5 h-5 text-emerald-700" />}
+          onClose={() => setVirtualModalOpen(false)}
+          wide
+        >
+          <OnlineModeTeacherWidget halaqah={activeHalaqah} students={halaqahStudents} />
+        </ToolModal>
+      )}
+
+      {attendanceModalOpen && (
+        <ToolModal
+          title="رصد حضور الطلاب"
+          icon={<CheckCircle2 className="w-5 h-5 text-emerald-700" />}
+          onClose={() => setAttendanceModalOpen(false)}
+          wide
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-slate-600">
+              الافتراضي: جميع الطلاب حاضرون. انقر على اسم الطالب لتبديل حالته (حاضر ← متأخر ← غائب) ثم احفظ.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {halaqahStudents.map((s) => {
+                const status = studentAttendanceMap[s.id] || 'present';
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => cycleAttendance(s.id)}
+                    className={`text-xs px-2.5 py-2 rounded-xl border font-bold transition-colors cursor-pointer flex flex-col items-center justify-center gap-1 h-14 w-full ${
+                      status === 'absent'
+                        ? 'bg-rose-100 border-rose-400 text-rose-800 line-through'
+                        : status === 'late'
+                        ? 'bg-amber-100 border-amber-400 text-amber-900'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    }`}
+                  >
+                    <span className="truncate max-w-full leading-tight">{s.fullName.split(' ')[0]} {s.fullName.split(' ')[1] || ''}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/60 font-mono shrink-0">
+                      {status === 'absent' ? 'غائب ✕' : status === 'late' ? 'متأخر ⏱️' : 'حاضر ✓'}
+                    </span>
+                  </button>
+                );
+              })}
+
+            </div>
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={handleSaveBulkAttendance}
+                className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                {attendanceSaved ? 'تم الحفظ بنجاح ✓' : 'حفظ كشف الحضور'}
+              </button>
+            </div>
+          </div>
+        </ToolModal>
+      )}
+
+      {interventionModalOpen && (
+        <ToolModal
+          title="من يحتاجني اليوم؟"
+          icon={<Sparkles className="w-5 h-5 text-amber-600" />}
+          onClose={() => setInterventionModalOpen(false)}
+          wide
+        >
+            {needingIntervention.length === 0 ? (
+              <div className="text-xs text-emerald-800 font-bold bg-white/80 p-3 rounded-xl border border-emerald-200 flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>ما شاء الله! جميع طلاب الحلقة يسيرون بوتيرة ممتازة ومطابقة للخطة المقررة.</span>
+              </div>
+            ) : (
+              <>
+              {/* Mobile: vertical cards (no horizontal scroll) */}
+              <div className="md:hidden space-y-3">
+                {needingIntervention.map(({ student, eval: ev }, idx) => (
+                  <div
+                    key={student.id}
+                    className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs inline-flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-900 text-xs block truncate">
+                            {student.fullName}
+                          </span>
+                          <span className="text-[11px] text-slate-500">{student.grade}</span>
+                        </div>
+                      </div>
+                      <StatusBadge status={ev.status} label={ev.statusLabel} size="sm" />
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed">{ev.reason}</p>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      {isHalaqahTrackEnabled(student.halaqahId, 'track_spelling') && (
+                        <span className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 font-mono">
+                          الهجاء: {ev.spellingMasteryRate}% (درس {ev.actualLessonNum})
+                        </span>
+                      )}
+                      <button
+                        onClick={() => setActiveStudentRecord(student)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs whitespace-nowrap inline-flex items-center gap-1"
+                      >
+                        <span>جلسة دعم</span>
+                        <span>📝</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop: table layout */}
+              <div className="hidden md:block bg-white rounded-xl border border-amber-200 overflow-hidden shadow-2xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-amber-100/60 border-b border-amber-200 text-amber-950 font-bold">
+                      <tr>
+                        <th className="p-3 w-16 text-center">الأولوية</th>
+                        <th className="p-3 min-w-[160px]">اسم الطالب والصف</th>
+                        <th className="p-3 min-w-[260px]">سبب الاحتياج والتشخيص التربوي</th>
+                        <th className="p-3 w-32 text-center">مستوى الهجاء</th>
+                        <th className="p-3 w-32 text-center">الحالة</th>
+                        <th className="p-3 w-28 text-center">الإجراء المباشر</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {needingIntervention.map(({ student, eval: ev }, idx) => (
+                        <tr
+                          key={student.id}
+                          className="hover:bg-amber-50/50 transition-colors"
+                        >
+                          <td className="p-3 text-center align-middle">
+                            <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs inline-flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                          </td>
+                          <td className="p-3 align-middle">
+                            <span className="font-bold text-slate-900 block text-xs">
+                              {student.fullName}
+                            </span>
+                            <span className="text-[11px] text-slate-500 block">
+                              {student.grade}
+                            </span>
+                          </td>
+                          <td className="p-3 align-middle text-slate-700 text-xs">
+                            {ev.reason}
+                          </td>
+                          <td className="p-3 text-center align-middle">
+                            {isHalaqahTrackEnabled(student.halaqahId, 'track_spelling') ? (
+                              <span className="text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 inline-block font-mono">
+                                {ev.spellingMasteryRate}% (درس {ev.actualLessonNum})
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center align-middle">
+                            <StatusBadge status={ev.status} label={ev.statusLabel} size="sm" />
+                          </td>
+                          <td className="p-3 text-center align-middle">
+                            <button
+                              onClick={() => setActiveStudentRecord(student)}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs whitespace-nowrap inline-flex items-center gap-1"
+                            >
+                              <span>جلسة دعم</span>
+                              <span>📝</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+            )}
+        </ToolModal>
+      )}
+
+      {reportsModalOpen && (
+        <ToolModal
+          title="التقارير والكشوف"
+          icon={<Printer className="w-5 h-5 text-slate-700" />}
+          onClose={() => setReportsModalOpen(false)}
+        >
+          <div className="space-y-2.5">
+            <button
+              onClick={() => {
+                setReportsModalOpen(false);
+                exportStudentsToExcel(halaqahStudents, sessionRecords, spellingLessons, academicConfig, {
+                  halaqahName: activeHalaqah?.name,
+                });
+              }}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40 transition-all text-right cursor-pointer"
+            >
+              <span className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <FileSpreadsheet className="w-4 h-4" />
+              </span>
+              <span>
+                <span className="block text-xs font-bold text-slate-900">تصدير كشف Excel</span>
+                <span className="block text-[11px] text-slate-500 mt-0.5">تصدير بيانات الحلقة في ملف إكسل رسمي</span>
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setReportsModalOpen(false);
+                setOfficialReportModalOpen(true);
+              }}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 hover:border-slate-400 hover:bg-slate-50 transition-all text-right cursor-pointer"
+            >
+              <span className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                <Printer className="w-4 h-4" />
+              </span>
+              <span>
+                <span className="block text-xs font-bold text-slate-900">طباعة كشف معتمد (PDF)</span>
+                <span className="block text-[11px] text-slate-500 mt-0.5">معاينة وطباعة تقرير بالأختام والشعارات الرسمية</span>
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setReportsModalOpen(false);
+                handleOpenTeacherWeeklySummary();
+              }}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40 transition-all text-right cursor-pointer"
+            >
+              <span className="w-9 h-9 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0">
+                <Send className="w-4 h-4 text-amber-300" />
+              </span>
+              <span>
+                <span className="block text-xs font-bold text-slate-900">تقرير المعلم الأسبوعي</span>
+                <span className="block text-[11px] text-slate-500 mt-0.5">توليد وإرسال التقرير الأسبوعي عبر واتساب</span>
+              </span>
+            </button>
+          </div>
+        </ToolModal>
+      )}
     </div>
   );
 };

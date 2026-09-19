@@ -407,16 +407,27 @@ export class RangeCalculator {
     dailyAmount = 1,
     direction: 'forward' | 'backward' = 'backward',
     consolidationDays = 3,
-    revisionDailyPages = 1
+    revisionDailyPages = 1,
+    initialMemorizedVerses: Ayah[] = []
   ): Promise<PlanningUnit[]> {
     const surahs = getSurahsInRangeByDirection(start.surahNumber, end.surahNumber, direction);
     if (!surahs || surahs.length === 0) return [];
 
     const units: PlanningUnit[] = [];
 
-    // Track all unique verses memorized so far in chronological learning sequence
-    const memorizedVersesAccumulator: Ayah[] = [];
+    // Track all unique verses memorized so far in chronological learning sequence.
+    // Auto Minor Revision: seeded with the student's prior memorization so the rolling
+    // window rotates across prior + new memorization as one pool.
+    const memorizedVersesAccumulator: Ayah[] = [...initialMemorizedVerses];
     let revisionWindowOffset = 0;
+    if (initialMemorizedVerses.length > 0) {
+      // Start the window at the most recently memorized pages (nearest to plan start)
+      const seedPageCount = new Set(initialMemorizedVerses.map((v) => v.pageNumber)).size;
+      revisionWindowOffset = Math.max(
+        0,
+        seedPageCount - Math.max(1, Math.round(revisionDailyPages))
+      );
+    }
 
     for (let sIdx = 0; sIdx < surahs.length; sIdx++) {
       const surahEntry = surahs[sIdx];

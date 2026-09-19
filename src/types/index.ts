@@ -212,6 +212,12 @@ export interface IndividualQuranPlan {
   targetSurahLimit: string;
   notes?: string;
   customTeacherAdjustments?: boolean;
+  /**
+   * Per-student academic days (subset of the halaqah working days).
+   * Undefined/empty = student follows the halaqah schedule (backward compatible).
+   * Stored inside the students.quran_plan JSONB — no schema change.
+   */
+  preferredWorkingDays?: number[];
 }
 
 export interface SubLesson {
@@ -334,6 +340,9 @@ export interface DailySessionRecord {
     type: 'قريبة' | 'بعيدة';
     score: number;
     notes?: string;
+    /** Set when the revision range was auto-determined by the plan engine (Auto Minor Revision) */
+    isAutoRange?: boolean;
+    autoRangeLabel?: string;
   };
   customTracks?: Record<string, any>; // مسارات مخصصة مستقبلية
   createdAt?: string;

@@ -20,6 +20,14 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
     needsScope: false,
     allowedScopeTypes: ['tenant'],
   },
+  {
+    id: 'view_intervention_radar',
+    label: 'رادار التدخل المبكر',
+    category: 'programs',
+    description: 'الوصول إلى رادار المتابعة الذكي والتدخل المبكر ضمن البرامج التربوية',
+    needsScope: true,
+    allowedScopeTypes: ['tenant', 'stage'],
+  },
 
   // 2. Teachers & Halaqahs
   {
@@ -226,6 +234,14 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
     description: 'تسجيل التسميع اليومي وتقييم الحفظ والتلاوة',
     needsScope: true,
     allowedScopeTypes: ['stage', 'halaqah'],
+  },
+  {
+    id: 'manage_quran_plan',
+    label: 'إدارة الخطط القرآنية للطلاب',
+    category: 'quran',
+    description: 'إنشاء وتعديل الخطط القرآنية الفردية للطلاب وتسجيل إنجازاتها اليومية',
+    needsScope: true,
+    allowedScopeTypes: ['tenant', 'stage', 'halaqah'],
   },
   {
     id: 'view_spelling',
@@ -570,6 +586,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'send_group_report',
     'view_meetings',
     'manage_meetings',
+    'view_intervention_radar',
   ],
   parent: [
     'view_dashboard',
@@ -599,6 +616,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'manage_attendance',
     'view_quran',
     'manage_quran',
+    'manage_quran_plan',
     'view_points',
     'manage_points',
     'view_finance',
@@ -620,6 +638,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'send_group_report',
     'view_meetings',
     'manage_meetings',
+    'view_intervention_radar',
   ],
   finance_supervisor: [
     'view_dashboard',
@@ -641,6 +660,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'manage_attendance',
     'view_quran',
     'manage_quran',
+    'manage_quran_plan',
     'view_spelling',
     'manage_spelling',
     'view_curriculum',
@@ -681,6 +701,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'view_reports',
     'view_meetings',
     'manage_meetings',
+    'view_intervention_radar',
   ],
   stage_supervisor: [
     'view_dashboard',
@@ -691,6 +712,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'manage_attendance',
     'view_quran',
     'manage_quran',
+    'manage_quran_plan',
     'view_points',
     'manage_points',
     'view_stages',
@@ -701,6 +723,7 @@ export const SUPERVISOR_TYPE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'view_reports',
     'send_group_report',
     'view_meetings',
+    'view_intervention_radar',
   ],
   admissions_supervisor: [
     'view_dashboard',

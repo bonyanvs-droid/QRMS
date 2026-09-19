@@ -23,6 +23,7 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import { Student } from '../../types';
+import { hasPermission } from '../../lib/permissions';
 import { useApp } from '../../context/AppContext';
 import {
   StudentQuranPlan,
@@ -63,7 +64,18 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     academicConfig,
     halaqahs,
     teachers,
+    activeTenant,
   } = useApp();
+
+  // Teachers can view the plan but never modify it — editing requires manage_quran_plan
+  const canEditPlan = hasPermission(
+    currentUser,
+    'manage_quran_plan',
+    undefined,
+    undefined,
+    halaqahs,
+    activeTenant
+  );
 
   const provider = useMemo(() => new BundledQuranProvider(), []);
 
@@ -118,7 +130,18 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   const [setupRevisionDailyPages, setSetupRevisionDailyPages] = useState<number>(1);
   const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
   const [setupWorkingDays, setSetupWorkingDays] = useState<number[]>([0, 1, 2, 3]);
+  const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
   const [isSettingUp, setIsSettingUp] = useState<boolean>(false);
+
+  // Stage config matched to the student's grade (used for setup defaults & read-only summary)
+  const matchedStageConfig = useMemo(
+    () =>
+      student
+        ? quranStageConfigs.find((c) => c.targetGrades.includes(student.grade) && c.isActive) ||
+          quranStageConfigs[0]
+        : undefined,
+    [student, quranStageConfigs]
+  );
 
   // Auto-fill setup defaults when student changes
   useEffect(() => {
@@ -243,6 +266,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         customRevisionDailyPages: setupRevisionDailyPages,
         customConsolidationDays: setupConsolidationDays,
         customWorkingDays: setupWorkingDays,
+        autoMinorRevisionMode: setupAutoMinorRevision,
       });
 
       setFeedbackMessage({
@@ -387,6 +411,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
             /* ============================================================
                STATE 1: Student Needs Starting Point Setup (يحتاج تحديد نقطة البداية)
                ============================================================ */
+            canEditPlan ? (
             <div className="space-y-6">
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-800 shrink-0 mt-0.5">
@@ -644,6 +669,22 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                   </div>
                 </div>
 
+                {/* Auto Minor Revision toggle — ON by default for new plans */}
+                <label className="flex items-center justify-between gap-3 bg-emerald-50/60 border border-emerald-200 rounded-xl px-3.5 py-2.5 cursor-pointer">
+                  <span className="min-w-0">
+                    <span className="text-xs font-bold text-emerald-950 block">المراجعة الصغرى التلقائية</span>
+                    <span className="text-[10px] text-emerald-800/80 block mt-0.5">
+                      يحدد المحرك نطاق المراجعة اليومية تلقائيًا من المحفوظ السابق + الجديد (يبقى مقدار المراجعة قابلًا للضبط أعلاه)
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={setupAutoMinorRevision}
+                    onChange={(e) => setSetupAutoMinorRevision(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-700 shrink-0"
+                  />
+                </label>
+
                 <div className="pt-3 flex justify-end">
                   <button
                     type="submit"
@@ -656,6 +697,75 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                 </div>
               </form>
             </div>
+            ) : (
+            /* Read-only view: teacher sees the student's Quran data without edit surfaces */
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                <h4 className="text-xs font-black text-slate-900 mb-3">بيانات الطالب القرآنية الحالية</h4>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">نقطة البداية</span>
+                    <span className="font-black text-slate-900">
+                      سورة {student.currentSurah || '—'} • آية {student.currentAyah || '—'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">النهاية (المستهدف)</span>
+                    <span className="font-black text-slate-900">
+                      سورة {student.minimumTargetSurah || '—'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">مقدار الحفظ اليومي</span>
+                    <span className="font-black text-slate-900">
+                      {matchedStageConfig?.memorization
+                        ? `${matchedStageConfig.memorization.defaultDailyAmount} ${
+                            (
+                              {
+                                ayah: 'آيات',
+                                line: 'أسطر',
+                                half_page: 'نصف صفحة',
+                                quarter_page: 'ربع صفحة',
+                                page: 'صفحة',
+                                surah: 'سورة',
+                                juz: 'جزء',
+                                quarter: 'ربع حزب',
+                                hizb: 'حزب',
+                              } as Record<string, string>
+                            )[matchedStageConfig.memorization.unitType] || ''
+                          }`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">مقدار المراجعة اليومية</span>
+                    <span className="font-black text-slate-900">
+                      {matchedStageConfig?.revision?.defaultDailyPages !== undefined
+                        ? `${matchedStageConfig.revision.defaultDailyPages} صفحة`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">اتجاه الحفظ</span>
+                    <span className="font-black text-slate-900">
+                      {matchedStageConfig?.memorization?.defaultDirection === 'forward'
+                        ? 'تصاعدي (الفاتحة ← الناس)'
+                        : 'تنازلي (الناس ← الفاتحة)'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <span className="text-[10px] text-slate-500 block mb-0.5">الحلقة</span>
+                    <span className="font-black text-slate-900">
+                      {halaqahs.find((h) => h.id === student.halaqahId)?.name || '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-center text-[11px] text-slate-500">
+                لا توجد خطة قرآنية معتمدة لهذا الطالب حتى الآن — عرض فقط، ويتم اعتماد الخطة من قبل الإدارة أو المشرف المختص.
+              </p>
+            </div>
+            )
           ) : (
             /* ============================================================
                STATE 2: Student HAS Active Plan (View & Record Achievement)
@@ -867,8 +977,8 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     </div>
                   )}
 
-                  {/* Interactive Achievement Recording Section */}
-                  {currentDayItem && (
+                  {/* Interactive Achievement Recording Section — permission-gated */}
+                  {currentDayItem && canEditPlan && (
                     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
                       <h5 className="text-xs font-black text-slate-900 flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-emerald-700" />

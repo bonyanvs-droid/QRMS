@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
-import { SURAHS_LIST } from '../../data/initialData';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, RotateCcw, Check, MessageSquare, X, Send } from 'lucide-react';
+import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 
 interface QuickRecordModalProps {
@@ -38,6 +37,61 @@ interface QuickRecordModalContentProps {
   onOpenReportModal?: (content: string, phone: string, name: string, studentId: string) => void;
 }
 
+// Builtin step ids + any custom halaqah track id (dynamic steps)
+type SessionTrack = string;
+
+// Smart tab label: strips "مسار/مسارات" prefix, returns first meaningful word
+// "مسار المناهج المدرسية" → "المناهج" | "فضائل الأعمال" → "فضائل"
+const trackShortLabel = (name: string): string => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return name.trim();
+  const generic = ['مسار', 'مسارات', 'المسار'];
+  const meaningful = generic.includes(words[0]) ? words.slice(1) : words;
+  return meaningful[0] || words[words.length - 1];
+};
+const BUILTIN_STEP_IDS = ['spelling', 'memorization', 'revision'];
+// Halaqah track ids that map to builtin wizard steps — every other enabled track
+// (custom or builtin like virtues/tilawah) gets a generic wizard step
+const NON_SESSION_TRACK_IDS = ['track_quran', 'track_spelling'];
+
+const TRACK_META: Record<string, { label: string; icon: React.ReactNode }> = {
+  spelling: { label: 'الهجاء', icon: <Sparkles className="w-3.5 h-3.5" /> },
+  memorization: { label: 'الحفظ', icon: <BookOpen className="w-3.5 h-3.5" /> },
+  revision: { label: 'المراجعة', icon: <RotateCcw className="w-3.5 h-3.5" /> },
+};
+
+/** Shared 0-100 mastery slider — same UX reused by memorization & revision */
+const ScoreSlider: React.FC<{
+  value: number;
+  onChange: (v: number) => void;
+  accent: string;
+  textClass: string;
+  min?: number;
+  label: string;
+}> = ({ value, onChange, accent, textClass, min = 60, label }) => (
+  <div className="mt-3 flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
+    <span className="text-slate-700">{label}</span>
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={min}
+        max="100"
+        step="5"
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className={`w-28 ${accent}`}
+      />
+      <span className={`font-bold ${textClass}`}>{value}%</span>
+    </div>
+  </div>
+);
+
+// Spelling mastery zones (equal quarters): <25 لم ينتقل بعد | 25-49 يحتاج مراجعة | 50-74 يحتاج تثبيت | >=75 أتقن
+const tagForSpellingScore = (
+  val: number
+): 'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة' =>
+  val >= 75 ? 'أتقن' : val >= 50 ? 'يحتاج تثبيت' : val >= 25 ? 'يحتاج مراجعة' : 'لم ينتقل بعد';
+
 const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   student,
   onClose,
@@ -52,10 +106,35 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     teachers,
     getActiveStudentQuranPlan,
     recordQuranPlanAchievement,
+    tracks,
   } = useApp();
 
-  // Active Tab: spelling, memorization, revision, or all
-  const [activeMode, setActiveMode] = useState<'all' | 'spelling' | 'memorization' | 'revision'>('all');
+  // Quran Planning Engine Integration — plan determines which tracks today's session needs
+  const activeQuranPlan = getActiveStudentQuranPlan(student.id);
+  const todayIso = new Date().toISOString().split('T')[0];
+  const todayDailyItem = activeQuranPlan?.generatedPlan?.dailyPlans?.find((d) => d.date === todayIso);
+
+  // Auto Minor Revision: engine-determined range, teacher only records the actual result
+  const autoRevision = activeQuranPlan?.autoMinorRevisionMode === true;
+  const autoRevLabel = todayDailyItem?.revisionDisplayLabel;
+  const autoRevPages = todayDailyItem?.revisionPagesAmount;
+
+  // Plan-derived memorization target (prefill, teacher may adjust to actual)
+  const planUnit = todayDailyItem?.targetUnit;
+  const planStartSurah = useMemo(() => {
+    if (!planUnit?.start) return undefined;
+    return (
+      planUnit.start.surahName ||
+      ALL_114_SURAHS.find((s) => s.number === planUnit.start.surahNumber)?.name
+    );
+  }, [planUnit]);
+  const planEndSurah = useMemo(() => {
+    if (!planUnit?.end) return undefined;
+    return (
+      planUnit.end.surahName ||
+      ALL_114_SURAHS.find((s) => s.number === planUnit.end.surahNumber)?.name
+    );
+  }, [planUnit]);
 
   // Spelling Track State
   const initialLesson =
@@ -76,11 +155,11 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [spellingStatusTag, setSpellingStatusTag] = useState<'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة'>('أتقن');
   const [spellingNotes, setSpellingNotes] = useState('');
 
-  // Memorization Track State
-  const [surahFrom, setSurahFrom] = useState<string>(student.currentSurah);
-  const [ayahFrom, setAyahFrom] = useState<number>(1);
-  const [surahTo, setSurahTo] = useState<string>(student.currentSurah);
-  const [ayahTo, setAyahTo] = useState<number>(student.currentAyah || 10);
+  // Memorization Track State — prefilled from the Quran plan when available
+  const [surahFrom, setSurahFrom] = useState<string>(planStartSurah || student.currentSurah);
+  const [ayahFrom, setAyahFrom] = useState<number>(planUnit?.start?.ayahNumber || 1);
+  const [surahTo, setSurahTo] = useState<string>(planEndSurah || student.currentSurah);
+  const [ayahTo, setAyahTo] = useState<number>(planUnit?.end?.ayahNumber || student.currentAyah || 10);
   const [memScore, setMemScore] = useState<number>(90);
   const [memNotes, setMemNotes] = useState('');
 
@@ -91,14 +170,64 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [revAyahTo, setRevAyahTo] = useState<number>(student.currentAyah || 1);
   const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>('قريبة');
   const [revScore, setRevScore] = useState<number>(95);
+  const [revManualOverride, setRevManualOverride] = useState(false);
+
+  // Custom (admin-defined) tracks — generic score + notes per track, saved to customTracks
+  const [customTrackScores, setCustomTrackScores] = useState<Record<string, number>>({});
+  const [customTrackNotes, setCustomTrackNotes] = useState<Record<string, string>>({});
 
   const [generalNotes, setGeneralNotes] = useState('');
   const [isSaved, setIsSaved] = useState(false);
 
-  // Quran Planning Engine Integration
-  const activeQuranPlan = getActiveStudentQuranPlan(student.id);
-  const todayIso = new Date().toISOString().split('T')[0];
-  const todayDailyItem = activeQuranPlan?.generatedPlan?.dailyPlans?.find((d) => d.date === todayIso);
+  // ── Wizard: tracks required TODAY, driven by the student's plan + halaqah enabled tracks ──
+  const studentHalaqah =
+    halaqahs.find((h) => h.id === student.halaqahId) ||
+    halaqahs.find((h) => h.name === student.halaqahName);
+  const enabledTrackIds = studentHalaqah?.activeTrackIds || [
+    'track_quran',
+    'track_spelling',
+    'track_virtues',
+  ];
+  const isSpellingTrackEnabled = enabledTrackIds.includes('track_spelling');
+  const isQuranTrackEnabled = enabledTrackIds.includes('track_quran');
+
+  const steps = useMemo<SessionTrack[]>(() => {
+    const list: SessionTrack[] = [];
+    if (isSpellingTrackEnabled) list.push('spelling');
+    if (!isQuranTrackEnabled) {
+      for (const tid of enabledTrackIds) {
+        if (!NON_SESSION_TRACK_IDS.includes(tid) && !list.includes(tid)) list.push(tid);
+      }
+      return list;
+    }
+    if (todayDailyItem) {
+      const dt = todayDailyItem.dayType;
+      if (!dt || dt === 'memorization' || dt === 'consolidation') list.push('memorization');
+      if (
+        dt === 'revision' ||
+        dt === 'general_revision' ||
+        (todayDailyItem.revisionPagesAmount ?? 0) > 0
+      )
+        list.push('revision');
+    } else {
+      list.push('memorization', 'revision');
+    }
+    if (list.length === 0) list.push('memorization');
+    // Custom admin-defined tracks → generic wizard steps, in halaqah track order
+    for (const tid of enabledTrackIds) {
+      if (!NON_SESSION_TRACK_IDS.includes(tid) && !list.includes(tid)) list.push(tid);
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled]);
+
+  const [stepIndex, setStepIndex] = useState(0);
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  const safeIndex = Math.min(stepIndex, steps.length - 1);
+  const currentStep = steps[safeIndex];
+  const isFirstStep = safeIndex === 0;
+  const isLastStep = safeIndex === steps.length - 1;
+  const singleStep = steps.length === 1;
 
   // When lesson changes, re-populate sub-scores
   const handleLessonChange = (lessonId: string) => {
@@ -123,10 +252,21 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     setSpellingFinalScore(avg);
 
     // Auto status tag
-    if (avg >= 85) setSpellingStatusTag('أتقن');
-    else if (avg >= 70) setSpellingStatusTag('يحتاج تثبيت');
-    else setSpellingStatusTag('لم ينتقل بعد');
+    setSpellingStatusTag(tagForSpellingScore(avg));
   };
+
+  // Colored mastery slider → maps zones to teacher decision (visual input only)
+  const handleSpellingScoreChange = (val: number) => {
+    setSpellingFinalScore(val);
+    setSpellingStatusTag(tagForSpellingScore(val));
+  };
+
+  // Step state lives in component state — navigating back/forward never loses data
+  const handleNextStep = () => {
+    setCompletedSteps((prev) => new Set(prev).add(safeIndex));
+    setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+  };
+  const handlePrevStep = () => setStepIndex((i) => Math.max(i - 1, 0));
 
   const handleSave = async (andSendReport = false) => {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -138,7 +278,19 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       date: todayStr,
       weekNumber: academicConfig.currentWeek,
       attendance: 'present',
-      spelling: selectedLesson
+      customTracks: (() => {
+        const ids = steps.filter((t) => !BUILTIN_STEP_IDS.includes(t));
+        if (ids.length === 0) return undefined;
+        const out: Record<string, { score: number; notes?: string }> = {};
+        for (const id of ids) {
+          out[id] = {
+            score: customTrackScores[id] ?? 85,
+            notes: customTrackNotes[id] || undefined,
+          };
+        }
+        return out;
+      })(),
+      spelling: steps.includes('spelling') && selectedLesson
         ? {
             lessonId: selectedLesson.id,
             lessonNumber: selectedLesson.lessonNumber,
@@ -149,20 +301,27 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             notes: spellingNotes,
           }
         : undefined,
-      memorization: {
-        surahFrom,
-        ayahFrom,
-        surahTo,
-        ayahTo,
-        score: memScore,
-        notes: memNotes,
-      },
-      revision: {
-        surahFrom: revSurahFrom,
-        surahTo: revSurahTo,
-        type: revType,
-        score: revScore,
-      },
+      memorization: steps.includes('memorization')
+        ? {
+            surahFrom,
+            ayahFrom,
+            surahTo,
+            ayahTo,
+            score: memScore,
+            notes: memNotes,
+          }
+        : undefined,
+      revision: steps.includes('revision')
+        ? {
+            surahFrom: revSurahFrom,
+            surahTo: revSurahTo,
+            type: revType,
+            score: revScore,
+            ...(autoRevision && autoRevLabel && !revManualOverride
+              ? { isAutoRange: true, autoRangeLabel: autoRevLabel }
+              : {}),
+          }
+        : undefined,
       teacherRemarks: generalNotes,
     };
 
@@ -240,56 +399,56 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </button>
         </div>
 
-        {/* Mode Selector Tabs */}
-        <div className="flex items-center gap-1.5 mt-4 p-1 bg-slate-100 rounded-xl">
-          <button
-            onClick={() => setActiveMode('all')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-              activeMode === 'all' ? 'bg-white text-emerald-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            التقييم الشامل
-          </button>
-          <button
-            onClick={() => setActiveMode('spelling')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
-              activeMode === 'spelling' ? 'bg-white text-emerald-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>الهجاء القرآني</span>
-          </button>
-          <button
-            onClick={() => setActiveMode('memorization')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
-              activeMode === 'memorization'
-                ? 'bg-white text-emerald-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-            <span>الحفظ الجديد</span>
-          </button>
-          <button
-            onClick={() => setActiveMode('revision')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
-              activeMode === 'revision' ? 'bg-white text-emerald-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-            <span>المراجعة</span>
-          </button>
-        </div>
+        {/* Step Indicator — one track at a time, no "التقييم الشامل" */}
+        {!singleStep && (
+          <div className="flex items-center gap-1.5 mt-4">
+            {steps.map((st, i) => {
+              const done = completedSteps.has(i);
+              const active = i === safeIndex;
+              const meta = TRACK_META[st] || {
+                label: trackShortLabel(
+                  tracks.find((tr) => tr.id === st)?.name || st
+                ),
+                icon: <BookOpen className="w-3.5 h-3.5" />,
+              };
+              return (
+                <div
+                  key={st}
+                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+                    active
+                      ? 'bg-emerald-700 text-white shadow-xs'
+                      : done
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {done && !active ? <Check className="w-3.5 h-3.5" /> : meta.icon}
+                  <span className="truncate">{meta.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Content Body */}
+        {/* Content Body — single active track */}
         <div className="mt-4 space-y-4 max-h-[60vh] overflow-y-auto pl-1">
-          {/* TRACK 1: SPELLING */}
-          {(activeMode === 'all' || activeMode === 'spelling') && (
+          {steps.length === 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center text-xs text-slate-600 font-bold">
+              لا توجد مسارات تعليمية مفعّلة لهذه الحلقة حاليًا — راجع إعدادات الحلقة.
+            </div>
+          )}
+          {/* STEP: SPELLING */}
+          {currentStep === 'spelling' && !selectedLesson && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center text-xs text-slate-600 font-bold">
+              مسار الهجاء مفعّل لهذه الحلقة لكن لا توجد دروس هجاء مهيأة لهذا الطالب حاليًا.
+            </div>
+          )}
+          {currentStep === 'spelling' && selectedLesson && (
             <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-700" />
-                  <h4 className="text-xs font-bold text-emerald-950">تقييم الهجاء القرآني (الدرس والمهام الفرعية)</h4>
+                  <h4 className="text-xs font-bold text-emerald-950">✏️ الهجاء القرآني</h4>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-700 font-medium">الدرجة:</span>
@@ -339,34 +498,61 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 ))}
               </div>
 
-              {/* Status Tag Selector */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-700">قرار المعلم:</span>
-                {(['أتقن', 'يحتاج تثبيت', 'لم ينتقل بعد', 'يحتاج مراجعة'] as const).map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => setSpellingStatusTag(tag)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                      spellingStatusTag === tag
-                        ? 'bg-emerald-700 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))}
+              {/* Colored mastery slider — the sole decision input (4 zones) */}
+              <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between mb-1.5 text-[11px] font-bold text-slate-700">
+                  <span>مؤشر إتقان الهجاء</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono text-slate-800">{spellingFinalScore}%</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-black border ${
+                        spellingStatusTag === 'أتقن'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : spellingStatusTag === 'يحتاج تثبيت'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : spellingStatusTag === 'يحتاج مراجعة'
+                          ? 'bg-rose-50 text-rose-800 border-rose-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {spellingStatusTag}
+                    </span>
+                  </span>
+                </div>
+                <div className="relative">
+                  <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-2 rounded-full overflow-hidden flex" dir="ltr">
+                    <div className="h-full bg-emerald-300" style={{ width: '25%' }} />
+                    <div className="h-full bg-amber-300" style={{ width: '25%' }} />
+                    <div className="h-full bg-rose-300" style={{ width: '25%' }} />
+                    <div className="h-full bg-slate-300" style={{ width: '25%' }} />
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={spellingFinalScore}
+                    onChange={(e) => handleSpellingScoreChange(parseInt(e.target.value))}
+                    className="relative w-full h-2 appearance-none bg-transparent accent-slate-800"
+                  />
+                </div>
+                <div className="flex text-[10px] font-bold mt-1">
+                  <span className="text-slate-500 text-center flex-1">لم ينتقل بعد</span>
+                  <span className="text-rose-700 text-center flex-1">يحتاج مراجعة</span>
+                  <span className="text-amber-700 text-center flex-1">يحتاج تثبيت</span>
+                  <span className="text-emerald-700 text-center flex-1">أتقن</span>
+                </div>
               </div>
             </div>
           )}
 
-          {/* TRACK 2: MEMORIZATION */}
-          {(activeMode === 'all' || activeMode === 'memorization') && (
+          {/* STEP: MEMORIZATION */}
+          {currentStep === 'memorization' && (
             <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-blue-700" />
-                  <h4 className="text-xs font-bold text-blue-950">تسميع المحفوظ الجديد</h4>
+                  <h4 className="text-xs font-bold text-blue-950">📖 الحفظ الجديد</h4>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-700 font-medium">درجة الحفظ:</span>
@@ -463,31 +649,23 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
-              <div className="mt-3 flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
-                <span className="text-slate-700">تقييم إتقان التسميع والتجويد:</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="60"
-                    max="100"
-                    step="5"
-                    value={memScore}
-                    onChange={(e) => setMemScore(parseInt(e.target.value))}
-                    className="w-28 accent-blue-600"
-                  />
-                  <span className="font-bold text-blue-800">{memScore}%</span>
-                </div>
-              </div>
+              <ScoreSlider
+                label="تقييم إتقان التسميع والتجويد:"
+                value={memScore}
+                onChange={setMemScore}
+                accent="accent-blue-600"
+                textClass="text-blue-800"
+              />
             </div>
           )}
 
-          {/* TRACK 3: REVISION */}
-          {(activeMode === 'all' || activeMode === 'revision') && (
+          {/* STEP: REVISION */}
+          {currentStep === 'revision' && (
             <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <RotateCcw className="w-4 h-4 text-amber-700" />
-                  <h4 className="text-xs font-bold text-amber-950">المراجعة والتثبيت</h4>
+                  <h4 className="text-xs font-bold text-amber-950">🔄 المراجعة والتثبيت</h4>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-700 font-medium">الدرجة:</span>
@@ -497,6 +675,61 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
+              {/* Plan-driven daily revision banner */}
+              {todayDailyItem?.revisionDisplayLabel && (
+                <div className="mb-3 bg-white p-2.5 rounded-xl border border-amber-200 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] text-amber-700 font-bold block">مقرر مراجعة اليوم بالخطة:</span>
+                    <span className="font-bold text-slate-900">{todayDailyItem.revisionDisplayLabel}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800">
+                    مربوط تلقائياً
+                  </span>
+                </div>
+              )}
+
+              {/* Auto Minor Revision — engine-determined range */}
+              {autoRevision && autoRevLabel && !revManualOverride ? (
+                <div className="bg-white p-3 rounded-xl border border-amber-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
+                      المراجعة التلقائية
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setRevManualOverride(true)}
+                      className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                    >
+                      تعديل النطاق يدويًا
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <span className="font-bold text-slate-900">{autoRevLabel}</span>
+                    {autoRevPages !== undefined && (
+                      <span className="text-slate-600">
+                        المقدار اليومي: <strong className="text-amber-900">{autoRevPages} صفحة</strong>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-600">نوع المراجعة:</span>
+                    {(['قريبة', 'بعيدة'] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setRevType(t)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg border ${
+                          revType === t
+                            ? 'bg-amber-500 text-slate-950 border-amber-600'
+                            : 'bg-white text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Rev From */}
                 <div className="bg-white p-2.5 rounded-xl border border-amber-200">
@@ -587,6 +820,17 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                   </div>
                 </div>
               </div>
+              )}
+
+              {/* Revision mastery — same slider UX as memorization */}
+              <ScoreSlider
+                label="تقييم المراجعة والتثبيت:"
+                value={revScore}
+                onChange={setRevScore}
+                accent="accent-amber-600"
+                textClass="text-amber-800"
+                min={0}
+              />
             </div>
           )}
 
@@ -603,31 +847,56 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </div>
         </div>
 
-        {/* Footer Actions */}
+        {/* Wizard Footer */}
         <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-medium transition-colors"
-          >
-            إلغاء
-          </button>
-
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleSave(false)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow-xs transition-colors"
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-medium transition-colors"
             >
-              {isSaved ? <Check className="w-4 h-4 text-emerald-400" /> : null}
-              <span>حفظ التقييم فقط</span>
+              إلغاء
             </button>
+            {!isFirstStep && (
+              <button
+                onClick={handlePrevStep}
+                className="inline-flex items-center gap-1 px-4 py-2.5 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 text-xs font-bold transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+                <span>رجوع</span>
+              </button>
+            )}
+          </div>
 
-            <button
-              onClick={() => handleSave(true)}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
-            >
-              <Send className="w-4 h-4 text-amber-300" />
-              <span>حفظ وإرسال تقرير الواتساب 📲</span>
-            </button>
+          <div className="flex items-center gap-2">
+            {steps.length > 0 && isLastStep && onOpenReportModal && (
+              <button
+                onClick={() => handleSave(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                title="حفظ الجلسة ثم فتح تقرير واتساب لولي الأمر"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">حفظ وإرسال تقرير</span>
+                <span className="sm:hidden">تقرير</span>
+              </button>
+            )}
+
+            {steps.length > 0 && (singleStep || isLastStep) ? (
+              <button
+                onClick={() => handleSave(false)}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
+              >
+                {isSaved ? <Check className="w-4 h-4 text-emerald-200" /> : null}
+                <span>حفظ</span>
+              </button>
+            ) : steps.length > 0 ? (
+              <button
+                onClick={handleNextStep}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
+              >
+                <span>التالي</span>
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

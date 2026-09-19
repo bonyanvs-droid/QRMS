@@ -88,6 +88,7 @@ export const UNIFIED_NAV_ITEMS: NavigationItem[] = [
   // 4. Educational Programs (قسم الشؤون التربوية)
   { id: 'educational', label: '📘 البرنامج التربوي العام', shortLabel: 'التربوي العام', path: '/educational', icon: BookOpen, category: 'educational_programs', requiredModule: 'educational', requiredPermission: ['view_educational', 'manage_educational', 'manage_programs'] },
   { id: 'seasonal_programs', label: '☀️ البرامج الموسمية', shortLabel: 'البرامج الموسمية', path: '/seasonal-programs', icon: Sun, category: 'educational_programs', requiredPermission: ['view_seasonal', 'manage_seasonal', 'view_educational', 'manage_educational', 'manage_programs'] },
+  { id: 'intervention_radar', label: '📡 رادار التدخل المبكر', shortLabel: 'رادار التدخل', path: '/educational?view=radar', icon: Activity, category: 'educational_programs', requiredModule: 'educational', requiredPermission: 'view_intervention_radar' },
 
   // 5. Students & Services (قسم شؤون الطلاب)
   { id: 'admissions', label: 'القبول والتسجيل', shortLabel: 'القبول', path: '/admissions', icon: UserPlus, category: 'students_services', requiredModule: 'admissions', requiredPermission: ['view_admissions', 'manage_admissions', 'manage_students'], badgeKey: 'admissions' },

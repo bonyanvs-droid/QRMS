@@ -3097,6 +3097,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                     </div>
                   </div>
 
+                  {/* Student study days — subset of the halaqah's active days */}
+                  {(() => {
+                    const h = halaqahs.find((hal) => hal.id === editingStudent.halaqahId);
+                    const activeDays = (h?.weeklySchedule || []).filter((d) => d.isActive);
+                    if (!h || activeDays.length === 0) return null;
+                    const halaqahDays = activeDays.map((d) => d.dayOfWeek);
+                    const pref = editingStudent.quranPlan?.preferredWorkingDays;
+                    const effective = pref && pref.length > 0 ? pref : halaqahDays;
+                    return (
+                      <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                        <label className="block font-bold text-slate-700 mb-1.5 text-xs">
+                          أيام دراسة الطالب <span className="text-slate-400 font-normal">(من أيام الحلقة فقط)</span>
+                        </label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {activeDays.map((d) => {
+                            const checked = effective.includes(d.dayOfWeek);
+                            return (
+                              <button
+                                key={d.dayOfWeek}
+                                type="button"
+                                onClick={() => {
+                                  const next = checked
+                                    ? effective.filter((x) => x !== d.dayOfWeek)
+                                    : [...effective, d.dayOfWeek].sort((a, b) => a - b);
+                                  const sameAsHalaqah =
+                                    next.length === halaqahDays.length &&
+                                    halaqahDays.every((x) => next.includes(x));
+                                  setEditingStudent({
+                                    ...editingStudent,
+                                    quranPlan: {
+                                      ...(editingStudent.quranPlan as any),
+                                      preferredWorkingDays: sameAsHalaqah ? undefined : next,
+                                    } as any,
+                                  });
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                                  checked
+                                    ? 'bg-emerald-700 text-white border-emerald-700'
+                                    : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-100'
+                                }`}
+                              >
+                                {d.dayName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1.5">
+                          الخطة القرآنية تُبنى على أيام الطالب الفعلية فقط — اليوم غير المحدد ليس غيابًا.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">جوال ولي الأمر</label>

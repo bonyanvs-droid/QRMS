@@ -186,14 +186,14 @@ export function OnlineModeTeacherWidget({ halaqah, students }: Props) {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-white tracking-wide">الغرفة الافتراضية للحلقة (عن بُعد)</h3>
+              <h3 className="text-base md:text-lg font-bold text-white tracking-wide">الغرفة الافتراضية للحلقة</h3>
               {isLiveNow && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                   <Sparkles className="w-3 h-3" /> جارية الآن
                 </span>
               )}
             </div>
-            <p className="text-xs text-emerald-100/70 mt-0.5">
+            <p className="hidden sm:block text-xs text-emerald-100/70 mt-0.5">
               رابط البث المباشر (Google Meet / Zoom / Teams) لطلاب الحلقة
             </p>
           </div>

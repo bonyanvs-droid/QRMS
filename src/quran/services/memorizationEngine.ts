@@ -14,7 +14,9 @@ import {
   OriginalTargetSnapshot,
   TargetAtRiskDiagnostic,
 } from '../types/plan';
+import { Ayah } from '../types';
 import { IQuranDataProvider } from '../providers/IQuranDataProvider';
+import { getSurahAyahsCount } from '../../utils/quranMetadata';
 import { RangeCalculator } from './rangeCalculator';
 import {
   generateWorkingDates,
@@ -38,6 +40,11 @@ export interface CreateMemorizationPlanParams {
   consolidationDaysPerSurah?: number;
   schedule: WorkingDaysSchedule;
   planId?: string;
+  /**
+   * Auto Minor Revision: seed the rolling revision cycle with the student's
+   * prior memorization (before plan start). Defaults to ON for new plans.
+   */
+  autoMinorRevisionMode?: boolean;
 }
 
 export class QuranMemorizationPlanningEngine {
@@ -56,6 +63,45 @@ export class QuranMemorizationPlanningEngine {
     const nowIso = new Date().toISOString();
     const consolidationDays = params.consolidationDaysPerSurah !== undefined ? params.consolidationDaysPerSurah : 3;
     const revisionDailyPages = params.revisionDailyPages !== undefined ? params.revisionDailyPages : 1;
+    const autoMinorRevision = params.autoMinorRevisionMode !== false; // ON by default for newly created plans
+
+    // Seed the revision pool with prior memorization (before plan start) when Auto Minor
+    // Revision is enabled — prior + new memorization form one revision set.
+    let priorMemorizedVerses: Ayah[] = [];
+    if (autoMinorRevision) {
+      const priorStart: QuranPosition =
+        params.direction === 'backward'
+          ? { surahNumber: 114, ayahNumber: 1 }
+          : { surahNumber: 1, ayahNumber: 1 };
+      let priorEnd: QuranPosition | null = null;
+      if (params.targetStart.ayahNumber > 1) {
+        priorEnd = {
+          surahNumber: params.targetStart.surahNumber,
+          ayahNumber: params.targetStart.ayahNumber - 1,
+        };
+      } else if (params.direction === 'backward' && params.targetStart.surahNumber < 114) {
+        priorEnd = {
+          surahNumber: params.targetStart.surahNumber + 1,
+          ayahNumber: getSurahAyahsCount(params.targetStart.surahNumber + 1),
+        };
+      } else if (params.direction === 'forward' && params.targetStart.surahNumber > 1) {
+        priorEnd = {
+          surahNumber: params.targetStart.surahNumber - 1,
+          ayahNumber: getSurahAyahsCount(params.targetStart.surahNumber - 1),
+        };
+      }
+      if (priorEnd) {
+        try {
+          priorMemorizedVerses = await this.provider.getAyahsInRange(
+            priorStart,
+            priorEnd,
+            params.direction
+          );
+        } catch {
+          priorMemorizedVerses = [];
+        }
+      }
+    }
 
     // 1. Resolve verses and structural metrics
     const verses = await this.provider.getAyahsInRange(params.targetStart, params.targetEnd, params.direction);
@@ -71,7 +117,8 @@ export class QuranMemorizationPlanningEngine {
       params.dailyAmount,
       params.direction,
       consolidationDays,
-      revisionDailyPages
+      revisionDailyPages,
+      priorMemorizedVerses
     );
 
     if (units.length === 0) {
@@ -291,6 +338,7 @@ export class QuranMemorizationPlanningEngine {
       dailyAmount: params.dailyAmount,
       revisionDailyPages,
       consolidationDaysPerSurah: consolidationDays,
+      autoMinorRevisionMode: autoMinorRevision,
       schedule: params.schedule,
       originalTarget: originalSnapshot,
       currentPosition: params.targetStart,

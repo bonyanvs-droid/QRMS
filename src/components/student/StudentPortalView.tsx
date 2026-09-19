@@ -4,7 +4,8 @@ import { StudentPlanDashboard } from '../quran/StudentPlanDashboard';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { OnlineModeStudentWidget } from './OnlineModeStudentWidget';
 import { TrackNominationCardModal } from '../common/TrackNominationCardModal';
-import { TrackNomination } from '../../types';
+import { TrackNomination, Student } from '../../types';
+import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import {
   BookOpen,
   Award,
@@ -38,6 +39,7 @@ export const StudentPortalView: React.FC = () => {
   } = useApp();
 
   const [selectedNominationForCard, setSelectedNominationForCard] = useState<TrackNomination | null>(null);
+  const [showComprehensivePlan, setShowComprehensivePlan] = useState(false);
 
   // Resolve active student from user session
   const student = useMemo(() => {
@@ -387,11 +389,18 @@ export const StudentPortalView: React.FC = () => {
       {/* 4. INTERACTIVE QURAN PLAN DASHBOARD */}
       {plan ? (
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
             <div>
               <h2 className="text-lg font-bold text-slate-900 font-serif">جدول الحفظ والمراجعة الذكي</h2>
               <p className="text-xs text-slate-500">مقسم يومياً وأسبوعياً وشهرياً لضمان الإتقان التام</p>
             </div>
+            <button
+              onClick={() => setShowComprehensivePlan(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-bold border border-indigo-200 transition-colors cursor-pointer"
+            >
+              <Layers className="w-4 h-4" />
+              الخطة القرآنية الشاملة
+            </button>
           </div>
 
           <StudentPlanDashboard plan={plan} readOnly={true} />
@@ -411,6 +420,14 @@ export const StudentPortalView: React.FC = () => {
         nomination={selectedNominationForCard}
         tenantName={activeTenant?.name}
       />
+
+      {showComprehensivePlan && student && (
+        <ComprehensiveQuranPlanModal
+          student={student as Student}
+          variant="student"
+          onClose={() => setShowComprehensivePlan(false)}
+        />
+      )}
     </div>
   );
 };

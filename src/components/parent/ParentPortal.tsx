@@ -41,6 +41,7 @@ import {
 import { BADGE_DEFINITIONS } from '../../utils/badgeSystem';
 import { CertificateModal } from '../common/CertificateModal';
 import { StudentProgressPortalView } from './StudentProgressPortalView';
+import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { TrackNominationCardModal } from '../common/TrackNominationCardModal';
 import { TrackNomination } from '../../types';
@@ -118,6 +119,7 @@ export const ParentPortal: React.FC = () => {
   const [students, setStudents] = useState<Student[]>(() => immediateAssociatedStudents);
   const [recordsMap, setRecordsMap] = useState<Record<string, DailySessionRecord[]>>({});
   const [parentQuranPlans, setParentQuranPlans] = useState<Record<string, StudentQuranPlan[]>>({});
+  const [showComprehensivePlan, setShowComprehensivePlan] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(() => {
     return immediateAssociatedStudents.length > 0 ? immediateAssociatedStudents[0].id : null;
   });
@@ -548,6 +550,15 @@ export const ParentPortal: React.FC = () => {
           {/* ========================================================================= */}
           {activeTab === 'quran' && (
             <div className="space-y-6 animate-fadeIn">
+              {selectedStudent && (
+                <button
+                  onClick={() => setShowComprehensivePlan(true)}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-bold border border-indigo-200 transition-colors cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  الخطة القرآنية الشاملة — من البداية إلى المستهدف
+                </button>
+              )}
               {/* Holistic Progress View */}
               <StudentProgressPortalView
                 student={selectedStudent}
@@ -559,6 +570,14 @@ export const ParentPortal: React.FC = () => {
                 academicConfig={academicConfig}
               />
             </div>
+          )}
+
+          {showComprehensivePlan && selectedStudent && (
+            <ComprehensiveQuranPlanModal
+              student={selectedStudent}
+              variant="parent"
+              onClose={() => setShowComprehensivePlan(false)}
+            />
           )}
 
           {/* ========================================================================= */}

@@ -189,8 +189,11 @@ export const BadgesManagementModal: React.FC<BadgesManagementModalProps> = ({
                 <Crown className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-black text-lg">منظومة الحوافز والأوسمة الذكية للطلاب</h3>
-                <p className="text-xs text-emerald-200">
+                <h3 className="font-black text-base md:text-lg">
+                  <span className="hidden sm:inline">منظومة الحوافز والأوسمة الذكية للطلاب</span>
+                  <span className="sm:hidden">الأوسمة والحوافز</span>
+                </h3>
+                <p className="hidden sm:block text-xs text-emerald-200">
                   تتويج إتقان الهجاء، بلوغ الغاشية، المواظبة، وبث الفرح في نفوس الطلاب وأولياء الأمور
                 </p>
               </div>
