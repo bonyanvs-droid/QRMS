@@ -257,6 +257,13 @@ export interface StudentQuranPlan {
    */
   autoMinorRevisionMode?: boolean;
 
+  /**
+   * Manual minor-revision range chosen at plan creation (used when
+   * autoMinorRevisionMode is false). Persisted so recalculation can rebuild
+   * the future revision cycle from the same fixed source range.
+   */
+  manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
+
   // Schedule
   schedule: WorkingDaysSchedule;
 

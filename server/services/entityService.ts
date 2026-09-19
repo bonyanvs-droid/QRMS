@@ -13,6 +13,34 @@ export interface TableConfig {
   hasSoftDelete?: boolean;
 }
 
+/**
+ * Tables whose complete entity payload is persisted inside a dedicated JSONB
+ * column in addition to the indexed scalar columns.
+ *
+ * quran_plans: the fixed columns (status, scope, direction, unit_type,
+ * daily_amount...) only mirror a small subset of the StudentQuranPlan model.
+ * The full generated plan (generatedPlan.dailyPlans / weeklyPlans /
+ * monthlyPlans / termPlan, positions, schedule, histories...) is stored in
+ * `plan_data` so a saved plan survives a full reload round-trip.
+ */
+const JSONB_PAYLOAD_COLUMNS: Record<string, { column: string; key: string }> = {
+  quran_plans: { column: 'plan_data', key: 'planData' },
+};
+
+/**
+ * Unfolds a stored JSONB payload column back into the entity object.
+ * Scalar columns take precedence for the fields they mirror (they are written
+ * from the same payload, and remain the authoritative indexed values).
+ */
+function hydrateRow<T>(config: TableConfig, row: any): T {
+  const payload = JSONB_PAYLOAD_COLUMNS[config.tableName];
+  if (!payload || !row || typeof row !== 'object') return row;
+  const packed = row[payload.key];
+  if (!packed || typeof packed !== 'object' || Array.isArray(packed)) return row;
+  const { [payload.key]: _packed, ...columns } = row;
+  return { ...packed, ...columns } as T;
+}
+
 export const ENTITY_TABLE_CONFIGS: Record<string, TableConfig> = {
   organizations: {
     tableName: 'organizations',
@@ -796,7 +824,8 @@ export async function findMany<T = any>(
   }
 
   const fullQuery = `${selectClause} ${whereClause} ${orderBy} ${pagination}`;
-  return executeQuery<T>(fullQuery, params);
+  const rows = await executeQuery<T>(fullQuery, params);
+  return (rows || []).map((r) => hydrateRow<T>(config, r));
 }
 
 /**
@@ -840,7 +869,8 @@ export async function findById<T = any>(
   }
 
   const query = `${selectClause} WHERE ${conditions.join(' AND ')} LIMIT 1`;
-  return executeQuerySingle<T>(query, params);
+  const row = await executeQuerySingle<T>(query, params);
+  return row ? hydrateRow<T>(config, row) : row;
 }
 
 /**
@@ -895,6 +925,18 @@ function prepareRecord(config: TableConfig, rawData: Record<string, any>, tenant
 
       sanitized[col] = val;
     }
+  }
+
+  // Pack the complete entity payload into the dedicated JSONB column when the
+  // table has one and the caller did not supply it explicitly.
+  const payloadSpec = JSONB_PAYLOAD_COLUMNS[config.tableName];
+  if (payloadSpec && sanitized[payloadSpec.column] === undefined) {
+    sanitized[payloadSpec.column] = JSON.stringify(rawData);
+  }
+
+  // quran_plans: keep plan_name searchable by mirroring the plan title.
+  if (config.tableName === 'quran_plans' && sanitized.plan_name === undefined) {
+    sanitized.plan_name = rawData.title || rawData.planName || null;
   }
 
   // Ensure primary key exists (if id)
@@ -976,7 +1018,7 @@ export async function upsert<T = any>(
     return existing;
   }
 
-  return result;
+  return hydrateRow<T>(config, result);
 }
 
 /**
@@ -1024,7 +1066,7 @@ export async function bulkUpsert<T = any>(
 
       const res = await client.query(query, values);
       if (res.rows.length > 0) {
-        results.push(snakeToCamelCase<T>(res.rows[0]));
+        results.push(hydrateRow<T>(config, snakeToCamelCase<T>(res.rows[0])));
       }
     }
 

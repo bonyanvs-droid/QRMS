@@ -174,6 +174,7 @@ import {
   subscribeToQuranPlans,
   saveQuranPlanToDb,
   getQuranPlansForStudentFromDb,
+  getQuranPlanByIdFromDb,
   deleteQuranPlanFromDb,
   subscribeToQuranStageConfigs,
   saveQuranStageConfigToDb,
@@ -3997,14 +3998,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // -------------------------------------------------------------
   const getActiveStudentQuranPlan = useCallback(
     (studentId: string): StudentQuranPlan | null => {
-      // Find active plan for the student
-      const active = quranPlans.find(
-        (p) => p.studentId === studentId && (p.isCurrentActive || p.status === 'active')
+      // Find active plan for the student — 'at_risk' is still an active plan.
+      // Among duplicates (legacy rows), prefer the one whose generated
+      // plan payload is actually populated.
+      const candidates = quranPlans.filter((p) => p.studentId === studentId);
+      const isActive = (p: StudentQuranPlan) =>
+        p.isCurrentActive || p.status === 'active' || p.status === 'at_risk';
+      const hasData = (p: StudentQuranPlan) =>
+        (p.generatedPlan?.dailyPlans?.length ?? 0) > 0;
+      return (
+        candidates.find((p) => isActive(p) && hasData(p)) ||
+        candidates.find(isActive) ||
+        candidates[0] ||
+        null
       );
-      if (active) return active;
-      // Fallback: any plan matching studentId
-      const anyPlan = quranPlans.find((p) => p.studentId === studentId);
-      return anyPlan || null;
     },
     [quranPlans]
   );
@@ -4191,11 +4198,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       evaluation?: 'excellent' | 'very_good' | 'good' | 'needs_practice';
       notes?: string;
     }): Promise<StudentQuranPlan> => {
-      // 1. Locate plan
-      let targetPlan = quranPlans.find((p) => p.id === params.planId);
+      // 1. Locate plan — always recalculate on top of the latest persisted copy
+      // from PostgreSQL so a stale in-memory state can never overwrite a newer
+      // plan (last recorded achievement = source of truth).
+      let targetPlan = await getQuranPlanByIdFromDb(params.planId).catch(() => null);
       if (!targetPlan) {
-        const plansFromDb = await getQuranPlansForStudentFromDb(params.planId);
-        targetPlan = plansFromDb.find((p) => p.id === params.planId) || null;
+        targetPlan = quranPlans.find((p) => p.id === params.planId) || null;
       }
       if (!targetPlan) {
         throw new Error(`الخطة القرآنية غير موجودة.`);

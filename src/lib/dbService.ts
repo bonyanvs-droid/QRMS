@@ -656,6 +656,11 @@ export async function getQuranPlansForStudentFromDb(studentId: string): Promise<
   return plans.filter((p) => p.studentId === studentId);
 }
 
+export async function getQuranPlanByIdFromDb(planId: string): Promise<StudentQuranPlan | null> {
+  const plans = await AcademicRepository.getQuranPlans();
+  return plans.find((p) => p.id === planId) || null;
+}
+
 export async function deleteQuranPlanFromDb(planId: string, _actor?: any): Promise<void> {
   await apiClient.delete(`/quran_plans/${planId}`);
 }

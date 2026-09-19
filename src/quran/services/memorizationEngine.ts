@@ -352,6 +352,7 @@ export class QuranMemorizationPlanningEngine {
       revisionDailyPages,
       consolidationDaysPerSurah: consolidationDays,
       autoMinorRevisionMode: autoMinorRevision,
+      manualRevisionRange: params.manualRevisionRange,
       schedule: params.schedule,
       originalTarget: originalSnapshot,
       currentPosition: params.targetStart,

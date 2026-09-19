@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   Printer,
@@ -62,7 +62,9 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 }) => {
   const { getActiveStudentQuranPlan, sessionRecords } = useApp();
   const [calendar, setCalendar] = useState<CalendarMode>('hijri');
-  const [openWeeks, setOpenWeeks] = useState<Set<number>>(new Set());
+  // Weeks are fully expanded by default so the WHOLE term plan is visible;
+  // collapsedWeeks tracks only the weeks the user explicitly folds away.
+  const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(new Set());
   const printRef = useRef<HTMLDivElement>(null);
 
   const plan: StudentQuranPlan | undefined = useMemo(
@@ -100,7 +102,8 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
   }, [dailyPlans]);
 
-  // Auto-open the week containing today (or first pending week)
+  // The week containing today (or the first pending week) — used for
+  // highlighting and auto-scroll, never to hide the rest of the plan.
   const currentWeek = useMemo(() => {
     const todayDay = dailyPlans.find((d) => d.date === todayIso);
     if (todayDay) return todayDay.weekNumber;
@@ -109,15 +112,36 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   }, [dailyPlans, todayIso]);
 
   const toggleWeek = (w: number) => {
-    setOpenWeeks((prev) => {
+    setCollapsedWeeks((prev) => {
       const next = new Set(prev);
       if (next.has(w)) next.delete(w);
       else next.add(w);
       return next;
     });
   };
-  const isWeekOpen = (w: number) =>
-    openWeeks.size === 0 ? w === currentWeek : openWeeks.has(w);
+  const isWeekOpen = (w: number) => !collapsedWeeks.has(w);
+
+  // Scroll the current week into view once the full plan renders.
+  useEffect(() => {
+    if (currentWeek === undefined) return;
+    const el = document.getElementById(`quran-plan-week-${currentWeek}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [currentWeek]);
+
+  // Prior achievement recorded BEFORE this plan's start date — the "إنجاز سابق"
+  // section is built strictly from real session records (no fabricated days).
+  const priorMemRecords = useMemo(() => {
+    if (!plan?.startDate) return [];
+    return sessionRecords
+      .filter(
+        (r) =>
+          r.studentId === student.id &&
+          r.memorization &&
+          r.memorization.surahTo &&
+          r.date < plan.startDate
+      )
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [sessionRecords, student.id, plan?.startDate]);
 
   const holidays = new Set(plan?.schedule?.holidays || []);
 
@@ -203,6 +227,15 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               <p className="font-bold text-slate-600 text-sm">لا توجد خطة قرآنية نشطة لهذا الطالب بعد.</p>
               <p className="text-xs text-slate-400 mt-1">تُنشأ الخطة من «الخطة القرآنية» ثم تظهر هنا كاملة.</p>
             </div>
+          ) : dailyPlans.length === 0 ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-8 text-center">
+              <BookOpen className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+              <p className="font-bold text-amber-900 text-sm">الخطة تحتاج إلى إعادة بناء</p>
+              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                توجد خطة مسجلة لهذا الطالب لكن بياناتها اليومية غير مكتملة في قاعدة البيانات.
+                أعد إنشاء الخطة من «الخطة القرآنية» لاستعادة الجدول الكامل دون فقدان موضع الطالب الحالي.
+              </p>
+            </div>
           ) : (
             <>
               {/* Summary strip */}
@@ -224,7 +257,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                 <div className="bg-white rounded-xl border border-slate-200 p-2.5">
                   <div className="text-[10px] text-slate-400 font-bold">الموضع الحالي</div>
                   <div className="text-xs font-black text-emerald-800 mt-0.5 truncate">
-                    سورة {surahName(plan.currentPosition.surahNumber)} — آية {plan.currentPosition.ayahNumber}
+                    سورة {surahName(plan.currentPosition?.surahNumber)} — آية {plan.currentPosition?.ayahNumber ?? '—'}
                   </div>
                 </div>
                 <div className="bg-emerald-700 rounded-xl p-2.5 text-white">
@@ -232,7 +265,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     <Target className="w-3 h-3" /> المستهدف الحالي لنهاية الخطة
                   </div>
                   <div className="text-xs font-black mt-0.5 truncate">
-                    سورة {surahName(plan.targetEnd.surahNumber)} — آية {plan.targetEnd.ayahNumber}
+                    سورة {surahName(plan.targetEnd?.surahNumber)} — آية {plan.targetEnd?.ayahNumber ?? '—'}
                   </div>
                   {plan.status === 'at_risk' && (
                     <div className="text-[9px] text-amber-200 font-bold mt-0.5">⚠ الخطة متعثرة — تتطلب تعديل الوتيرة</div>
@@ -240,10 +273,48 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                 </div>
               </div>
 
+              {/* Prior achievement (before this plan was created) — real session
+                  records only, never fabricated days */}
+              {(priorMemRecords.length > 0 ||
+                (student.currentSurah &&
+                  plan.targetStart &&
+                  (plan.targetStart.surahNumber !== 1 || plan.targetStart.ayahNumber !== 1))) && (
+                <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3">
+                  <div className="text-[11px] font-black text-indigo-900 flex items-center gap-1.5 mb-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    الإنجاز السابق (قبل إنشاء هذه الخطة)
+                  </div>
+                  {priorMemRecords.length > 0 ? (
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-indigo-800 font-bold">
+                        جلسات تسميع موثقة: {priorMemRecords.length} — من {fmtDate(priorMemRecords[0].date)} إلى{' '}
+                        {fmtDate(priorMemRecords[priorMemRecords.length - 1].date)}
+                      </div>
+                      <div className="text-[11px] text-indigo-700">
+                        آخر موضع مثبت: سورة{' '}
+                        {priorMemRecords[priorMemRecords.length - 1].memorization?.surahTo} — آية{' '}
+                        {priorMemRecords[priorMemRecords.length - 1].memorization?.ayahTo}
+                      </div>
+                      <div className="text-[10px] text-indigo-600">
+                        السور التي عمل عليها:{' '}
+                        {Array.from(
+                          new Set(priorMemRecords.map((r) => r.memorization?.surahTo).filter(Boolean))
+                        ).join('، ')}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-indigo-800">
+                      الموضع المسجل في ملف الطالب عند بدء الخطة: سورة {student.currentSurah} — آية{' '}
+                      {student.currentAyah ?? 1}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Student days note */}
               {student.quranPlan?.preferredWorkingDays && student.quranPlan.preferredWorkingDays.length > 0 && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-[11px] font-bold text-blue-800">
-                  أيام دراسة هذا الطالب: {plan.schedule.workingDays.length} يومًا أسبوعيًا (تُبنى الخطة على أيامه الفعلية فقط)
+                  أيام دراسة هذا الطالب: {plan.schedule?.workingDays?.length ?? 0} يومًا أسبوعيًا (تُبنى الخطة على أيامه الفعلية فقط)
                 </div>
               )}
 
@@ -254,7 +325,13 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                   (d) => d.status === 'completed' || d.status === 'overachieved'
                 ).length;
                 return (
-                  <div key={weekNum} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div
+                    key={weekNum}
+                    id={`quran-plan-week-${weekNum}`}
+                    className={`bg-white rounded-xl border overflow-hidden scroll-mt-24 ${
+                      weekNum === currentWeek ? 'border-blue-300 ring-1 ring-blue-200' : 'border-slate-200'
+                    }`}
+                  >
                     <button
                       onClick={() => toggleWeek(weekNum)}
                       className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50/80 hover:bg-slate-100 transition-colors"

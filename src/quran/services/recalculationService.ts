@@ -1,6 +1,7 @@
 import {
   QuranPosition,
   PlanningUnit,
+  Ayah,
 } from '../types';
 import {
   StudentQuranPlan,
@@ -16,6 +17,12 @@ import {
 } from '../types/plan';
 import { IQuranDataProvider } from '../providers/IQuranDataProvider';
 import { RangeCalculator } from './rangeCalculator';
+import {
+  getSurahsInRangeByDirection,
+  getSurahAyahsCount,
+  getSurahSequenceIndex,
+  getSurahArabicName,
+} from '../../utils/quranMetadata';
 import {
   getNextWorkingDay,
   getDayOfWeekFromDate,
@@ -62,7 +69,10 @@ export class PlanRecalculationService {
     const nowIso = new Date().toISOString();
 
     const planClone: StudentQuranPlan = JSON.parse(JSON.stringify(plan));
-    const dailyPlans = planClone.generatedPlan.dailyPlans;
+    const dailyPlans = planClone.generatedPlan?.dailyPlans;
+    if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
+      throw new Error('بيانات الخطة غير مكتملة في قاعدة البيانات — الخطة تحتاج إلى إعادة بناء قبل تسجيل الإنجاز.');
+    }
 
     // Find targeted day
     const dayIndex = dailyPlans.findIndex((d) => d.date === dayDate);
@@ -95,7 +105,8 @@ export class PlanRecalculationService {
       // Resolve actual ayahs count between targetDay start and actualEndPosition
       const verses = await this.provider.getAyahsInRange(
         targetDay.targetUnit.start,
-        actualEndPosition
+        actualEndPosition,
+        planClone.direction
       );
       actualUnit = {
         ...targetDay.targetUnit,
@@ -130,29 +141,34 @@ export class PlanRecalculationService {
     const effectiveFromDate = getNextWorkingDay(dayDate, planClone.schedule);
     const allPlannedVerses = await this.provider.getAyahsInRange(
       planClone.targetStart,
-      planClone.targetEnd
+      planClone.targetEnd,
+      planClone.direction
     );
 
     let nextFutureStart: QuranPosition | null = null;
     let isTargetComplete = false;
 
     if (status === 'absent' || status === 'excused' || status === 'unrecited') {
-      // The day's portion was unrecited; future resumes from the start of the unrecited unit
-      const unrecitedStart = targetDay.targetUnit.start;
-      const idx = allPlannedVerses.findIndex(
-        (v) =>
-          v.surahNumber === unrecitedStart.surahNumber &&
-          v.ayahNumber === unrecitedStart.ayahNumber
-      );
-      if (idx !== -1) {
-        const v = allPlannedVerses[idx];
-        nextFutureStart = {
-          surahNumber: v.surahNumber,
-          ayahNumber: v.ayahNumber,
-          globalIndex: v.globalIndex,
-        };
-      } else {
-        nextFutureStart = unrecitedStart;
+      // No progress was made — the future resumes right after the last verse
+      // that was ACTUALLY achieved (never inside the unrecited unit, whose new
+      // portion simply shifts forward into the remaining days).
+      let resumeBase: QuranPosition | null = null;
+      for (let i = dayIndex - 1; i >= 0; i--) {
+        const d = dailyPlans[i];
+        if (
+          d.isHistorical &&
+          d.actualAchieved &&
+          (d.status === 'completed' || d.status === 'partial' || d.status === 'overachieved')
+        ) {
+          resumeBase = d.actualAchieved.unit.end;
+          break;
+        }
+      }
+      nextFutureStart = resumeBase
+        ? await this.nextPositionAfter(resumeBase, planClone)
+        : planClone.targetStart;
+      if (!nextFutureStart) {
+        isTargetComplete = resumeBase ? this.reachedTargetEnd(resumeBase, planClone) : true;
       }
     } else {
       // Recitation achieved up to achievedEnd
@@ -171,55 +187,62 @@ export class PlanRecalculationService {
       } else if (idx === allPlannedVerses.length - 1) {
         isTargetComplete = true;
       } else {
-        // Fallback if not found directly
-        const nextGlobalIndex =
-          planClone.direction === 'forward'
-            ? achievedEnd.globalIndex! + 1
-            : achievedEnd.globalIndex! - 1;
-        const nextAyah = await this.provider.getAyahByGlobalIndex(nextGlobalIndex);
-        if (nextAyah) {
-          nextFutureStart = {
-            surahNumber: nextAyah.surahNumber,
-            ayahNumber: nextAyah.ayahNumber,
-            globalIndex: nextAyah.globalIndex,
-          };
+        // Fallback if the achieved position is not found inside the target
+        // range (e.g. overachievement beyond the original plan boundary).
+        nextFutureStart = await this.nextPositionAfter(achievedEnd, planClone);
+        if (!nextFutureStart && this.reachedTargetEnd(achievedEnd, planClone)) {
+          isTargetComplete = true;
         }
       }
     }
 
-    // 4. Partition remaining target range for future working days
+    // 4. Rebuild remaining future units using the SAME partitioning strategy as
+    // plan creation: cumulative per-surah pacing + consolidation days + rolling
+    // minor revision seeded from the accumulated memorized content.
     let remainingUnits: PlanningUnit[] = [];
+    let repartitionDone = false;
     if (nextFutureStart && !isTargetComplete) {
-      remainingUnits = await this.rangeCalculator.partitionRangeIntoUnits(
+      remainingUnits = await this.buildRemainingUnits(
+        planClone,
         nextFutureStart,
-        planClone.targetEnd,
-        planClone.unitType,
-        planClone.dailyAmount
+        newCurrentPosition,
+        status === 'absent' || status === 'excused' || status === 'unrecited'
+          ? null
+          : achievedEnd
       );
+      repartitionDone = true;
+    } else if (isTargetComplete) {
+      repartitionDone = true;
     }
 
-    // 5. Update only FUTURE days (index > dayIndex)
-    let unitCursor = 0;
-    for (let i = dayIndex + 1; i < dailyPlans.length; i++) {
-      const futureDay = dailyPlans[i];
-      if (futureDay.isHistorical || futureDay.isLocked) {
-        continue; // Strictly preserve any pre-existing historical records
-      }
+    // 5. Update only FUTURE days (index > dayIndex) — the past is immutable.
+    if (repartitionDone) {
+      let unitCursor = 0;
+      for (let i = dayIndex + 1; i < dailyPlans.length; i++) {
+        const futureDay = dailyPlans[i];
+        if (futureDay.isHistorical || futureDay.isLocked) {
+          continue; // Strictly preserve any pre-existing historical records
+        }
 
-      if (unitCursor < remainingUnits.length) {
-        futureDay.targetUnit = remainingUnits[unitCursor];
-        futureDay.status = 'pending';
-        unitCursor++;
-      } else {
-        // Target achieved early or empty buffer days
-        futureDay.targetUnit = {
-          type: planClone.unitType,
-          start: planClone.targetEnd,
-          end: planClone.targetEnd,
-          totalAyahs: 0,
-          displayLabel: 'يوم تثبيت ومراجعة (تم إنجاز المقرر)',
-        };
-        futureDay.status = 'pending';
+        if (unitCursor < remainingUnits.length) {
+          this.applyUnitToDay(futureDay, remainingUnits[unitCursor], planClone);
+          futureDay.status = 'pending';
+          unitCursor++;
+        } else {
+          // Target achieved early or empty buffer days
+          this.applyUnitToDay(
+            futureDay,
+            {
+              type: planClone.unitType,
+              start: planClone.targetEnd,
+              end: planClone.targetEnd,
+              totalAyahs: 0,
+              displayLabel: 'يوم تثبيت ومراجعة (تم إنجاز المقرر)',
+            },
+            planClone
+          );
+          futureDay.status = 'pending';
+        }
       }
     }
 
@@ -331,7 +354,10 @@ export class PlanRecalculationService {
 
     const nowIso = new Date().toISOString();
     const planClone: StudentQuranPlan = JSON.parse(JSON.stringify(plan));
-    const dailyPlans = planClone.generatedPlan.dailyPlans;
+    const dailyPlans = planClone.generatedPlan?.dailyPlans;
+    if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
+      throw new Error('بيانات الخطة غير مكتملة في قاعدة البيانات — الخطة تحتاج إلى إعادة بناء قبل تطبيق تعديل المعلم.');
+    }
 
     const changesRecord: Record<string, { before: unknown; after: unknown }> = {};
 
@@ -368,26 +394,18 @@ export class PlanRecalculationService {
       }
     }
 
-    // Partition remaining units from lastAchievedPosition to targetEnd
-    const nextGlobalIndex =
-      planClone.direction === 'forward'
-        ? lastAchievedPosition.globalIndex + 1
-        : lastAchievedPosition.globalIndex - 1;
+    // Partition remaining units from the position right after the last
+    // achieved verse to targetEnd — direction-aware, with consolidation days
+    // and rolling minor revision preserved (same strategy as plan creation).
+    const startForRemaining =
+      (await this.nextPositionAfter(lastAchievedPosition, planClone)) ||
+      lastAchievedPosition;
 
-    const nextAyah = await this.provider.getAyahByGlobalIndex(nextGlobalIndex);
-    const startForRemaining = nextAyah
-      ? {
-          surahNumber: nextAyah.surahNumber,
-          ayahNumber: nextAyah.ayahNumber,
-          globalIndex: nextAyah.globalIndex,
-        }
-      : lastAchievedPosition;
-
-    const remainingUnits = await this.rangeCalculator.partitionRangeIntoUnits(
+    const remainingUnits = await this.buildRemainingUnits(
+      planClone,
       startForRemaining,
-      planClone.targetEnd,
-      planClone.unitType,
-      planClone.dailyAmount
+      lastAchievedPosition,
+      null
     );
 
     // Re-assign future unhistorical days from effectiveFromDate
@@ -395,16 +413,20 @@ export class PlanRecalculationService {
     for (const d of dailyPlans) {
       if (d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked) {
         if (cursor < remainingUnits.length) {
-          d.targetUnit = remainingUnits[cursor];
+          this.applyUnitToDay(d, remainingUnits[cursor], planClone);
           cursor++;
         } else {
-          d.targetUnit = {
-            type: planClone.unitType,
-            start: planClone.targetEnd,
-            end: planClone.targetEnd,
-            totalAyahs: 0,
-            displayLabel: 'تثبيت ومراجعة',
-          };
+          this.applyUnitToDay(
+            d,
+            {
+              type: planClone.unitType,
+              start: planClone.targetEnd,
+              end: planClone.targetEnd,
+              totalAyahs: 0,
+              displayLabel: 'تثبيت ومراجعة',
+            },
+            planClone
+          );
         }
       }
     }
@@ -440,6 +462,178 @@ export class PlanRecalculationService {
     planClone.updatedAt = nowIso;
 
     return planClone;
+  }
+
+  /**
+   * Builds the revision seed = accumulated memorized verses up to the given
+   * position (Auto Minor Revision) or the plan's fixed manual revision range.
+   */
+  private async buildRevisionSeed(
+    plan: StudentQuranPlan,
+    upToPosition: QuranPosition
+  ): Promise<Ayah[]> {
+    try {
+      if (plan.autoMinorRevisionMode) {
+        const boundaryStart: QuranPosition =
+          plan.direction === 'backward'
+            ? { surahNumber: 114, ayahNumber: 1 }
+            : { surahNumber: 1, ayahNumber: 1 };
+        return await this.provider.getAyahsInRange(boundaryStart, upToPosition, plan.direction);
+      }
+      if (plan.manualRevisionRange) {
+        return await this.provider.getAyahsInRange(
+          plan.manualRevisionRange.start,
+          plan.manualRevisionRange.end,
+          plan.direction
+        );
+      }
+    } catch {
+      /* seed unavailable — revision rolls over new memorization only */
+    }
+    return [];
+  }
+
+  /**
+   * Rebuilds the remaining future units from `fromPosition` to `targetEnd` using
+   * the same strategy as plan creation (cumulative per-surah pacing +
+   * consolidation days + rolling minor revision seeded from accumulated
+   * memorized content). When `completedSurahEnd` marks a surah that was just
+   * finished by the recorded achievement, its consolidation cycle is prepended —
+   * the same rule the creation engine applies after every completed surah.
+   */
+  private async buildRemainingUnits(
+    plan: StudentQuranPlan,
+    fromPosition: QuranPosition,
+    currentPosition: QuranPosition,
+    completedSurahEnd: QuranPosition | null
+  ): Promise<PlanningUnit[]> {
+    const seed = await this.buildRevisionSeed(plan, currentPosition);
+    const revisionPages = plan.revisionDailyPages ?? 1;
+    const consolidationDays = plan.consolidationDaysPerSurah ?? 3;
+
+    const units = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
+      fromPosition,
+      plan.targetEnd,
+      plan.unitType,
+      plan.dailyAmount,
+      plan.direction,
+      consolidationDays,
+      revisionPages,
+      seed
+    );
+
+    if (!completedSurahEnd || consolidationDays <= 0) return units;
+
+    const surahAyahCount = getSurahAyahsCount(completedSurahEnd.surahNumber);
+    if (surahAyahCount <= 0 || completedSurahEnd.ayahNumber < surahAyahCount) return units;
+
+    const firstVerse = await this.provider.getAyah(completedSurahEnd.surahNumber, 1);
+    const lastVerse = await this.provider.getAyah(completedSurahEnd.surahNumber, surahAyahCount);
+    if (!firstVerse || !lastVerse) return units;
+
+    const acc: Ayah[] = [...seed];
+    let offset =
+      acc.length > 0
+        ? Math.max(0, new Set(acc.map((v) => v.pageNumber)).size - Math.max(1, Math.round(revisionPages)))
+        : 0;
+
+    const consolidationUnits: PlanningUnit[] = [];
+    for (let c = 1; c <= consolidationDays; c++) {
+      const rev = this.rangeCalculator.computeRollingRevision(acc, revisionPages, offset);
+      offset = rev.nextOffset;
+      consolidationUnits.push({
+        type: plan.unitType,
+        start: { surahNumber: firstVerse.surahNumber, ayahNumber: 1, globalIndex: firstVerse.globalIndex },
+        end: { surahNumber: lastVerse.surahNumber, ayahNumber: surahAyahCount, globalIndex: lastVerse.globalIndex },
+        totalAyahs: surahAyahCount,
+        displayLabel: `تثبيت سورة ${getSurahArabicName(completedSurahEnd.surahNumber)} كاملة (1 - ${surahAyahCount}) [اليوم ${c}/${consolidationDays}]`,
+        pageStart: firstVerse.pageNumber,
+        pageEnd: lastVerse.pageNumber,
+        isConsolidation: true,
+        consolidationDayIndex: c,
+        consolidationSurahNumber: completedSurahEnd.surahNumber,
+        revisionPages,
+        revisionDisplay: rev.displayLabel,
+        revisionPageStart: rev.pageStart,
+        revisionPageEnd: rev.pageEnd,
+      });
+    }
+
+    return [...consolidationUnits, ...units];
+  }
+
+  /**
+   * Direction-aware next position after `pos` within the plan's governed order.
+   * Backward plans traverse surahs in the governed order (الفاتحة ثم الناس نزولاً)
+   * while ayahs inside each surah still ascend.
+   */
+  private async nextPositionAfter(
+    pos: QuranPosition,
+    plan: StudentQuranPlan
+  ): Promise<QuranPosition | null> {
+    if (plan.direction === 'forward') {
+      let gi = pos.globalIndex;
+      if (!gi) {
+        const a = await this.provider.getAyah(pos.surahNumber, pos.ayahNumber);
+        gi = a?.globalIndex;
+      }
+      if (!gi) return null;
+      const next = await this.provider.getAyahByGlobalIndex(gi + 1);
+      return next
+        ? { surahNumber: next.surahNumber, ayahNumber: next.ayahNumber, globalIndex: next.globalIndex }
+        : null;
+    }
+
+    const ayahCount = getSurahAyahsCount(pos.surahNumber);
+    if (pos.ayahNumber < ayahCount) {
+      const next = await this.provider.getAyah(pos.surahNumber, pos.ayahNumber + 1);
+      return next
+        ? { surahNumber: next.surahNumber, ayahNumber: next.ayahNumber, globalIndex: next.globalIndex }
+        : null;
+    }
+    const seq = getSurahsInRangeByDirection(pos.surahNumber, plan.targetEnd.surahNumber, 'backward');
+    const idx = seq.findIndex((s) => s.number === pos.surahNumber);
+    if (idx !== -1 && idx + 1 < seq.length) {
+      const next = await this.provider.getAyah(seq[idx + 1].number, 1);
+      if (next) {
+        return { surahNumber: next.surahNumber, ayahNumber: next.ayahNumber, globalIndex: next.globalIndex };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * True when `pos` has reached or passed the plan target end in the plan's
+   * governed direction.
+   */
+  private reachedTargetEnd(pos: QuranPosition, plan: StudentQuranPlan): boolean {
+    const posIdx = getSurahSequenceIndex(pos.surahNumber, plan.direction);
+    const endIdx = getSurahSequenceIndex(plan.targetEnd.surahNumber, plan.direction);
+    if (posIdx !== endIdx) return posIdx > endIdx;
+    return pos.ayahNumber >= plan.targetEnd.ayahNumber;
+  }
+
+  /**
+   * Copies a regenerated unit onto a future plan day, carrying all metadata
+   * (consolidation flags, rolling revision label/pages) so recalculated days
+   * keep the same shape as freshly generated ones.
+   */
+  private applyUnitToDay(day: DailyPlanItem, unit: PlanningUnit, plan: StudentQuranPlan): void {
+    day.targetUnit = unit;
+    const isConsolidation = Boolean(unit.isConsolidation);
+    day.planType = isConsolidation || unit.totalAyahs === 0 ? 'revision' : 'memorization';
+    day.dayType = isConsolidation
+      ? 'consolidation'
+      : unit.totalAyahs > 0
+        ? 'memorization'
+        : 'general_revision';
+    day.isConsolidationDay = isConsolidation;
+    day.consolidationDayIndex = unit.consolidationDayIndex;
+    day.consolidationSurahNumber = unit.consolidationSurahNumber;
+    day.revisionPagesAmount = unit.revisionPages ?? plan.revisionDailyPages;
+    day.revisionDisplayLabel = unit.revisionDisplay || day.revisionDisplayLabel;
+    day.revisionPageStart = unit.revisionPageStart;
+    day.revisionPageEnd = unit.revisionPageEnd;
   }
 
   /**

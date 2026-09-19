@@ -594,7 +594,7 @@ export class RangeCalculator {
    * If accumulated memorized amount is smaller than the daily revision limit (e.g. 1 page),
    * it reviews the total memorized so far. Once larger, it rolls sequentially across pages.
    */
-  private computeRollingRevision(
+  computeRollingRevision(
     memorizedVerses: Ayah[],
     revisionDailyPages: number,
     currentOffset: number

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
-import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount } from '../../utils/quranMetadata';
+import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
 import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
@@ -327,13 +327,36 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
     await recordDailySession(recordData);
 
-    // Sync with Quran Planning Engine if plan is active
-    if (activeQuranPlan && todayDailyItem) {
+    // Sync with Quran Planning Engine if plan is active — record the ACTUAL
+    // memorized end position so the engine rebuilds the remaining term from
+    // the true last-achieved verse (overachievement advances, underachievement
+    // replans, nothing is assumed).
+    if (activeQuranPlan && todayDailyItem && steps.includes('memorization')) {
       try {
+        const endMeta = findSurahMetadata(surahTo);
+        const dir = activeQuranPlan.direction || 'backward';
+        let planStatus: 'completed' | 'partial' | 'overachieved' = 'completed';
+        let actualEndPosition: { surahNumber: number; ayahNumber: number } | undefined;
+        if (endMeta) {
+          actualEndPosition = {
+            surahNumber: endMeta.number,
+            ayahNumber: Math.min(Math.max(1, ayahTo), getSurahAyahsCount(endMeta.number)),
+          };
+          const plannedEnd = todayDailyItem.targetUnit?.end;
+          if (plannedEnd?.surahNumber) {
+            const plannedOrd =
+              getSurahSequenceIndex(plannedEnd.surahNumber, dir) * 1000 + plannedEnd.ayahNumber;
+            const actualOrd =
+              getSurahSequenceIndex(endMeta.number, dir) * 1000 + actualEndPosition.ayahNumber;
+            planStatus =
+              actualOrd > plannedOrd ? 'overachieved' : actualOrd < plannedOrd ? 'partial' : 'completed';
+          }
+        }
         await recordQuranPlanAchievement({
           planId: activeQuranPlan.id,
           dayDate: todayIso,
-          status: 'completed',
+          status: planStatus,
+          actualEndPosition,
           evaluation: memScore >= 95 ? 'excellent' : memScore >= 85 ? 'very_good' : 'good',
           notes: memNotes || 'تم التسميع عبر نافذة التسجيل السريع للمعلم',
         });

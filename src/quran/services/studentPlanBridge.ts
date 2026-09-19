@@ -13,6 +13,7 @@ import {
   resolveStudentWorkingDays,
   getStudentPreferredWorkingDays,
 } from '../utils/studentSchedule';
+import { isDateWorkingDay, addDaysToDate } from '../utils/dateUtils';
 
 export interface StudentPositionResolutionResult {
   position: QuranPosition | null;
@@ -251,10 +252,21 @@ export async function createRealStudentPlan(
   const workingDays = studentDaysResolution.days;
   const holidays = academicConfig?.holidays || [];
 
-  const startDate =
-    customStartDate ||
-    academicConfig?.startDate ||
-    new Date().toISOString().slice(0, 10);
+  // Local "today" (YYYY-MM-DD) — no UTC drift.
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate()
+  ).padStart(2, '0')}`;
+
+  // Plan start = the first ACTUAL day of the plan. A newly created plan must
+  // never back-fill days that existed before its creation, so we anchor at
+  // today (or the academic term start when the term has not begun yet), then
+  // snap forward to the student's first working day.
+  let startDate = customStartDate || '';
+  if (!startDate) {
+    const termStart = academicConfig?.startDate;
+    startDate = termStart && termStart > todayIso ? termStart : todayIso;
+  }
 
   // Default end date: ~12 weeks out if academicConfig not provided
   let endDate = customEndDate || academicConfig?.endDate;
@@ -262,6 +274,19 @@ export async function createRealStudentPlan(
     const d = new Date(startDate);
     d.setDate(d.getDate() + (stageConfig.defaultTermWeeks || 12) * 7);
     endDate = d.toISOString().slice(0, 10);
+  }
+
+  // Snap the plan start forward to the first student working day so day 1 of
+  // the plan is a real attendance day (non-working days and holidays skipped).
+  {
+    const sched = { workingDays, holidays };
+    let probe = startDate;
+    for (let i = 0; i < 14 && probe <= endDate && !isDateWorkingDay(probe, sched); i++) {
+      probe = addDaysToDate(probe, 1);
+    }
+    if (probe <= endDate && isDateWorkingDay(probe, sched)) {
+      startDate = probe;
+    }
   }
 
   // 6. Generate Core Universal Plan via Engine

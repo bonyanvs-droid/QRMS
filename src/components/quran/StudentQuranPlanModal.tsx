@@ -65,6 +65,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     halaqahs,
     teachers,
     activeTenant,
+    sessionRecords,
   } = useApp();
 
   // Teachers can view the plan but never modify it — editing requires manage_quran_plan
@@ -90,12 +91,68 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     return getActiveStudentQuranPlan(student.id);
   }, [student, getActiveStudentQuranPlan, quranPlans]);
 
+  const planDailyItems = useMemo(
+    () => activePlan?.generatedPlan?.dailyPlans || [],
+    [activePlan]
+  );
+
+  // A persisted plan row whose generated payload is missing/incomplete
+  // (legacy rows pre-dating plan_data persistence) must be flagged for
+  // rebuild instead of rendering an empty plan.
+  const planNeedsRebuild = !!activePlan && planDailyItems.length === 0;
+
+  // Derived plan metrics — computed from the canonical daily items (the engine
+  // does not store a metrics block).
+  const planMetrics = useMemo(() => {
+    const totalDaysPlanned = planDailyItems.length;
+    const completedDaysCount = planDailyItems.filter(
+      (d) => d.status === 'completed' || d.status === 'overachieved'
+    ).length;
+    const missedDaysCount = planDailyItems.filter(
+      (d) => d.status === 'absent' || d.status === 'unrecited'
+    ).length;
+    const totalAyahsCompleted = planDailyItems.reduce(
+      (sum, d) => sum + (d.actualAchieved?.unit?.totalAyahs || 0),
+      0
+    );
+    const completionPercentage =
+      totalDaysPlanned > 0 ? Math.round((completedDaysCount / totalDaysPlanned) * 100) : 0;
+    return {
+      totalDaysPlanned,
+      completedDaysCount,
+      missedDaysCount,
+      totalAyahsCompleted,
+      completionPercentage,
+    };
+  }, [planDailyItems]);
+
   // View Mode: 'today' | 'week' | 'month' | 'semester'
   const [viewMode, setViewMode] = useState<'today' | 'week' | 'month' | 'semester'>('today');
 
   // Selected date for Today's recitation view (defaults to today)
   const todayIso = useMemo(() => formatDateString(new Date()), []);
   const [selectedDate, setSelectedDate] = useState<string>(todayIso);
+
+  // Actual week list of the plan (no truncation — the whole term).
+  const planWeekNumbers = useMemo(
+    () => Array.from(new Set(planDailyItems.map((d) => d.weekNumber))).sort((a, b) => a - b),
+    [planDailyItems]
+  );
+
+  // Selected week for the Week view — defaults to the week containing the
+  // selected date (or the first plan week).
+  const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
+  const activeWeekNumber = useMemo(() => {
+    if (selectedWeek !== null && planWeekNumbers.includes(selectedWeek)) return selectedWeek;
+    const selDay = planDailyItems.find((d) => d.date === selectedDate);
+    if (selDay) return selDay.weekNumber;
+    return planWeekNumbers[0] ?? null;
+  }, [selectedWeek, planWeekNumbers, planDailyItems, selectedDate]);
+
+  const weekDays = useMemo(
+    () => planDailyItems.filter((d) => d.weekNumber === activeWeekNumber),
+    [planDailyItems, activeWeekNumber]
+  );
 
   // Sync selectedDate when plan loads
   useEffect(() => {
@@ -153,15 +210,22 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     [student, quranStageConfigs]
   );
 
-  // Auto-fill setup defaults when student changes
+  // Auto-fill setup defaults when student changes — the suggested starting
+  // position is the LAST actually-recorded achievement (session records are
+  // the source of truth), falling back to the student record's position.
   useEffect(() => {
     if (student) {
-      if (student.currentSurah) {
-        setSetupStartSurah(student.currentSurah);
+      const latestMemRec = sessionRecords
+        .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      const recordedSurah = latestMemRec?.memorization?.surahTo || student.currentSurah;
+      const recordedAyah = latestMemRec?.memorization?.ayahTo || student.currentAyah || 1;
+      if (recordedSurah) {
+        setSetupStartSurah(recordedSurah);
       } else {
-        setSetupStartSurah(student.grade === 'تمهيدي' ? 'الناس' : 'الناس');
+        setSetupStartSurah('الناس');
       }
-      setSetupStartAyah(student.currentAyah || 1);
+      setSetupStartAyah(recordedAyah);
 
       // Match a stage config template
       const matchedConfig = quranStageConfigs.find((c) =>
@@ -186,7 +250,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         }
       }
     }
-  }, [student, quranStageConfigs]);
+  }, [student, quranStageConfigs, sessionRecords]);
 
   // When stage config template changes in setup form
   const handleStageConfigChange = async (configId: string) => {
@@ -446,12 +510,25 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
-          {!activePlan ? (
+          {!activePlan || planNeedsRebuild ? (
             /* ============================================================
                STATE 1: Student Needs Starting Point Setup (يحتاج تحديد نقطة البداية)
                ============================================================ */
             canEditPlan ? (
             <div className="space-y-6">
+              {planNeedsRebuild && (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-black text-rose-900">الخطة الحالية تحتاج إلى إعادة بناء</h4>
+                    <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                      توجد خطة مسجلة لهذا الطالب لكن بياناتها اليومية غير مكتملة. اعتماد نقطة بداية
+                      جديدة أدناه سيبني خطة فصلية كاملة محفوظة في قاعدة البيانات دون المساس بسجلات
+                      التسميع السابقة.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-800 shrink-0 mt-0.5">
                   <AlertTriangle className="w-5 h-5" />
@@ -819,6 +896,11 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
             ) : (
             /* Read-only view: teacher sees the student's Quran data without edit surfaces */
             <div className="space-y-4">
+              {planNeedsRebuild && (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-xs font-bold text-rose-800">
+                  توجد خطة مسجلة لهذا الطالب لكن بياناتها غير مكتملة وتحتاج إعادة بناء من قبل المشرف المختص.
+                </div>
+              )}
               <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
                 <h4 className="text-xs font-black text-slate-900 mb-3">بيانات الطالب القرآنية الحالية</h4>
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -891,7 +973,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                ============================================================ */
             <div className="space-y-6">
               {/* At-Risk Warning Diagnostic Banner */}
-              {activePlan.diagnostic?.isAtRisk && (
+              {activePlan.targetAtRiskDiagnostic?.isAtRisk && (
                 <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
                   <div>
@@ -899,15 +981,15 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                       تنبيه تشخيصي: الخطة معرضة لخطر التأخر عن الهدف الفصلي
                     </h5>
                     <p className="text-[11px] text-rose-800 mt-1 leading-relaxed">
-                      يوجد تأخر متوقع بمقدار{' '}
-                      <span className="font-black">{activePlan.diagnostic.daysDelayed} أيام</span> عن تاريخ الإنجاز
-                      المستهدف الأصلي ({activePlan.originalTarget?.expectedEndDate || 'نهاية الفصل'}).
-                      {activePlan.diagnostic.recommendedAdjustment?.message && (
-                        <span className="block mt-1 font-semibold text-rose-950">
-                          الإجراء الموصى به: {activePlan.diagnostic.recommendedAdjustment.message}
-                        </span>
-                      )}
+                      {activePlan.targetAtRiskDiagnostic.warningMessage}
                     </p>
+                    {(activePlan.targetAtRiskDiagnostic.actionableRecommendations || []).length > 0 && (
+                      <ul className="text-[11px] text-rose-950 mt-1.5 space-y-0.5 list-disc list-inside font-semibold">
+                        {activePlan.targetAtRiskDiagnostic.actionableRecommendations.map((rec, i) => (
+                          <li key={i}>{rec}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
               )}
@@ -964,7 +1046,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     <span>المستهدف: {activePlan.originalTarget?.displayTarget || 'محدد بالخطة'}</span>
                   </span>
                   <span>•</span>
-                  <span>{activePlan.generatedPlan?.metrics?.completionPercentage || 0}% منجز</span>
+                  <span>{planMetrics.completionPercentage}% منجز</span>
                 </div>
               </div>
 
@@ -1335,21 +1417,36 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                 </div>
               )}
 
-              {/* TAB 2: WEEK VIEW */}
+              {/* TAB 2: WEEK VIEW — a REAL selected week of the full-term plan */}
               {viewMode === 'week' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h5 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
                       <CalendarDays className="w-4 h-4 text-emerald-700" />
-                      <span>جدول الأسبوع الحالي (Weekly Breakdown)</span>
+                      <span>
+                        جدول الأسبوع {activeWeekNumber ?? '—'} (من أصل {planWeekNumbers.length} أسبوعًا)
+                      </span>
                     </h5>
-                    <span className="text-xs text-slate-500 font-medium">
-                      المقدار اليومي: {activePlan.dailyAmount} {activePlan.unitType === 'ayah' ? 'آيات' : 'صفحة'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={activeWeekNumber ?? ''}
+                        onChange={(e) => setSelectedWeek(Number(e.target.value))}
+                        className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 bg-white focus:outline-emerald-600"
+                      >
+                        {planWeekNumbers.map((w) => (
+                          <option key={w} value={w}>
+                            الأسبوع {w}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-slate-500 font-medium">
+                        المقدار اليومي: {activePlan.dailyAmount} {activePlan.unitType === 'ayah' ? 'آيات' : 'صفحة'}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-2.5">
-                    {activePlan.generatedPlan?.dailyPlans?.slice(0, 12).map((day) => (
+                    {weekDays.map((day) => (
                       <div
                         key={day.date}
                         className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
@@ -1433,7 +1530,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     </div>
                     <div className="text-left">
                       <span className="text-xl font-black text-emerald-800">
-                        {activePlan.generatedPlan?.metrics?.completionPercentage || 0}%
+                        {planMetrics.completionPercentage}%
                       </span>
                       <span className="text-[10px] text-slate-500 block">نسبة الإنجاز الكلية</span>
                     </div>
@@ -1443,25 +1540,25 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     <div className="bg-white p-3 rounded-xl border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">إجمالي أيام الخطة</span>
                       <span className="text-base font-black text-slate-800">
-                        {activePlan.generatedPlan?.metrics?.totalDaysPlanned || 0}
+                        {planMetrics.totalDaysPlanned}
                       </span>
                     </div>
                     <div className="bg-white p-3 rounded-xl border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">الأيام المنجزة</span>
                       <span className="text-base font-black text-emerald-700">
-                        {activePlan.generatedPlan?.metrics?.completedDaysCount || 0}
+                        {planMetrics.completedDaysCount}
                       </span>
                     </div>
                     <div className="bg-white p-3 rounded-xl border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">أيام الغياب / لم يسمّع</span>
                       <span className="text-base font-black text-rose-700">
-                        {activePlan.generatedPlan?.metrics?.missedDaysCount || 0}
+                        {planMetrics.missedDaysCount}
                       </span>
                     </div>
                     <div className="bg-white p-3 rounded-xl border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">الآيات المنجزة</span>
                       <span className="text-base font-black text-blue-700">
-                        {activePlan.generatedPlan?.metrics?.totalAyahsCompleted || 0}
+                        {planMetrics.totalAyahsCompleted}
                       </span>
                     </div>
                   </div>
@@ -1502,9 +1599,9 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                       <span>سجل التعديلات وإعادة الجدولة (Audit Revisions Log)</span>
                     </h5>
 
-                    {activePlan.revisions && activePlan.revisions.length > 0 ? (
+                    {activePlan.versionHistory && activePlan.versionHistory.length > 1 ? (
                       <div className="space-y-2 max-h-48 overflow-y-auto">
-                        {(activePlan.revisions || []).map((rev) => (
+                        {(activePlan.versionHistory || []).map((rev) => (
                           <div
                             key={rev.version}
                             className="bg-white p-3 rounded-xl border border-slate-200 text-xs flex items-center justify-between gap-3"
@@ -1512,12 +1609,12 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-slate-900">إصدار v{rev.version}</span>
-                                <span className="text-[10px] text-slate-500">({rev.recalculatedAt})</span>
+                                <span className="text-[10px] text-slate-500">({rev.createdAt?.split('T')[0]})</span>
                               </div>
                               <p className="text-[11px] text-slate-600 mt-0.5">{rev.reason}</p>
                             </div>
                             <span className="text-[10px] text-slate-400">
-                              التأخر: {rev.impact?.delayedDays || 0} يوم
+                              متبقٍ: {rev.remainingUnitsAtVersion ?? 0} وحدة
                             </span>
                           </div>
                         ))}

@@ -516,6 +516,17 @@ async function getTenantByIdOrSlug(idOrSlug) {
 }
 
 // server/services/entityService.ts
+var JSONB_PAYLOAD_COLUMNS = {
+  quran_plans: { column: "plan_data", key: "planData" }
+};
+function hydrateRow(config2, row) {
+  const payload = JSONB_PAYLOAD_COLUMNS[config2.tableName];
+  if (!payload || !row || typeof row !== "object") return row;
+  const packed = row[payload.key];
+  if (!packed || typeof packed !== "object" || Array.isArray(packed)) return row;
+  const { [payload.key]: _packed, ...columns } = row;
+  return { ...packed, ...columns };
+}
 var ENTITY_TABLE_CONFIGS = {
   organizations: {
     tableName: "organizations",
@@ -1756,7 +1767,8 @@ async function findMany(collectionName, options = {}) {
     }
   }
   const fullQuery = `${selectClause} ${whereClause} ${orderBy} ${pagination}`;
-  return executeQuery(fullQuery, params);
+  const rows = await executeQuery(fullQuery, params);
+  return (rows || []).map((r) => hydrateRow(config2, r));
 }
 async function findById(collectionName, id, tenantId) {
   const config2 = resolveTableConfig(collectionName);
@@ -1788,7 +1800,8 @@ async function findById(collectionName, id, tenantId) {
     `;
   }
   const query = `${selectClause} WHERE ${conditions.join(" AND ")} LIMIT 1`;
-  return executeQuerySingle(query, params);
+  const row = await executeQuerySingle(query, params);
+  return row ? hydrateRow(config2, row) : row;
 }
 function prepareRecord(config2, rawData, tenantId) {
   const snakeData = camelToSnakeCase(rawData);
@@ -1829,6 +1842,13 @@ function prepareRecord(config2, rawData, tenantId) {
       }
       sanitized[col] = val;
     }
+  }
+  const payloadSpec = JSONB_PAYLOAD_COLUMNS[config2.tableName];
+  if (payloadSpec && sanitized[payloadSpec.column] === void 0) {
+    sanitized[payloadSpec.column] = JSON.stringify(rawData);
+  }
+  if (config2.tableName === "quran_plans" && sanitized.plan_name === void 0) {
+    sanitized.plan_name = rawData.title || rawData.planName || null;
   }
   if (config2.primaryKey === "id" && !sanitized.id) {
     sanitized.id = rawData.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -1881,7 +1901,7 @@ async function upsert(collectionName, rawData, tenantId) {
     }
     return existing;
   }
-  return result;
+  return hydrateRow(config2, result);
 }
 async function bulkUpsert(collectionName, items, tenantId) {
   if (!Array.isArray(items) || items.length === 0) {
@@ -1909,7 +1929,7 @@ async function bulkUpsert(collectionName, items, tenantId) {
       const query = updateClauses.length > 0 ? `INSERT INTO ${config2.tableName} (${columns}) VALUES (${placeholders}) ON CONFLICT (${config2.primaryKey}) DO UPDATE SET ${updateClauses.join(", ")} RETURNING *` : `INSERT INTO ${config2.tableName} (${columns}) VALUES (${placeholders}) ON CONFLICT (${config2.primaryKey}) DO NOTHING RETURNING *`;
       const res = await client.query(query, values);
       if (res.rows.length > 0) {
-        results.push(snakeToCamelCase(res.rows[0]));
+        results.push(hydrateRow(config2, snakeToCamelCase(res.rows[0])));
       }
     }
     await client.query("COMMIT");
