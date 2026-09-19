@@ -66,13 +66,17 @@ export function usePwaBranding(
     }
 
     const origin = window.location.origin;
-    const tenantLogo = activeTenant.logoUrl || logoUrl;
+    const rawLogo = activeTenant.logoUrl || logoUrl;
+    // data:/blob: URIs are not valid manifest icon sources — exclude them
+    const tenantLogo = rawLogo && !/^(data|blob):/i.test(rawLogo) ? rawLogo : null;
     const isSvgLogo = Boolean(tenantLogo && iconMime(tenantLogo) === 'image/svg+xml');
 
     // Icons: tenant logo first (installed-app icon), platform PNGs as fallback
     const icons: { src: string; sizes: string; type: string; purpose?: string }[] = [];
     if (tenantLogo) {
-      const absLogo = tenantLogo.startsWith('http') ? tenantLogo : origin + tenantLogo;
+      const absLogo = /^https?:\/\//.test(tenantLogo)
+        ? tenantLogo
+        : origin + (tenantLogo.startsWith('/') ? tenantLogo : '/' + tenantLogo);
       icons.push(
         { src: absLogo, sizes: isSvgLogo ? 'any' : '512x512', type: iconMime(tenantLogo) },
         { src: absLogo, sizes: isSvgLogo ? 'any' : '192x192', type: iconMime(tenantLogo), purpose: 'any maskable' }

@@ -2242,14 +2242,14 @@ function normalizeDigits(val) {
   if (!val) return "";
   return String(val).trim().replace(/\D/g, "");
 }
-async function findUserByIdentifier(identifier) {
+async function findUsersByIdentifier(identifier) {
   const trimmedIdentifier = identifier.trim();
   const identDigits = normalizeDigits(trimmedIdentifier);
   const identLower = trimmedIdentifier.toLowerCase();
   const pool2 = getDbPool();
   if (pool2) {
     try {
-      const user2 = await executeQuerySingle(`
+      const users = await executeQuery(`
         SELECT 
           u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
           u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
@@ -2264,9 +2264,8 @@ async function findUserByIdentifier(identifier) {
             u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
             OR u.login_identifier = $1 OR u.id = $1
           )
-        LIMIT 1
       `, [trimmedIdentifier, identLower]);
-      if (user2) return user2;
+      if (users && users.length > 0) return users;
     } catch (dbErr) {
       console.warn("[AUTH] Direct DB query fallback to remote forwarder:", dbErr);
     }
@@ -2275,6 +2274,7 @@ async function findUserByIdentifier(identifier) {
   const pass = config.devApiPassword;
   const token = Buffer.from(user + ":" + pass).toString("base64");
   const remoteUrl = config.devRemoteApiUrl || "https://qrms-dev.schoolscreen.sa/api";
+  const remoteMatches = [];
   try {
     const tenantsRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/tenants`, {
       headers: {
@@ -2309,22 +2309,29 @@ async function findUserByIdentifier(identifier) {
           const uLoginId = (u.loginIdentifier || u.login_identifier || "").trim().toLowerCase();
           const uId = (u.id || "").trim().toLowerCase();
           if (identDigits && uPhoneDigits) {
-            if (identDigits === uPhoneDigits) return u;
+            if (identDigits === uPhoneDigits) {
+              remoteMatches.push(u);
+              continue;
+            }
             if (identDigits.startsWith("966") && identDigits.slice(3) === uPhoneDigits.replace(/^0/, "") || uPhoneDigits.startsWith("966") && uPhoneDigits.slice(3) === identDigits.replace(/^0/, "") || identDigits.replace(/^0/, "") === uPhoneDigits.replace(/^0/, "")) {
-              return u;
+              remoteMatches.push(u);
+              continue;
             }
           }
           if (uNatId && (uNatId === trimmedIdentifier || identDigits && uNatId === identDigits)) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
           if (uEmail && uEmail === identLower) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
           if (uLoginId && uLoginId === identLower) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
           if (uId && uId === identLower) {
-            return u;
+            remoteMatches.push(u);
           }
         }
       }
@@ -2332,7 +2339,7 @@ async function findUserByIdentifier(identifier) {
   } catch (remoteErr) {
     console.error("[AUTH] Remote user fetch error:", remoteErr);
   }
-  return null;
+  return remoteMatches;
 }
 authRouter.post("/login", async (req, res, next) => {
   try {
@@ -2345,18 +2352,22 @@ authRouter.post("/login", async (req, res, next) => {
       res.status(400).json({ ok: false, error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629." });
       return;
     }
-    const userRow = await findUserByIdentifier(identifier);
-    if (!userRow) {
+    const candidates = await findUsersByIdentifier(identifier);
+    if (candidates.length === 0) {
       res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631." });
+      return;
+    }
+    const verified = candidates.filter((u) => verifyUserPassword(password, u));
+    const ROLE_PRIORITY = ["parent", "student"];
+    const userRow = [...verified].sort(
+      (a, b) => (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) - (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
+    )[0];
+    if (!userRow) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
       return;
     }
     if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
       res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
-      return;
-    }
-    const isPasswordValid = verifyUserPassword(password, userRow);
-    if (!isPasswordValid) {
-      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
       return;
     }
     const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;

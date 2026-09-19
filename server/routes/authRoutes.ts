@@ -75,7 +75,7 @@ function normalizeDigits(val: string): string {
 /**
  * Finds user across database or remote VPS by identifier
  */
-async function findUserByIdentifier(identifier: string): Promise<any | null> {
+async function findUsersByIdentifier(identifier: string): Promise<any[]> {
   const trimmedIdentifier = identifier.trim();
   const identDigits = normalizeDigits(trimmedIdentifier);
   const identLower = trimmedIdentifier.toLowerCase();
@@ -84,7 +84,9 @@ async function findUserByIdentifier(identifier: string): Promise<any | null> {
   const pool = getDbPool();
   if (pool) {
     try {
-      const user = await executeQuerySingle(`
+      // Multiple accounts may share one phone (e.g. parent + student) —
+      // collect all candidates; password verification picks the right one
+      const users = await executeQuery(`
         SELECT 
           u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
           u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
@@ -99,9 +101,8 @@ async function findUserByIdentifier(identifier: string): Promise<any | null> {
             u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
             OR u.login_identifier = $1 OR u.id = $1
           )
-        LIMIT 1
       `, [trimmedIdentifier, identLower]);
-      if (user) return user;
+      if (users && users.length > 0) return users;
     } catch (dbErr) {
       console.warn('[AUTH] Direct DB query fallback to remote forwarder:', dbErr);
     }
@@ -112,6 +113,7 @@ async function findUserByIdentifier(identifier: string): Promise<any | null> {
   const pass = config.devApiPassword;
   const token = Buffer.from(user + ':' + pass).toString('base64');
   const remoteUrl = config.devRemoteApiUrl || 'https://qrms-dev.schoolscreen.sa/api';
+  const remoteMatches: any[] = [];
 
   try {
     // Get all tenants
@@ -157,33 +159,40 @@ async function findUserByIdentifier(identifier: string): Promise<any | null> {
           // Strict matching:
           // A. Phone match
           if (identDigits && uPhoneDigits) {
-            if (identDigits === uPhoneDigits) return u;
+            if (identDigits === uPhoneDigits) {
+              remoteMatches.push(u);
+              continue;
+            }
             // Match Saudi formats with or without leading zero or country code
             if (
               (identDigits.startsWith('966') && identDigits.slice(3) === uPhoneDigits.replace(/^0/, '')) ||
               (uPhoneDigits.startsWith('966') && uPhoneDigits.slice(3) === identDigits.replace(/^0/, '')) ||
               (identDigits.replace(/^0/, '') === uPhoneDigits.replace(/^0/, ''))
             ) {
-              return u;
+              remoteMatches.push(u);
+              continue;
             }
           }
 
           // B. National ID match
           if (uNatId && (uNatId === trimmedIdentifier || (identDigits && uNatId === identDigits))) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
 
           // C. Email match
           if (uEmail && uEmail === identLower) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
 
           // D. Login identifier or ID match
           if (uLoginId && uLoginId === identLower) {
-            return u;
+            remoteMatches.push(u);
+            continue;
           }
           if (uId && uId === identLower) {
-            return u;
+            remoteMatches.push(u);
           }
         }
       }
@@ -192,7 +201,7 @@ async function findUserByIdentifier(identifier: string): Promise<any | null> {
     console.error('[AUTH] Remote user fetch error:', remoteErr);
   }
 
-  return null;
+  return remoteMatches;
 }
 
 /**
@@ -213,26 +222,38 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // 1. Look up user by the specific entered identifier
-    const userRow = await findUserByIdentifier(identifier);
+    // 1. Look up all user rows matching the identifier
+    const candidates = await findUsersByIdentifier(identifier);
 
-    // 2. User not found -> 401 Unauthorized
-    if (!userRow) {
+    // 2. No match at all -> 401 Unauthorized
+    if (candidates.length === 0) {
       res.status(401).json({ ok: false, error: 'بيانات الدخول غير صحيحة. يرجى التأكد من اسم المستخدم أو كلمة المرور.' });
       return;
     }
 
-    // 3. Check account status
-    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
-      res.status(403).json({ ok: false, error: 'هذا الحساب معطل أو مؤرشف. يرجى التواصل مع إدارة المجمع.' });
+    // 3. Password verification across ALL matching rows — when several
+    // accounts share one identifier (e.g. parent + student on one phone),
+    // the correct account is the one whose password verifies.
+    const verified = candidates.filter((u) => verifyUserPassword(password, u));
+
+    // Deterministic role preference when the same credential verifies
+    // multiple accounts sharing an identifier — a family phone should open
+    // the parent portal, not an arbitrary student account.
+    const ROLE_PRIORITY = ['parent', 'student'];
+    const userRow = [...verified].sort(
+      (a, b) =>
+        (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) -
+        (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
+    )[0];
+
+    if (!userRow) {
+      res.status(401).json({ ok: false, error: 'بيانات الدخول غير صحيحة. كلمة المرور غير مطابقة.' });
       return;
     }
 
-    // 4. Strict password verification
-    const isPasswordValid = verifyUserPassword(password, userRow);
-
-    if (!isPasswordValid) {
-      res.status(401).json({ ok: false, error: 'بيانات الدخول غير صحيحة. كلمة المرور غير مطابقة.' });
+    // 4. Check account status
+    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
+      res.status(403).json({ ok: false, error: 'هذا الحساب معطل أو مؤرشف. يرجى التواصل مع إدارة المجمع.' });
       return;
     }
 
