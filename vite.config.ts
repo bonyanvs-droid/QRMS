@@ -46,6 +46,18 @@ export default defineConfig(() => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg,webp,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
+          // Navigation fallback so offline/failed fetches return the app shell
+          // instead of an uncaught "Failed to fetch" rejection
+          navigateFallback: 'index.html',
+          navigateFallbackDenylist: [/^\/api\//, /^\/manifest\.webmanifest/, /^\/uploads\//],
+          cleanupOutdatedCaches: true,
+          // API must never be served from cache — live PostgreSQL data only
+          runtimeCaching: [
+            {
+              urlPattern: /\/api\/.*/i,
+              handler: 'NetworkOnly',
+            },
+          ],
         },
       }),
     ],
