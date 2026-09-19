@@ -44,6 +44,10 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          // New SW activates immediately and seizes control — replaces stale
+          // workers that keep intercepting requests with broken fetch handlers
+          skipWaiting: true,
+          clientsClaim: true,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg,webp,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           // Navigation fallback so offline/failed fetches return the app shell
