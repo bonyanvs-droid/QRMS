@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import { getHalaqahActiveTracks } from '../../utils/trackAdapter';
 import { Student, TrackDefinition, TrackNomination } from '../../types';
 import {
   Award,
@@ -48,13 +49,10 @@ export const TeacherTrackNominationModal: React.FC<TeacherTrackNominationModalPr
     return students.filter((s) => s.halaqahId === halaqahId);
   }, [students, halaqahId]);
 
-  // Active tracks available for this halaqah or tenant
+  // Active tracks available for this halaqah — resolved through the single
+  // track authority (explicit subscription honored; absent → default set).
   const availableTracks = useMemo(() => {
-    const activeIds = halaqah?.activeTrackIds;
-    if (activeIds && activeIds.length > 0) {
-      return tracks.filter((t) => activeIds.includes(t.id) && t.isActive);
-    }
-    return tracks.filter((t) => t.isActive);
+    return getHalaqahActiveTracks(halaqah, tracks).filter((t) => t.isActive);
   }, [tracks, halaqah]);
 
   // Form State

@@ -58,7 +58,8 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     currentRole,
     quranPlans,
     quranStageConfigs,
-    createStudentQuranPlan,
+    previewStudentQuranPlan,
+    approveStudentQuranPlan,
     recordQuranPlanAchievement,
     getActiveStudentQuranPlan,
     academicConfig,
@@ -193,6 +194,9 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
   const [setupWorkingDays, setSetupWorkingDays] = useState<number[]>([0, 1, 2, 3]);
   const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
+  const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
+  // Preview state — the generated plan awaits explicit approval before persistence
+  const [previewPlan, setPreviewPlan] = useState<StudentQuranPlan | null>(null);
   // Manual minor-revision range (required when auto mode is off)
   const [setupRevStartSurah, setSetupRevStartSurah] = useState<string>('الفاتحة');
   const [setupRevStartAyah, setSetupRevStartAyah] = useState<number>(1);
@@ -260,6 +264,9 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         }
         if (matchedConfig.revision) {
           setSetupRevisionDailyPages(matchedConfig.revision.defaultDailyPages ?? 1);
+          if (matchedConfig.revision.defaultDirection) {
+            setSetupRevisionDirection(matchedConfig.revision.defaultDirection);
+          }
         }
         if (matchedConfig.consolidationDays !== undefined) {
           setSetupConsolidationDays(matchedConfig.consolidationDays);
@@ -293,6 +300,9 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
 
     if (cfg.revision) {
       setSetupRevisionDailyPages(cfg.revision.defaultDailyPages ?? 1);
+      if (cfg.revision.defaultDirection) {
+        setSetupRevisionDirection(cfg.revision.defaultDirection);
+      }
     }
     if (cfg.consolidationDays !== undefined) {
       setSetupConsolidationDays(cfg.consolidationDays);
@@ -300,6 +310,8 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     if (cfg.schedule?.workingDays) {
       setSetupWorkingDays(cfg.schedule.workingDays);
     }
+    // A changed template invalidates any previously generated preview
+    setPreviewPlan(null);
   };
 
   // Find target day in plan
@@ -323,11 +335,12 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
 
   if (!isOpen || !student) return null;
 
-  // Handler for creating plan from Setup Form
+  // Handler — Step 1: build the plan PREVIEW (nothing persisted yet)
   const handleCreatePlanFromSetup = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSettingUp(true);
     setFeedbackMessage(null);
+    setPreviewPlan(null);
 
     try {
       // Resolve start and end positions
@@ -377,11 +390,17 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         };
       }
 
-      await createStudentQuranPlan({
+      // Explicit template selection is honored — never silently re-matched
+      const chosenStageConfig =
+        quranStageConfigs.find((c) => c.id === selectedStageConfigId) || undefined;
+
+      const built = await previewStudentQuranPlan({
         student,
+        stageConfig: chosenStageConfig,
         customTargetStart: startPos,
         customTargetEnd: endPos,
         customDirection: setupDirection,
+        customRevisionDirection: setupRevisionDirection,
         customUnitType: setupUnitType,
         customDailyAmount: setupDailyAmount,
         customRevisionDailyPages: setupRevisionDailyPages,
@@ -391,14 +410,34 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         manualRevisionRange,
       });
 
+      // Step 2 requires explicit approval — nothing is persisted yet.
+      setPreviewPlan(built);
+    } catch (err: any) {
+      setFeedbackMessage({
+        type: 'error',
+        text: err.message || 'تعذر توليد معاينة الخطة، يرجى مراجعة المدخلات.',
+      });
+    } finally {
+      setIsSettingUp(false);
+    }
+  };
+
+  // Handler — Step 2: approve & persist the previewed plan
+  const handleApprovePreviewedPlan = async () => {
+    if (!previewPlan) return;
+    setIsSettingUp(true);
+    setFeedbackMessage(null);
+    try {
+      await approveStudentQuranPlan(previewPlan, student);
+      setPreviewPlan(null);
       setFeedbackMessage({
         type: 'success',
-        text: 'تم اعتماد نقطة البداية وتوليد الخطة القرآنية بنجاح.',
+        text: 'تم اعتماد الخطة القرآنية وحفظها في قاعدة البيانات بنجاح.',
       });
     } catch (err: any) {
       setFeedbackMessage({
         type: 'error',
-        text: err.message || 'تعذر إنشاء الخطة، يرجى مراجعة المدخلات.',
+        text: err.message || 'تعذر حفظ الخطة المعتمدة، يرجى المحاولة مجددًا.',
       });
     } finally {
       setIsSettingUp(false);
@@ -448,7 +487,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
 
       setFeedbackMessage({
         type: 'success',
-        text: 'تم قفل اليوم التاريخي وإعادة جدولة الأيام المستقبلية بنجاح.',
+        text: 'تم تحديث الخطة المستقبلية بناءً على الإنجاز الفعلي المسجل اليوم — تم قفل اليوم في السجل التاريخي وإعادة توزيع الأيام القادمة.',
       });
     } catch (err: any) {
       setFeedbackMessage({
@@ -722,8 +761,8 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                   </div>
                 </div>
 
-                {/* Additional Settings: Revision Pages, Consolidation Days, Working Days */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
+                {/* Additional Settings: Revision, Consolidation, Working Days */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">مقدار المراجعة اليومية</label>
                     <select
@@ -753,6 +792,18 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                       <option value="2">يومان</option>
                       <option value="1">يوم واحد</option>
                       <option value="0">بدون أيام تثبيت</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">اتجاه المراجعة (مستقل)</label>
+                    <select
+                      value={setupRevisionDirection}
+                      onChange={(e) => setSetupRevisionDirection(e.target.value as PlanDirection)}
+                      className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
+                    >
+                      <option value="backward">عكسي (الأحدث ← الأقدم)</option>
+                      <option value="forward">مع اتجاه الحفظ (الأقدم ← الأحدث)</option>
                     </select>
                   </div>
 
@@ -904,13 +955,144 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                   <button
                     type="submit"
                     disabled={isSettingUp}
-                    className="px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-800 hover:bg-emerald-900 text-white shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-800 hover:bg-blue-900 text-white shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>{isSettingUp ? 'جارٍ توليد الخطة...' : 'اعتماد نقطة البداية وتوليد الخطة القرآنية'}</span>
+                    <span>{isSettingUp ? 'جارٍ توليد المعاينة...' : 'توليد معاينة الخطة القرآنية'}</span>
                   </button>
                 </div>
               </form>
+
+              {/* =====================================================
+                  PREVIEW PANEL — generated plan awaiting explicit approval
+                  (nothing persisted until "اعتماد وحفظ" is pressed)
+                  ===================================================== */}
+              {previewPlan && (
+                <div className="bg-blue-50/60 border-2 border-blue-300 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-blue-700" />
+                    <h5 className="text-sm font-black text-blue-950">
+                      معاينة الخطة المولّدة — لم تُحفظ بعد
+                    </h5>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">النموذج</span>
+                      <span className="font-black text-slate-900">{previewPlan.title}</span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">الفترة</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.startDate} ← {previewPlan.endDate}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">أيام العمل المولدة</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.generatedPlan?.dailyPlans?.length ?? 0} يوم
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">مصدر المستهدف</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.targetSource === 'explicit'
+                          ? 'اختيار المعلم'
+                          : previewPlan.targetSource === 'personal'
+                            ? 'المستهدف الشخصي'
+                            : previewPlan.targetSource === 'academic_year'
+                              ? 'المستهدف الأكاديمي للصف'
+                              : previewPlan.targetSource === 'student_minimum'
+                                ? 'الحد الأدنى للطالب'
+                                : previewPlan.targetSource === 'halaqah'
+                                  ? 'مستهدف الحلقة'
+                                  : previewPlan.targetSource === 'stage'
+                                    ? 'مستهدف المرحلة'
+                                    : previewPlan.targetSource === 'tenant'
+                                      ? 'مستهدف المجمع'
+                                      : 'افتراضي النموذج'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">اتجاه الحفظ</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.direction === 'backward' ? 'تنازلي' : 'تصاعدي'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">اتجاه المراجعة</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.revisionDirection === 'forward'
+                          ? 'مع اتجاه الحفظ'
+                          : 'عكسي (الأحدث أولًا)'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">المسارات المفعلة</span>
+                      <span className="font-black text-slate-900">
+                        {(previewPlan.activeTrackIds || []).includes('track_spelling')
+                          ? 'قرآن + هجاء'
+                          : 'قرآن فقط'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">أول يوم مقرر</span>
+                      <span className="font-black text-emerald-900 font-['Amiri',serif]">
+                        {previewPlan.generatedPlan?.dailyPlans?.[0]?.targetUnit?.displayLabel || '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Feasibility diagnostic */}
+                  {previewPlan.targetAtRiskDiagnostic?.isAtRisk && (
+                    <div className="bg-rose-50 border border-rose-300 rounded-xl p-3 text-xs">
+                      <span className="font-black text-rose-900 block">⚠ تنبيه الجدوى:</span>
+                      <p className="text-rose-800 mt-1 leading-relaxed">
+                        {previewPlan.targetAtRiskDiagnostic.warningMessage}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Sample of generated days */}
+                  <div className="bg-white rounded-xl border border-blue-200 overflow-hidden">
+                    <div className="px-3 py-2 bg-blue-100/60 text-[11px] font-black text-blue-950">
+                      أول 3 أيام مقررة في الخطة
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {(previewPlan.generatedPlan?.dailyPlans || []).slice(0, 3).map((d) => (
+                        <div key={d.id} className="px-3 py-2 text-[11px] flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700">
+                            {d.dayName} {d.date}
+                          </span>
+                          <span className="font-bold text-slate-900 font-['Amiri',serif] truncate">
+                            {d.targetUnit?.displayLabel}
+                          </span>
+                          <span className="text-slate-500 truncate">{d.revisionDisplayLabel}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewPlan(null)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                    >
+                      تعديل المعايير
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApprovePreviewedPlan}
+                      disabled={isSettingUp}
+                      className="px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-800 hover:bg-emerald-900 text-white shadow-sm transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{isSettingUp ? 'جارٍ الحفظ...' : 'اعتماد وحفظ الخطة في قاعدة البيانات'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             ) : (
             /* Read-only view: teacher sees the student's Quran data without edit surfaces */

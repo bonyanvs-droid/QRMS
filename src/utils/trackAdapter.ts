@@ -193,6 +193,25 @@ export function getStudentTrackActivity(
   };
 }
 
+/** Platform default subscription — mirrors the `halaqahs.active_track_ids` DB default */
+export const DEFAULT_TRACK_IDS = ['track_quran', 'track_spelling', 'track_virtues'];
+
+/**
+ * Single source of truth for a halaqah's ACTIVE TRACK subscription.
+ * An explicit `activeTrackIds` subscription is honored exactly; when the
+ * subscription is absent the platform default set applies (same as the DB
+ * column default). Every consumer MUST resolve tracks through here instead
+ * of re-implementing its own fallback.
+ */
+export function getHalaqahActiveTrackIds(
+  halaqah: Pick<Halaqah, 'activeTrackIds'> | null | undefined
+): string[] {
+  if (halaqah?.activeTrackIds && halaqah.activeTrackIds.length > 0) {
+    return [...halaqah.activeTrackIds];
+  }
+  return [...DEFAULT_TRACK_IDS];
+}
+
 // -------------------------------------------------------------
 // HELPER: Get active tracks for a Halaqah
 // -------------------------------------------------------------
@@ -202,14 +221,12 @@ export function getHalaqahActiveTracks(
 ): TrackDefinition[] {
   if (!halaqah) return allTracks;
 
-  // إذا كانت مصفوفة المسارات محددة، نفلتر المسارات بموجبها
-  if (halaqah.activeTrackIds && halaqah.activeTrackIds.length > 0) {
-    const filtered = allTracks.filter((t) => halaqah.activeTrackIds!.includes(t.id));
-    if (filtered.length > 0) return filtered;
-  }
+  const ids = getHalaqahActiveTrackIds(halaqah);
+  const filtered = allTracks.filter((t) => ids.includes(t.id));
+  if (filtered.length > 0) return filtered;
 
-  // Fallback: إذا لم تكن محددة بعد، المسارات الافتراضية الأساسية الثلاثة مفعلة
-  return allTracks.filter((t) => ['track_quran', 'track_spelling', 'track_virtues'].includes(t.id));
+  // Fallback: إذا لم تطابق الاشتراكات أي مسار معروف، المسارات الافتراضية الأساسية
+  return allTracks.filter((t) => DEFAULT_TRACK_IDS.includes(t.id));
 }
 
 // -------------------------------------------------------------

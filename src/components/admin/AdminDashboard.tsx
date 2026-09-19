@@ -129,7 +129,7 @@ import { EmergencySupportTab } from './EmergencySupportTab';
 import { CurriculumTemplatesTab } from './CurriculumTemplatesTab';
 import { PermissionsDelegationTab } from './PermissionsDelegationTab';
 import FrontendManagementTab from './FrontendManagementTab';
-import { SUPERVISOR_ROLES_CONFIG } from '../../utils/trackAdapter';
+import { SUPERVISOR_ROLES_CONFIG, getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import { SupervisorScope } from '../../types';
 import { StudentCumulativeHistoryModal } from '../common/StudentCumulativeHistoryModal';
 import { isModuleEnabled } from '../../lib/moduleChecker';
@@ -2266,7 +2266,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                       const teacher = teachers.find((t) => t.id === h.teacherId) || users.find((u) => u.id === h.teacherId);
                       const teacherDisplayName = teacher?.name || h.teacherName || 'غير محدد';
                       const count = visibleStudents.filter((s) => s.halaqahId === h.id).length;
-                      const activeTracks = (h.activeTrackIds || ['track_quran', 'track_spelling', 'track_virtues'])
+                      const activeTracks = getHalaqahActiveTrackIds(h)
                         .map((tid) => tracks.find((tr) => tr.id === tid) || { id: tid, shortName: tid === 'track_quran' ? 'القرآن الكريم' : tid === 'track_spelling' ? 'الهجاء القرآني' : tid === 'track_virtues' ? 'القيم والتربية' : tid })
                         .filter(Boolean);
 
@@ -2394,7 +2394,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                   const teacher = teachers.find((t) => t.id === h.teacherId) || users.find((u) => u.id === h.teacherId);
                   const teacherDisplayName = teacher?.name || h.teacherName || 'غير محدد';
                   const count = visibleStudents.filter((s) => s.halaqahId === h.id).length;
-                  const activeTracks = (h.activeTrackIds || ['track_quran', 'track_spelling', 'track_virtues'])
+                  const activeTracks = getHalaqahActiveTrackIds(h)
                     .map((tid) => tracks.find((tr) => tr.id === tid) || { id: tid, shortName: tid === 'track_quran' ? 'القرآن الكريم' : tid === 'track_spelling' ? 'الهجاء القرآني' : tid === 'track_virtues' ? 'القيم والتربية' : tid })
                     .filter(Boolean);
 
@@ -3732,7 +3732,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <label className="block font-bold text-slate-700 mb-1.5">المسارات التعليمية المفعلة للحلقة</label>
                 <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                   {tracks.map((trk) => {
-                    const currentList = editingHalaqah.activeTrackIds || ['track_quran', 'track_spelling', 'track_virtues'];
+                    const currentList = getHalaqahActiveTrackIds(editingHalaqah);
                     const isChecked = currentList.includes(trk.id);
                     return (
                       <label

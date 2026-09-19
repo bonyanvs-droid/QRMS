@@ -32,7 +32,7 @@ import { SpellingLesson, SubLesson, EducationalPlanWeek } from '../../types';
 import { StageConfigModal } from '../quran/StageConfigModal';
 import { BadgesManagementModal } from '../teacher/BadgesManagementModal';
 import { BADGE_DEFINITIONS } from '../../utils/badgeSystem';
-import { QuranPlanManager } from '../quran/QuranPlanManager';
+
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { TemplatePlanPreviewModal } from './TemplatePlanPreviewModal';
 
@@ -107,7 +107,7 @@ export const CurriculumTemplatesTab: React.FC = () => {
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<
-    'quran_templates' | 'plan_engine' | 'spelling_lessons' | 'educational_goals' | 'badges_incentives'
+    'quran_templates' | 'spelling_lessons' | 'educational_goals' | 'badges_incentives'
   >('quran_templates');
 
   // Quran Stage Config Modal State
@@ -277,18 +277,6 @@ export const CurriculumTemplatesTab: React.FC = () => {
         >
           <BookOpen className="w-4 h-4" />
           <span>📖 قوالب الخطط القرآنية ({quranStageConfigs.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('plan_engine')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'plan_engine'
-              ? 'bg-emerald-800 text-white shadow-xs'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>⚡ محرك التخطيط القرآني والمحاكي المتقدم</span>
         </button>
 
         <button
@@ -500,31 +488,6 @@ export const CurriculumTemplatesTab: React.FC = () => {
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 2. ADVANCED QURAN PLAN ENGINE & SIMULATOR */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'plan_engine' && (
-        <div className="space-y-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-600" />
-                <span>محرك وهندسة الخطط القرآنية المتقدم والمحاكي</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                توليد خطط الحفظ التلقائية، اختبار التعويض عند الغياب أو التجاوز، وضبط المقادير المنهجية
-              </p>
-            </div>
-          </div>
-          <ErrorBoundary
-            fallbackTitle="تعذر تحميل محرك التخطيط القرآني"
-            fallbackMessage="حدث خطأ غير متوقع أثناء معالجة بيانات المصحف الشريف أو خطط الطلاب."
-          >
-            <QuranPlanManager />
-          </ErrorBoundary>
         </div>
       )}
 

@@ -11,6 +11,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import {
   analyzeStudentsForEarlyWarning,
   createRemedialPlanFromAnalysis,
@@ -46,10 +47,10 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
     halaqahs,
   } = useApp();
 
-  const isSpellingTrackEnabled = (halaqahIdVal: string | undefined) => {
-    const ids = halaqahs.find((h) => h.id === halaqahIdVal)?.activeTrackIds;
-    return !ids || ids.includes('track_spelling');
-  };
+  const isSpellingTrackEnabled = (halaqahIdVal: string | undefined) =>
+    getHalaqahActiveTrackIds(halaqahs.find((h) => h.id === halaqahIdVal)).includes(
+      'track_spelling'
+    );
 
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterRisk, setFilterRisk] = useState<string>('all');

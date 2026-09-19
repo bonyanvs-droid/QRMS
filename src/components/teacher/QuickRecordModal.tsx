@@ -5,6 +5,7 @@ import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMeta
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
 import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
+import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
 interface QuickRecordModalProps {
   isOpen: boolean;
@@ -183,11 +184,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const studentHalaqah =
     halaqahs.find((h) => h.id === student.halaqahId) ||
     halaqahs.find((h) => h.name === student.halaqahName);
-  const enabledTrackIds = studentHalaqah?.activeTrackIds || [
-    'track_quran',
-    'track_spelling',
-    'track_virtues',
-  ];
+  const enabledTrackIds = getHalaqahActiveTrackIds(studentHalaqah);
   const isSpellingTrackEnabled = enabledTrackIds.includes('track_spelling');
   const isQuranTrackEnabled = enabledTrackIds.includes('track_quran');
 

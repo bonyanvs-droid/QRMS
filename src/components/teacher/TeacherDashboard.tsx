@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
+import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import { filterHalaqahsByScope } from '../../lib/permissions';
 import { QuickRecordModal } from './QuickRecordModal';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
@@ -178,10 +179,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   // Authoritative module checks for active tenant
   const isSpellingActive = isModuleEnabled(activeTenant, 'spelling');
 
-  // Per-halaqah track gating — undefined activeTrackIds = all tracks enabled (legacy default)
+  // Per-halaqah track gating — resolved through the single track authority
+  // (explicit subscription honored; absent → platform default set).
   const isHalaqahTrackEnabled = (halaqahId: string | undefined, trackId: string) => {
-    const ids = halaqahs.find((h) => h.id === halaqahId)?.activeTrackIds;
-    return !ids || ids.includes(trackId);
+    const halaqah = halaqahs.find((h) => h.id === halaqahId);
+    return getHalaqahActiveTrackIds(halaqah).includes(trackId);
   };
   const isBadgesActive = isModuleEnabled(activeTenant, 'badges');
 
@@ -931,9 +933,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredStudents.map(({ student, eval: ev }) => {
               const currentLesson = spellingLessons.find((l) => l.id === student.currentSpellingLessonId);
-              const studentTrackIds =
-                halaqahs.find((h) => h.id === student.halaqahId)?.activeTrackIds ||
-                ['track_quran', 'track_spelling', 'track_virtues'];
+              const studentTrackIds = getHalaqahActiveTrackIds(
+                halaqahs.find((h) => h.id === student.halaqahId)
+              );
               const studentSpellingEnabled = studentTrackIds.includes('track_spelling');
               const studentQuranEnabled = studentTrackIds.includes('track_quran');
               // Dynamic tracks: every enabled track without a builtin section gets its own row

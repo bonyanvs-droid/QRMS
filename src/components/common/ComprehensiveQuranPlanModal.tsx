@@ -20,6 +20,7 @@ import {
   getTodayLocalIso,
 } from '../../utils/hijriDate';
 import { executePrintOrPdfFallback } from '../../utils/pdfExportUtils';
+import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import { SURAHS_LIST } from '../../data/initialData';
 
 type ViewVariant = 'teacher' | 'student' | 'parent';
@@ -60,7 +61,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   variant = 'teacher',
   onClose,
 }) => {
-  const { getActiveStudentQuranPlan, sessionRecords } = useApp();
+  const { getActiveStudentQuranPlan, sessionRecords, halaqahs, teachers, activeTenant } = useApp();
   const [calendar, setCalendar] = useState<CalendarMode>('hijri');
   // Weeks are fully expanded by default so the WHOLE term plan is visible;
   // collapsedWeeks tracks only the weeks the user explicitly folds away.
@@ -73,6 +74,22 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   );
 
   const todayIso = getTodayLocalIso();
+
+  // Active tracks — resolved from the halaqah subscription through the single
+  // track authority. The spelling column only renders when subscribed.
+  const studentHalaqah = useMemo(
+    () =>
+      halaqahs.find((h) => h.id === student.halaqahId) ||
+      halaqahs.find((h) => h.name === student.halaqahName),
+    [halaqahs, student.halaqahId, student.halaqahName]
+  );
+  const enabledTrackIds = useMemo(() => getHalaqahActiveTrackIds(studentHalaqah), [studentHalaqah]);
+  const spellingTrackOn = enabledTrackIds.includes('track_spelling');
+
+  const teacherName =
+    teachers.find((t) => t.id === student.teacherId)?.name ||
+    studentHalaqah?.teacherName ||
+    '—';
 
   const fmtDate = (d: string) =>
     calendar === 'hijri' ? formatHijriDate(d) : formatGregorianDate(d);
@@ -150,6 +167,18 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   ).length;
   const pastCount = dailyPlans.filter((d) => d.date < todayIso || d.isHistorical).length;
 
+  const academicLabel = () => plan?.termName || 'الفصل الدراسي الحالي';
+
+  // The canonical "current day" — today when inside the plan, else the first
+  // pending day. Drives the dedicated current-day panel (Phase M).
+  const currentDayItem = useMemo(() => {
+    if (!dailyPlans.length) return undefined;
+    return (
+      dailyPlans.find((d) => d.date === todayIso) ||
+      dailyPlans.find((d) => d.date > todayIso && !d.isHistorical && d.status === 'pending')
+    );
+  }, [dailyPlans, todayIso]);
+
   const subtitle =
     variant === 'student'
       ? 'رحلتك القرآنية من البداية إلى المستهدف — يومًا بيوم'
@@ -221,6 +250,95 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
         {/* Body (printable) */}
         <div ref={printRef} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 bg-slate-50">
+          {/* Official document letterhead — tenant identity on screen + PDF */}
+          {plan && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4">
+              <div className="flex items-center gap-3">
+                {activeTenant?.logoUrl ? (
+                  <img
+                    src={activeTenant.logoUrl}
+                    alt={activeTenant.name}
+                    className="w-11 h-11 rounded-xl object-contain border border-slate-100 bg-white shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-xl bg-emerald-800 text-amber-300 font-black text-lg flex items-center justify-center shrink-0">
+                    ق
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-black text-slate-900 truncate">
+                    {activeTenant?.name || 'المجمع القرآني'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-bold">
+                    وثيقة الخطة القرآنية الشاملة — {academicLabel()}
+                  </div>
+                </div>
+                <div className="text-left text-[10px] text-slate-500 font-bold shrink-0">
+                  <div>الإصدار: v{plan.planVersion || 1}</div>
+                  <div>تاريخ الإصدار: {fmtDate(todayIso)}</div>
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2.5 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                <div>
+                  <span className="text-slate-400 block">الطالب</span>
+                  <span className="font-black text-slate-800">{student.fullName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">المرحلة / الصف</span>
+                  <span className="font-black text-slate-800">{student.grade}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">الحلقة</span>
+                  <span className="font-black text-slate-800">{studentHalaqah?.name || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">المعلم</span>
+                  <span className="font-black text-slate-800">{teacherName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">فترة الخطة</span>
+                  <span className="font-black text-slate-800">
+                    {fmtDate(plan.startDate)} ← {fmtDate(plan.endDate)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">مصدر المستهدف</span>
+                  <span className="font-black text-slate-800">
+                    {plan.targetSource === 'explicit'
+                      ? 'اختيار المعلم'
+                      : plan.targetSource === 'personal'
+                        ? 'المستهدف الشخصي'
+                        : plan.targetSource === 'academic_year'
+                          ? 'المستهدف الأكاديمي'
+                          : plan.targetSource === 'student_minimum'
+                            ? 'الحد الأدنى للطالب'
+                            : plan.targetSource === 'halaqah'
+                              ? 'مستهدف الحلقة'
+                              : plan.targetSource === 'stage'
+                                ? 'مستهدف المرحلة'
+                                : plan.targetSource === 'tenant'
+                                  ? 'مستهدف المجمع'
+                                  : 'افتراضي النموذج'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">المسارات المفعلة</span>
+                  <span className="font-black text-slate-800">
+                    {spellingTrackOn ? 'القرآن + الهجاء' : 'القرآن فقط'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">اتجاه الحفظ / المراجعة</span>
+                  <span className="font-black text-slate-800">
+                    {plan.direction === 'backward' ? 'تنازلي' : 'تصاعدي'} /{' '}
+                    {(plan.revisionDirection || plan.revisionSettings?.direction) === 'forward'
+                      ? 'مع الحفظ'
+                      : 'عكسي'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
           {!plan ? (
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
               <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -318,7 +436,53 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Weekly timeline */}
+              {/* CURRENT DAY panel — latest confirmed position + today's task
+                  + actual vs planned (Phase M) */}
+              {currentDayItem && (
+                <div className="bg-blue-50/70 border border-blue-300 rounded-xl p-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                    <span className="text-[11px] font-black text-blue-900 flex items-center gap-1.5">
+                      <CalendarDays className="w-3.5 h-3.5" />
+                      اليوم الحالي — {currentDayItem.dayName} {fmtDate(currentDayItem.date)}
+                    </span>
+                    <span
+                      className={`text-[10px] font-black border rounded-lg px-2 py-0.5 ${
+                        dayStatusMeta(currentDayItem).cls
+                      }`}
+                    >
+                      {dayStatusMeta(currentDayItem).label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                    <div className="bg-white rounded-lg border border-blue-100 p-2">
+                      <span className="text-[9px] text-slate-400 font-bold block">المقرر اليوم</span>
+                      <span className="font-black text-slate-900 font-['Amiri',serif]">
+                        {currentDayItem.targetUnit?.displayLabel}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-lg border border-blue-100 p-2">
+                      <span className="text-[9px] text-slate-400 font-bold block">المراجعة المقررة</span>
+                      <span className="font-black text-slate-900">
+                        {currentDayItem.revisionDisplayLabel || '—'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-lg border border-blue-100 p-2">
+                      <span className="text-[9px] text-slate-400 font-bold block">الإنجاز الفعلي</span>
+                      <span className="font-black text-emerald-800 font-['Amiri',serif]">
+                        {currentDayItem.actualAchieved?.unit?.displayLabel ||
+                          'لم يُسجَّل بعد — بانتظار التسميع'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-blue-800 font-bold">
+                    آخر موضع مثبت: سورة {surahName(plan.currentPosition?.surahNumber)} — آية{' '}
+                    {plan.currentPosition?.ayahNumber ?? '—'}
+                  </div>
+                </div>
+              )}
+
+              {/* Weekly timeline — canonical DAY-BY-DAY table (past locked
+                  green / current blue / future neutral) */}
               {weeks.map(([weekNum, days]) => {
                 const open = isWeekOpen(weekNum);
                 const weekDone = days.filter(
@@ -351,109 +515,144 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     </button>
 
                     {open && (
-                      <div className="divide-y divide-slate-100">
-                        {days.map((d) => {
-                          const meta = dayStatusMeta(d);
-                          const isToday = d.date === todayIso;
-                          const rec = recordsByDate.get(d.date);
-                          const isHoliday = holidays.has(d.date);
-                          const achieved = d.actualAchieved;
-                          return (
-                            <div
-                              key={d.id}
-                              className={`px-3 py-2.5 ${isToday ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-300' : d.isHistorical ? 'bg-white' : 'bg-slate-50/40'}`}
-                            >
-                              {/* Day header */}
-                              <div className="flex items-center justify-between gap-2 flex-wrap">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="text-[11px] font-black text-slate-800 whitespace-nowrap">
-                                    {d.dayName}
-                                  </span>
-                                  <span className="text-[10px] text-slate-500 font-bold whitespace-nowrap">
-                                    {fmtDate(d.date)}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  {d.dayType && (
-                                    <span className="text-[9px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1 py-0.5">
-                                      {DAY_TYPE_LABELS[d.dayType] || d.dayType}
-                                    </span>
-                                  )}
-                                  {isHoliday && (
-                                    <span className="text-[9px] font-bold text-purple-600 bg-purple-50 border border-purple-200 rounded px-1 py-0.5">
-                                      إجازة
-                                    </span>
-                                  )}
-                                  <span className={`text-[10px] font-black border rounded-lg px-2 py-0.5 ${meta.cls}`}>
-                                    {meta.label}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Three tracks */}
-                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
-                                {/* Spelling (from session record) */}
-                                <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-                                  <div className="flex items-center gap-1 font-black text-slate-500 mb-0.5">
-                                    <Sparkles className="w-3 h-3 text-emerald-600" /> الهجاء
-                                  </div>
-                                  {rec?.spelling ? (
-                                    <div className="text-slate-700 font-bold">
-                                      الدرس {rec.spelling.lessonNumber} — {rec.spelling.finalScore}%
-                                      <span className="block text-[9px] text-emerald-700">{rec.spelling.statusTag}</span>
-                                    </div>
-                                  ) : rec?.spellingDrillMinutes ? (
-                                    <div className="text-slate-700 font-bold">تدريب {rec.spellingDrillMinutes} د</div>
-                                  ) : (
-                                    <div className="text-slate-400">—</div>
-                                  )}
-                                </div>
-
-                                {/* Memorization */}
-                                <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-                                  <div className="flex items-center gap-1 font-black text-slate-500 mb-0.5">
-                                    <BookOpen className="w-3 h-3 text-blue-600" /> الحفظ
-                                  </div>
-                                  <div className="text-slate-700 font-bold leading-relaxed">
-                                    {achieved ? achieved.unit.displayLabel : d.targetUnit.displayLabel}
-                                  </div>
-                                  {achieved && (
-                                    <div className="text-[9px] text-emerald-700 font-bold mt-0.5 flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      {achieved.evaluation ? EVAL_LABELS[achieved.evaluation] : 'سُجّل'}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Revision */}
-                                <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-                                  <div className="flex items-center gap-1 font-black text-slate-500 mb-0.5">
-                                    <RotateCcw className="w-3 h-3 text-amber-600" /> المراجعة
-                                  </div>
-                                  {d.revisionDisplayLabel || rec?.revision ? (
-                                    <div className="text-slate-700 font-bold leading-relaxed">
-                                      {d.revisionDisplayLabel || `ص ${d.revisionPageStart}–${d.revisionPageEnd}`}
-                                      {rec?.revision && (
-                                        <span className="block text-[9px] text-amber-700">
-                                          تقييم {rec.revision.score}%
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[10px] min-w-[560px]">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-500 font-black border-b border-slate-200">
+                              <th className="text-right px-2 py-1.5 whitespace-nowrap">اليوم</th>
+                              <th className="text-right px-2 py-1.5">الحفظ (المقرر / الفعلي)</th>
+                              <th className="text-right px-2 py-1.5">المراجعة</th>
+                              {spellingTrackOn && (
+                                <th className="text-right px-2 py-1.5">التهجئة</th>
+                              )}
+                              <th className="text-right px-2 py-1.5 whitespace-nowrap">الحالة</th>
+                              <th className="text-right px-2 py-1.5">ملاحظات</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {days.map((d) => {
+                              const meta = dayStatusMeta(d);
+                              const isToday = d.date === todayIso;
+                              const rec = recordsByDate.get(d.date);
+                              const isHoliday = holidays.has(d.date);
+                              const achieved = d.actualAchieved;
+                              const locked = d.isHistorical || d.isLocked;
+                              return (
+                                <tr
+                                  key={d.id}
+                                  className={`align-top ${
+                                    isToday
+                                      ? 'bg-blue-50/70'
+                                      : locked
+                                        ? 'bg-emerald-50/40'
+                                        : d.date < todayIso
+                                          ? 'bg-slate-50/60'
+                                          : ''
+                                  }`}
+                                >
+                                  {/* Day / date */}
+                                  <td className="px-2 py-2 whitespace-nowrap">
+                                    <div className="font-black text-slate-800">{d.dayName}</div>
+                                    <div className="text-slate-500 font-bold">{fmtDate(d.date)}</div>
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                      {d.dayType && (
+                                        <span className="text-[8px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1">
+                                          {DAY_TYPE_LABELS[d.dayType] || d.dayType}
+                                        </span>
+                                      )}
+                                      {isHoliday && (
+                                        <span className="text-[8px] font-bold text-purple-600 bg-purple-50 border border-purple-200 rounded px-1">
+                                          إجازة
                                         </span>
                                       )}
                                     </div>
-                                  ) : (
-                                    <div className="text-slate-400">—</div>
-                                  )}
-                                </div>
-                              </div>
+                                  </td>
 
-                              {/* Notes / actual remarks */}
-                              {(achieved?.notes || rec?.teacherRemarks) && (
-                                <div className="mt-1.5 text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1">
-                                  {achieved?.notes || rec?.teacherRemarks}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                                  {/* Memorization: planned → actual */}
+                                  <td className="px-2 py-2">
+                                    <div className="font-bold text-slate-800 font-['Amiri',serif] leading-relaxed">
+                                      {d.targetUnit.displayLabel}
+                                    </div>
+                                    {achieved && (
+                                      <div className="text-[9px] text-emerald-700 font-bold mt-0.5 flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 shrink-0" />
+                                        <span className="font-['Amiri',serif]">
+                                          {achieved.unit.displayLabel}
+                                        </span>
+                                        <span>
+                                          {achieved.evaluation ? EVAL_LABELS[achieved.evaluation] : 'سُجّل'}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Revision */}
+                                  <td className="px-2 py-2">
+                                    {d.revisionDisplayLabel || d.revisionPageStart ? (
+                                      <div className="font-bold text-slate-700 leading-relaxed">
+                                        {d.revisionDisplayLabel ||
+                                          `ص ${d.revisionPageStart}–${d.revisionPageEnd}`}
+                                        {rec?.revision && (
+                                          <span className="block text-[9px] text-amber-700">
+                                            تقييم {rec.revision.score}%
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* Spelling — only when the track is subscribed */}
+                                  {spellingTrackOn && (
+                                    <td className="px-2 py-2">
+                                      {rec?.spelling ? (
+                                        <div className="font-bold text-slate-700">
+                                          الدرس {rec.spelling.lessonNumber} — {rec.spelling.finalScore}%
+                                          <span className="block text-[9px] text-emerald-700">
+                                            {rec.spelling.statusTag}
+                                          </span>
+                                        </div>
+                                      ) : d.spellingAssignment ? (
+                                        <div className="font-bold text-slate-600">
+                                          الدرس {d.spellingAssignment.lessonNumber}:{' '}
+                                          {d.spellingAssignment.title}
+                                          <span className="block text-[8px] text-slate-400">مقرر</span>
+                                        </div>
+                                      ) : rec?.spellingDrillMinutes ? (
+                                        <div className="font-bold text-slate-700">
+                                          تدريب {rec.spellingDrillMinutes} د
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </td>
+                                  )}
+
+                                  {/* Status */}
+                                  <td className="px-2 py-2 whitespace-nowrap">
+                                    <span
+                                      className={`inline-block text-[9px] font-black border rounded-lg px-1.5 py-0.5 ${meta.cls}`}
+                                    >
+                                      {meta.label}
+                                    </span>
+                                  </td>
+
+                                  {/* Notes */}
+                                  <td className="px-2 py-2">
+                                    {achieved?.notes || rec?.teacherRemarks ? (
+                                      <span className="text-slate-500">
+                                        {achieved?.notes || rec?.teacherRemarks}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-300">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
@@ -463,6 +662,44 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               <p className="text-center text-[10px] text-slate-400 font-bold pb-2">
                 الخطة ديناميكية — الأيام القادمة تعكس آخر إعادة جدولة بعد كل تسجيل إنجاز.
               </p>
+
+              {/* Official signature footer — teacher / Quran supervisor /
+                  complex director. Reads the tenant reportsConfig (signature
+                  image, footer text) which was previously write-only. */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="grid grid-cols-3 gap-3 text-center text-[10px] font-bold text-slate-700">
+                  <div>
+                    <div className="mb-6">معلم الحلقة</div>
+                    <div className="border-t border-slate-300 pt-1.5">
+                      {teacherName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-6">مشرف القرآن</div>
+                    <div className="border-t border-slate-300 pt-1.5">
+                      {activeTenant?.supervisorName || 'المشرف التربوي'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2">إدارة {activeTenant?.name || 'المجمع'}</div>
+                    {activeTenant?.reportsConfig?.signatureImageUrl ? (
+                      <img
+                        src={activeTenant.reportsConfig.signatureImageUrl}
+                        alt="التوقيع والختم"
+                        className="mx-auto h-10 object-contain"
+                      />
+                    ) : (
+                      <div className="h-6" />
+                    )}
+                    <div className="border-t border-slate-300 pt-1.5">التوقيع والختم</div>
+                  </div>
+                </div>
+                {activeTenant?.reportsConfig?.footerText && (
+                  <p className="text-center text-[9px] text-slate-400 font-bold mt-3 pt-2 border-t border-slate-100">
+                    {activeTenant.reportsConfig.footerText}
+                  </p>
+                )}
+              </div>
             </>
           )}
         </div>

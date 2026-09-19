@@ -17,7 +17,6 @@ interface StageConfigModalProps {
   onClose: () => void;
   onConfigUpdated?: () => void;
   initialSelectedId?: string;
-  planService?: any;
 }
 
 const ALL_DAYS = [
