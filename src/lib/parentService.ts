@@ -30,8 +30,9 @@ export function normalizePhone(rawPhone: string): string {
 
 /**
  * Searches for a student by registered parent phone or student ID from PostgreSQL
+ * Scoped to the supplied tenant so the query reaches the API with tenant context.
  */
-export async function queryStudentsForParent(searchTerm: string): Promise<ParentQueryResult> {
+export async function queryStudentsForParent(searchTerm: string, tenantId?: string): Promise<ParentQueryResult> {
   const cleanTerm = searchTerm.trim();
   if (!cleanTerm) {
     return {
@@ -49,7 +50,7 @@ export async function queryStudentsForParent(searchTerm: string): Promise<Parent
   let matchedStudents: Student[] = [];
 
   try {
-    const allStudents = await StudentRepository.getAll();
+    const allStudents = await StudentRepository.getAll(tenantId);
     matchedStudents = allStudents.filter(
       (s) =>
         normalizePhone(s.parentPhone || '') === phoneVariant1 ||
@@ -77,8 +78,8 @@ export async function queryStudentsForParent(searchTerm: string): Promise<Parent
 
   try {
     const [allRecords, allPlans] = await Promise.all([
-      DailyRecordRepository.getAll(),
-      AcademicRepository.getQuranPlans(),
+      DailyRecordRepository.getAll(tenantId),
+      AcademicRepository.getQuranPlans(tenantId),
     ]);
 
     for (const student of matchedStudents) {

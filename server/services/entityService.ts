@@ -720,6 +720,70 @@ export interface QueryOptions {
   tenantId?: string;
   queryParams?: Record<string, any>;
   isSuperAdmin?: boolean;
+  sessionUser?: any;
+}
+
+/**
+ * Builds the Saudi phone variants used to match students.parent_phone
+ * against the authenticated parent's phone regardless of stored format.
+ */
+function sessionPhoneVariants(rawPhone: any): string[] {
+  const raw = String(rawPhone || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const variants = new Set<string>([raw, digits]);
+  let core = digits;
+  if (core.startsWith('00966')) core = core.slice(5);
+  else if (core.startsWith('966')) core = core.slice(3);
+  if (core) {
+    variants.add(core);
+    if (!core.startsWith('0')) variants.add('0' + core);
+    variants.add('966' + (core.startsWith('0') ? core.slice(1) : core));
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+/**
+ * Row-level scope for authenticated parent/student sessions.
+ * Parents may only read rows linked to their own children through the
+ * established students.parent_phone = users.phone relationship; students may
+ * only read their own student record. Applies to the students table and to
+ * any table carrying a student_id column.
+ */
+function applySessionScope(
+  config: TableConfig,
+  conditions: string[],
+  params: any[],
+  paramIndex: number,
+  sessionUser: any
+): number {
+  const role = sessionUser?.role;
+  if (role !== 'parent' && role !== 'student') return paramIndex;
+
+  if (config.tableName === 'students') {
+    if (role === 'parent') {
+      conditions.push(`students.parent_phone = ANY($${paramIndex})`);
+      params.push(sessionPhoneVariants(sessionUser.phone));
+    } else {
+      conditions.push(`students.id = $${paramIndex}`);
+      params.push(sessionUser.studentId || sessionUser.student_id || '');
+    }
+    return paramIndex + 1;
+  }
+
+  if (config.allowedColumns.includes('student_id')) {
+    if (role === 'parent') {
+      conditions.push(
+        `${config.tableName}.student_id IN (SELECT id FROM students WHERE parent_phone = ANY($${paramIndex}))`
+      );
+      params.push(sessionPhoneVariants(sessionUser.phone));
+    } else {
+      conditions.push(`${config.tableName}.student_id = $${paramIndex}`);
+      params.push(sessionUser.studentId || sessionUser.student_id || '');
+    }
+    return paramIndex + 1;
+  }
+
+  return paramIndex;
 }
 
 /**
@@ -751,6 +815,9 @@ export async function findMany<T = any>(
       return [];
     }
   }
+
+  // 1.5 Session Row-Level Scope (parent/student can only see their own linked rows)
+  paramIndex = applySessionScope(config, conditions, params, paramIndex, options.sessionUser);
 
   // 2. Safe Dynamic Query Filters (matching allowed columns)
   for (const [rawKey, rawVal] of Object.entries(queryParams)) {
@@ -834,7 +901,8 @@ export async function findMany<T = any>(
 export async function findById<T = any>(
   collectionName: string,
   id: string,
-  tenantId?: string
+  tenantId?: string,
+  sessionUser?: any
 ): Promise<T | null> {
   const config = resolveTableConfig(collectionName);
   if (!config) {
@@ -845,9 +913,11 @@ export async function findById<T = any>(
   const params: any[] = [id];
 
   if (config.isTenantScoped && tenantId) {
-    conditions.push(`${config.tableName}.tenant_id = $2`);
+    conditions.push(`${config.tableName}.tenant_id = $${params.length + 1}`);
     params.push(tenantId);
   }
+
+  applySessionScope(config, conditions, params, params.length + 1, sessionUser);
 
   let selectClause = `SELECT * FROM ${config.tableName}`;
   if (config.tableName === 'users') {

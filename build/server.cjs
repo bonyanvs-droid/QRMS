@@ -29,37 +29,12 @@ var import_path3 = __toESM(require("path"), 1);
 var import_express9 = __toESM(require("express"), 1);
 var import_cookie_parser = __toESM(require("cookie-parser"), 1);
 
-// server/middleware/tenantContext.ts
-function extractTenantContext(req, res, next) {
-  const headerTenantId = req.headers["x-tenant-id"];
-  const queryTenantId = req.query.tenantId;
-  const headerOrgId = req.headers["x-organization-id"];
-  const queryOrgId = req.query.organizationId;
-  const rawTenantId = headerTenantId || queryTenantId;
-  const rawOrgId = headerOrgId || queryOrgId;
-  if (rawTenantId && typeof rawTenantId === "string") {
-    req.tenantId = rawTenantId.trim();
-  }
-  if (rawOrgId && typeof rawOrgId === "string") {
-    req.organizationId = rawOrgId.trim();
-  }
-  next();
-}
-function requireTenantContext(req, res, next) {
-  if (!req.tenantId) {
-    res.status(400).json({
-      ok: false,
-      error: "Tenant context is required for this operation. Please provide the X-Tenant-Id header or tenantId parameter."
-    });
-    return;
-  }
-  next();
-}
+// server/routes/authRoutes.ts
+var import_express = require("express");
+var import_crypto = __toESM(require("crypto"), 1);
 
-// server/middleware/remoteForwarder.ts
-var import_http = __toESM(require("http"), 1);
-var import_https = __toESM(require("https"), 1);
-var import_url = require("url");
+// server/config/db.ts
+var import_pg = __toESM(require("pg"), 1);
 
 // server/config/env.ts
 var import_dotenv = __toESM(require("dotenv"), 1);
@@ -97,7 +72,429 @@ var config = {
   }
 };
 
+// server/config/db.ts
+var { Pool } = import_pg.default;
+var pool = null;
+function getDbPool() {
+  if (!config.databaseUrl) {
+    return null;
+  }
+  if (!pool) {
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      max: 20,
+      idleTimeoutMillis: 3e4,
+      connectionTimeoutMillis: 5e3,
+      ssl: config.isProduction ? { rejectUnauthorized: false } : void 0
+    });
+    pool.on("error", (err) => {
+      console.error("Unexpected error on idle PostgreSQL client:", err);
+    });
+  }
+  return pool;
+}
+async function checkDbHealth() {
+  const currentPool = getDbPool();
+  if (!currentPool) {
+    return {
+      connected: false,
+      configured: false,
+      error: "DATABASE_URL environment variable is not configured"
+    };
+  }
+  const start = Date.now();
+  try {
+    const client = await currentPool.connect();
+    try {
+      await client.query("SELECT 1");
+      const latencyMs = Date.now() - start;
+      return {
+        connected: true,
+        configured: true,
+        latencyMs
+      };
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    return {
+      connected: false,
+      configured: true,
+      error: err?.message || "Failed to connect to PostgreSQL database"
+    };
+  }
+}
+
+// src/db/schema.ts
+function snakeToCamelCase(obj, parentKey) {
+  if (obj === null || obj === void 0) {
+    return obj;
+  }
+  if (obj instanceof Date) {
+    if (isNaN(obj.getTime())) {
+      return "";
+    }
+    const iso = obj.toISOString();
+    const isPureDateKey = parentKey && /(?:^|[a-z])(Date|date)$/.test(parentKey);
+    const isMidnight = iso.endsWith("T00:00:00.000Z");
+    if (isPureDateKey || isMidnight) {
+      return iso.split("T")[0];
+    }
+    return iso;
+  }
+  if (typeof obj !== "object") {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => snakeToCamelCase(item, parentKey));
+  }
+  const camelObj = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const camelKey = key.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
+    const isNumericField = [
+      "spellingPassingThreshold",
+      "passingScore",
+      "passingThreshold",
+      "baseTuition",
+      "discountAmount",
+      "scholarshipAmount",
+      "paidAmount",
+      "balanceDue",
+      "estimatedAmount",
+      "actualSpent",
+      "budget",
+      "overallProjectBudget"
+    ].includes(camelKey);
+    if (isNumericField && typeof value === "string" && value.trim() !== "" && !isNaN(Number(value))) {
+      camelObj[camelKey] = Number(value);
+    } else {
+      camelObj[camelKey] = snakeToCamelCase(value, camelKey);
+    }
+  }
+  return camelObj;
+}
+function camelToSnakeCase(obj) {
+  if (obj === null || obj === void 0 || typeof obj !== "object") {
+    return obj;
+  }
+  if (obj instanceof Date) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => camelToSnakeCase(item));
+  }
+  const snakeObj = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    snakeObj[snakeKey] = camelToSnakeCase(value);
+  }
+  return snakeObj;
+}
+
+// server/db/query.ts
+async function executeQuery(text, params = []) {
+  const pool2 = getDbPool();
+  if (!pool2) {
+    throw new Error("Database is not connected. Please set DATABASE_URL.");
+  }
+  const client = await pool2.connect();
+  try {
+    const res = await client.query(text, params);
+    return res.rows.map((row) => snakeToCamelCase(row));
+  } finally {
+    client.release();
+  }
+}
+async function executeQuerySingle(text, params = []) {
+  const rows = await executeQuery(text, params);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+// server/routes/authRoutes.ts
+var authRouter = (0, import_express.Router)();
+var activeSessions = /* @__PURE__ */ new Map();
+function getSessionUser(sessionId) {
+  if (!sessionId) return null;
+  const session = activeSessions.get(sessionId);
+  return session?.user ?? null;
+}
+function hashPasswordWithSalt(password) {
+  const salted = password.trim() + "_ghazzawi_salt_2026";
+  return import_crypto.default.createHash("sha256").update(salted).digest("hex");
+}
+function hashPasswordPlain(password) {
+  return import_crypto.default.createHash("sha256").update(password.trim()).digest("hex");
+}
+function verifyUserPassword(plainPassword, user) {
+  if (!plainPassword) return false;
+  const trimmed = plainPassword.trim();
+  const inputSaltedHash = hashPasswordWithSalt(trimmed);
+  const inputPlainHash = hashPasswordPlain(trimmed);
+  const storedHash = (user.passwordHash || user.password_hash || "").trim();
+  if (storedHash) {
+    if (storedHash.toLowerCase() === inputSaltedHash.toLowerCase()) return true;
+    if (storedHash.toLowerCase() === inputPlainHash.toLowerCase()) return true;
+    if (storedHash === trimmed) return true;
+    return false;
+  }
+  const validInitialPasswords = [
+    "Admin@123456",
+    "Admin@123",
+    "123456",
+    "admin123",
+    user.phone?.trim(),
+    user.nationalId?.trim(),
+    user.national_id?.trim()
+  ].filter(Boolean);
+  return validInitialPasswords.includes(trimmed);
+}
+function normalizeDigits(val) {
+  if (!val) return "";
+  return String(val).trim().replace(/\D/g, "");
+}
+async function findUsersByIdentifier(identifier) {
+  const trimmedIdentifier = identifier.trim();
+  const identDigits = normalizeDigits(trimmedIdentifier);
+  const identLower = trimmedIdentifier.toLowerCase();
+  const pool2 = getDbPool();
+  if (pool2) {
+    try {
+      const users = await executeQuery(`
+        SELECT 
+          u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
+          u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
+          u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
+          u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
+          u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
+          u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
+          u.is_archived
+        FROM users u
+        WHERE (u.is_archived = FALSE OR u.is_archived IS NULL)
+          AND (
+            u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
+            OR u.login_identifier = $1 OR u.id = $1
+          )
+      `, [trimmedIdentifier, identLower]);
+      if (users && users.length > 0) return users;
+    } catch (dbErr) {
+      console.warn("[AUTH] Direct DB query fallback to remote forwarder:", dbErr);
+    }
+  }
+  const user = config.devApiUsername;
+  const pass = config.devApiPassword;
+  const token = Buffer.from(user + ":" + pass).toString("base64");
+  const remoteUrl = config.devRemoteApiUrl || "https://qrms-dev.schoolscreen.sa/api";
+  const remoteMatches = [];
+  try {
+    const tenantsRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/tenants`, {
+      headers: {
+        Authorization: `Basic ${token}`,
+        Accept: "application/json"
+      }
+    });
+    let tenants = [];
+    if (tenantsRes.ok) {
+      const tenantsData = await tenantsRes.json();
+      tenants = tenantsData.data || [];
+    }
+    if (tenants.length === 0) {
+      tenants = [{ id: "tenant_1789350839237" }, { id: "tenant_1789346881267" }];
+    }
+    for (const t of tenants) {
+      const usersRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/users`, {
+        headers: {
+          Authorization: `Basic ${token}`,
+          Accept: "application/json",
+          "X-Tenant-Id": t.id
+        }
+      });
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        const userList = usersData.data || [];
+        for (const u of userList) {
+          const uPhone = (u.phone || "").trim();
+          const uPhoneDigits = normalizeDigits(uPhone);
+          const uNatId = (u.nationalId || u.national_id || "").trim();
+          const uEmail = (u.email || "").trim().toLowerCase();
+          const uLoginId = (u.loginIdentifier || u.login_identifier || "").trim().toLowerCase();
+          const uId = (u.id || "").trim().toLowerCase();
+          if (identDigits && uPhoneDigits) {
+            if (identDigits === uPhoneDigits) {
+              remoteMatches.push(u);
+              continue;
+            }
+            if (identDigits.startsWith("966") && identDigits.slice(3) === uPhoneDigits.replace(/^0/, "") || uPhoneDigits.startsWith("966") && uPhoneDigits.slice(3) === identDigits.replace(/^0/, "") || identDigits.replace(/^0/, "") === uPhoneDigits.replace(/^0/, "")) {
+              remoteMatches.push(u);
+              continue;
+            }
+          }
+          if (uNatId && (uNatId === trimmedIdentifier || identDigits && uNatId === identDigits)) {
+            remoteMatches.push(u);
+            continue;
+          }
+          if (uEmail && uEmail === identLower) {
+            remoteMatches.push(u);
+            continue;
+          }
+          if (uLoginId && uLoginId === identLower) {
+            remoteMatches.push(u);
+            continue;
+          }
+          if (uId && uId === identLower) {
+            remoteMatches.push(u);
+          }
+        }
+      }
+    }
+  } catch (remoteErr) {
+    console.error("[AUTH] Remote user fetch error:", remoteErr);
+  }
+  return remoteMatches;
+}
+authRouter.post("/login", async (req, res, next) => {
+  try {
+    const { identifier, password } = req.body;
+    if (!identifier || typeof identifier !== "string" || !identifier.trim()) {
+      res.status(400).json({ ok: false, error: "\u0645\u0639\u0631\u0641 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0637\u0644\u0648\u0628 (\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0637\u0646\u064A\u0629)." });
+      return;
+    }
+    if (!password || typeof password !== "string") {
+      res.status(400).json({ ok: false, error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629." });
+      return;
+    }
+    const candidates = await findUsersByIdentifier(identifier);
+    if (candidates.length === 0) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631." });
+      return;
+    }
+    const verified = candidates.filter((u) => verifyUserPassword(password, u));
+    const ROLE_PRIORITY = ["parent", "student"];
+    const userRow = [...verified].sort(
+      (a, b) => (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) - (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
+    )[0];
+    if (!userRow) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
+      return;
+    }
+    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
+      res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
+      return;
+    }
+    const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;
+    const { passwordHash, password_hash, ...safeUser } = userRow;
+    activeSessions.set(sessionId, {
+      user: safeUser,
+      createdAt: Date.now()
+    });
+    res.cookie("session_id", sessionId, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1e3
+    });
+    res.json({
+      ok: true,
+      user: safeUser,
+      token: sessionId,
+      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
+    });
+  } catch (err) {
+    console.error("[AUTH] Login unexpected error:", err);
+    next(err);
+  }
+});
+authRouter.get("/me", (req, res) => {
+  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!sessionId) {
+    res.status(401).json({ ok: false, error: "Not authenticated" });
+    return;
+  }
+  const session = activeSessions.get(sessionId);
+  if (!session || !session.user) {
+    res.status(401).json({ ok: false, error: "Session expired or invalid" });
+    return;
+  }
+  res.json({ ok: true, user: session.user });
+});
+authRouter.post("/logout", (req, res) => {
+  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (sessionId) {
+    activeSessions.delete(sessionId);
+  }
+  res.clearCookie("session_id", { path: "/" });
+  res.json({ ok: true, message: "Logged out successfully" });
+});
+authRouter.post("/update-password", async (req, res) => {
+  try {
+    const { userId, newPassword } = req.body;
+    if (!userId || !newPassword) {
+      res.status(400).json({ ok: false, error: "User ID and new password are required" });
+      return;
+    }
+    const newHash = hashPasswordWithSalt(newPassword);
+    const pool2 = getDbPool();
+    if (pool2) {
+      await pool2.query("UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = NOW() WHERE id = $2", [newHash, userId]);
+    }
+    for (const [sId, sess] of activeSessions.entries()) {
+      if (sess.user.id === userId) {
+        sess.user.mustChangePassword = false;
+        activeSessions.set(sId, sess);
+      }
+    }
+    res.json({ ok: true, message: "Password updated successfully" });
+  } catch (err) {
+    console.error("[AUTH] Update password error:", err);
+    res.status(500).json({ ok: false, error: "Failed to update password" });
+  }
+});
+
+// server/middleware/tenantContext.ts
+var CROSS_TENANT_ROLES = /* @__PURE__ */ new Set(["system_admin", "charity_supervisor"]);
+function extractTenantContext(req, res, next) {
+  const headerTenantId = req.headers["x-tenant-id"];
+  const queryTenantId = req.query.tenantId;
+  const headerOrgId = req.headers["x-organization-id"];
+  const queryOrgId = req.query.organizationId;
+  const rawTenantId = headerTenantId || queryTenantId;
+  const rawOrgId = headerOrgId || queryOrgId;
+  if (rawTenantId && typeof rawTenantId === "string") {
+    req.tenantId = rawTenantId.trim();
+  }
+  if (rawOrgId && typeof rawOrgId === "string") {
+    req.organizationId = rawOrgId.trim();
+  }
+  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  const sessionUser = sessionId ? getSessionUser(sessionId) : null;
+  if (sessionUser) {
+    req.sessionUser = sessionUser;
+    const sessionTenantId = sessionUser.tenantId || sessionUser.tenant_id;
+    if (sessionTenantId && !CROSS_TENANT_ROLES.has(sessionUser.role)) {
+      if (!req.tenantId) {
+        req.tenantId = String(sessionTenantId);
+      } else if (req.tenantId !== sessionTenantId) {
+        req.tenantScopeViolation = true;
+      }
+    }
+  }
+  next();
+}
+function requireTenantContext(req, res, next) {
+  if (!req.tenantId) {
+    res.status(400).json({
+      ok: false,
+      error: "Tenant context is required for this operation. Please provide the X-Tenant-Id header or tenantId parameter."
+    });
+    return;
+  }
+  next();
+}
+
 // server/middleware/remoteForwarder.ts
+var import_http = __toESM(require("http"), 1);
+var import_https = __toESM(require("https"), 1);
+var import_url = require("url");
 var httpsAgent = new import_https.default.Agent({
   keepAlive: true,
   keepAliveMsecs: 3e4,
@@ -319,61 +716,7 @@ function errorHandler(err, req, res, next) {
 }
 
 // server/routes/healthRoutes.ts
-var import_express = require("express");
-
-// server/config/db.ts
-var import_pg = __toESM(require("pg"), 1);
-var { Pool } = import_pg.default;
-var pool = null;
-function getDbPool() {
-  if (!config.databaseUrl) {
-    return null;
-  }
-  if (!pool) {
-    pool = new Pool({
-      connectionString: config.databaseUrl,
-      max: 20,
-      idleTimeoutMillis: 3e4,
-      connectionTimeoutMillis: 5e3,
-      ssl: config.isProduction ? { rejectUnauthorized: false } : void 0
-    });
-    pool.on("error", (err) => {
-      console.error("Unexpected error on idle PostgreSQL client:", err);
-    });
-  }
-  return pool;
-}
-async function checkDbHealth() {
-  const currentPool = getDbPool();
-  if (!currentPool) {
-    return {
-      connected: false,
-      configured: false,
-      error: "DATABASE_URL environment variable is not configured"
-    };
-  }
-  const start = Date.now();
-  try {
-    const client = await currentPool.connect();
-    try {
-      await client.query("SELECT 1");
-      const latencyMs = Date.now() - start;
-      return {
-        connected: true,
-        configured: true,
-        latencyMs
-      };
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    return {
-      connected: false,
-      configured: true,
-      error: err?.message || "Failed to connect to PostgreSQL database"
-    };
-  }
-}
+var import_express2 = require("express");
 
 // server/services/healthService.ts
 async function getSystemHealth() {
@@ -392,7 +735,7 @@ async function getSystemHealth() {
 }
 
 // server/routes/healthRoutes.ts
-var healthRouter = (0, import_express.Router)();
+var healthRouter = (0, import_express2.Router)();
 healthRouter.get("/", async (req, res, next) => {
   try {
     const health = await getSystemHealth();
@@ -404,92 +747,7 @@ healthRouter.get("/", async (req, res, next) => {
 });
 
 // server/routes/tenantRoutes.ts
-var import_express2 = require("express");
-
-// src/db/schema.ts
-function snakeToCamelCase(obj, parentKey) {
-  if (obj === null || obj === void 0) {
-    return obj;
-  }
-  if (obj instanceof Date) {
-    if (isNaN(obj.getTime())) {
-      return "";
-    }
-    const iso = obj.toISOString();
-    const isPureDateKey = parentKey && /(?:^|[a-z])(Date|date)$/.test(parentKey);
-    const isMidnight = iso.endsWith("T00:00:00.000Z");
-    if (isPureDateKey || isMidnight) {
-      return iso.split("T")[0];
-    }
-    return iso;
-  }
-  if (typeof obj !== "object") {
-    return obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map((item) => snakeToCamelCase(item, parentKey));
-  }
-  const camelObj = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const camelKey = key.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
-    const isNumericField = [
-      "spellingPassingThreshold",
-      "passingScore",
-      "passingThreshold",
-      "baseTuition",
-      "discountAmount",
-      "scholarshipAmount",
-      "paidAmount",
-      "balanceDue",
-      "estimatedAmount",
-      "actualSpent",
-      "budget",
-      "overallProjectBudget"
-    ].includes(camelKey);
-    if (isNumericField && typeof value === "string" && value.trim() !== "" && !isNaN(Number(value))) {
-      camelObj[camelKey] = Number(value);
-    } else {
-      camelObj[camelKey] = snakeToCamelCase(value, camelKey);
-    }
-  }
-  return camelObj;
-}
-function camelToSnakeCase(obj) {
-  if (obj === null || obj === void 0 || typeof obj !== "object") {
-    return obj;
-  }
-  if (obj instanceof Date) {
-    return obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map((item) => camelToSnakeCase(item));
-  }
-  const snakeObj = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-    snakeObj[snakeKey] = camelToSnakeCase(value);
-  }
-  return snakeObj;
-}
-
-// server/db/query.ts
-async function executeQuery(text, params = []) {
-  const pool2 = getDbPool();
-  if (!pool2) {
-    throw new Error("Database is not connected. Please set DATABASE_URL.");
-  }
-  const client = await pool2.connect();
-  try {
-    const res = await client.query(text, params);
-    return res.rows.map((row) => snakeToCamelCase(row));
-  } finally {
-    client.release();
-  }
-}
-async function executeQuerySingle(text, params = []) {
-  const rows = await executeQuery(text, params);
-  return rows.length > 0 ? rows[0] : null;
-}
+var import_express3 = require("express");
 
 // server/services/tenantService.ts
 async function getPublicTenants() {
@@ -1690,6 +1948,47 @@ function resolveTableConfig(collectionName) {
   }
   return ENTITY_TABLE_CONFIGS[canonicalName] || null;
 }
+function sessionPhoneVariants(rawPhone) {
+  const raw = String(rawPhone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  const variants = /* @__PURE__ */ new Set([raw, digits]);
+  let core = digits;
+  if (core.startsWith("00966")) core = core.slice(5);
+  else if (core.startsWith("966")) core = core.slice(3);
+  if (core) {
+    variants.add(core);
+    if (!core.startsWith("0")) variants.add("0" + core);
+    variants.add("966" + (core.startsWith("0") ? core.slice(1) : core));
+  }
+  return Array.from(variants).filter(Boolean);
+}
+function applySessionScope(config2, conditions, params, paramIndex, sessionUser) {
+  const role = sessionUser?.role;
+  if (role !== "parent" && role !== "student") return paramIndex;
+  if (config2.tableName === "students") {
+    if (role === "parent") {
+      conditions.push(`students.parent_phone = ANY($${paramIndex})`);
+      params.push(sessionPhoneVariants(sessionUser.phone));
+    } else {
+      conditions.push(`students.id = $${paramIndex}`);
+      params.push(sessionUser.studentId || sessionUser.student_id || "");
+    }
+    return paramIndex + 1;
+  }
+  if (config2.allowedColumns.includes("student_id")) {
+    if (role === "parent") {
+      conditions.push(
+        `${config2.tableName}.student_id IN (SELECT id FROM students WHERE parent_phone = ANY($${paramIndex}))`
+      );
+      params.push(sessionPhoneVariants(sessionUser.phone));
+    } else {
+      conditions.push(`${config2.tableName}.student_id = $${paramIndex}`);
+      params.push(sessionUser.studentId || sessionUser.student_id || "");
+    }
+    return paramIndex + 1;
+  }
+  return paramIndex;
+}
 async function findMany(collectionName, options = {}) {
   const config2 = resolveTableConfig(collectionName);
   if (!config2) {
@@ -1709,6 +2008,7 @@ async function findMany(collectionName, options = {}) {
       return [];
     }
   }
+  paramIndex = applySessionScope(config2, conditions, params, paramIndex, options.sessionUser);
   for (const [rawKey, rawVal] of Object.entries(queryParams)) {
     if (rawVal === void 0 || rawVal === null || rawVal === "") continue;
     if (rawKey === "tenantId" || rawKey === "limit" || rawKey === "offset" || rawKey === "page" || rawKey === "search") continue;
@@ -1770,7 +2070,7 @@ async function findMany(collectionName, options = {}) {
   const rows = await executeQuery(fullQuery, params);
   return (rows || []).map((r) => hydrateRow(config2, r));
 }
-async function findById(collectionName, id, tenantId) {
+async function findById(collectionName, id, tenantId, sessionUser) {
   const config2 = resolveTableConfig(collectionName);
   if (!config2) {
     throw new Error(`Unknown or unsupported collection: '${collectionName}'`);
@@ -1778,9 +2078,10 @@ async function findById(collectionName, id, tenantId) {
   const conditions = [`${config2.tableName}.${config2.primaryKey} = $1`];
   const params = [id];
   if (config2.isTenantScoped && tenantId) {
-    conditions.push(`${config2.tableName}.tenant_id = $2`);
+    conditions.push(`${config2.tableName}.tenant_id = $${params.length + 1}`);
     params.push(tenantId);
   }
+  applySessionScope(config2, conditions, params, params.length + 1, sessionUser);
   let selectClause = `SELECT * FROM ${config2.tableName}`;
   if (config2.tableName === "users") {
     selectClause = `
@@ -1958,7 +2259,7 @@ async function deleteRecord(collectionName, id, tenantId) {
 }
 
 // server/routes/tenantRoutes.ts
-var tenantRouter = (0, import_express2.Router)();
+var tenantRouter = (0, import_express3.Router)();
 tenantRouter.get("/", async (req, res, next) => {
   try {
     const tenants = await getPublicTenants();
@@ -2025,7 +2326,7 @@ tenantRouter.delete("/:id", async (req, res, next) => {
 });
 
 // server/routes/stageRoutes.ts
-var import_express3 = require("express");
+var import_express4 = require("express");
 
 // server/services/stageService.ts
 async function getActiveStages() {
@@ -2048,7 +2349,7 @@ async function getStageById(stageId) {
 }
 
 // server/routes/stageRoutes.ts
-var stageRouter = (0, import_express3.Router)();
+var stageRouter = (0, import_express4.Router)();
 stageRouter.get("/", async (req, res, next) => {
   try {
     const stages = await getActiveStages();
@@ -2081,7 +2382,7 @@ stageRouter.get("/:id", async (req, res, next) => {
 });
 
 // server/routes/userRoutes.ts
-var import_express4 = require("express");
+var import_express5 = require("express");
 
 // server/services/userService.ts
 var SAFE_USER_SELECT = `
@@ -2143,15 +2444,23 @@ async function getUserById(userId, tenantId) {
 }
 
 // server/routes/userRoutes.ts
-var userRouter = (0, import_express4.Router)();
+var userRouter = (0, import_express5.Router)();
 userRouter.get("/", requireTenantContext, async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
+    if (req.tenantScopeViolation) {
+      res.json({ ok: true, tenantId, count: 0, data: [] });
+      return;
+    }
     const filters = {};
     if (req.query.isArchived === "true") filters.isArchived = true;
     else if (req.query.isArchived === "false") filters.isArchived = false;
     if (typeof req.query.role === "string" && req.query.role) filters.role = req.query.role;
-    const users = await getUsersByTenant(tenantId, filters);
+    let users = await getUsersByTenant(tenantId, filters);
+    const suRole = req.sessionUser?.role;
+    if (suRole === "parent" || suRole === "student") {
+      users = users.filter((u) => u.id === req.sessionUser.id);
+    }
     res.json({
       ok: true,
       tenantId,
@@ -2164,6 +2473,15 @@ userRouter.get("/", requireTenantContext, async (req, res, next) => {
 });
 userRouter.get("/:id", async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(404).json({ ok: false, error: "User not found in the specified context" });
+      return;
+    }
+    const suRole = req.sessionUser?.role;
+    if ((suRole === "parent" || suRole === "student") && req.sessionUser.id !== req.params.id) {
+      res.status(404).json({ ok: false, error: "User not found in the specified context" });
+      return;
+    }
     const user = await getUserById(req.params.id, req.tenantId);
     if (!user) {
       res.status(404).json({
@@ -2182,6 +2500,14 @@ userRouter.get("/:id", async (req, res, next) => {
 });
 userRouter.post("/", async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
+    if (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student") {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const saved = await upsert("users", req.body, req.tenantId);
     res.json({
       ok: true,
@@ -2193,6 +2519,14 @@ userRouter.post("/", async (req, res, next) => {
 });
 userRouter.post("/bulk", async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
+    if (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student") {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const items = req.body.items || req.body.records || (Array.isArray(req.body) ? req.body : []);
     const result = await bulkUpsert("users", items, req.tenantId);
     res.json({
@@ -2206,6 +2540,14 @@ userRouter.post("/bulk", async (req, res, next) => {
 });
 userRouter.delete("/:id", async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
+    if (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student") {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const deleted = await deleteRecord("users", req.params.id, req.tenantId);
     if (!deleted) {
       res.status(404).json({
@@ -2220,243 +2562,6 @@ userRouter.delete("/:id", async (req, res, next) => {
     });
   } catch (err) {
     next(err);
-  }
-});
-
-// server/routes/authRoutes.ts
-var import_express5 = require("express");
-var import_crypto = __toESM(require("crypto"), 1);
-var authRouter = (0, import_express5.Router)();
-var activeSessions = /* @__PURE__ */ new Map();
-function hashPasswordWithSalt(password) {
-  const salted = password.trim() + "_ghazzawi_salt_2026";
-  return import_crypto.default.createHash("sha256").update(salted).digest("hex");
-}
-function hashPasswordPlain(password) {
-  return import_crypto.default.createHash("sha256").update(password.trim()).digest("hex");
-}
-function verifyUserPassword(plainPassword, user) {
-  if (!plainPassword) return false;
-  const trimmed = plainPassword.trim();
-  const inputSaltedHash = hashPasswordWithSalt(trimmed);
-  const inputPlainHash = hashPasswordPlain(trimmed);
-  const storedHash = (user.passwordHash || user.password_hash || "").trim();
-  if (storedHash) {
-    if (storedHash.toLowerCase() === inputSaltedHash.toLowerCase()) return true;
-    if (storedHash.toLowerCase() === inputPlainHash.toLowerCase()) return true;
-    if (storedHash === trimmed) return true;
-    return false;
-  }
-  const validInitialPasswords = [
-    "Admin@123456",
-    "Admin@123",
-    "123456",
-    "admin123",
-    user.phone?.trim(),
-    user.nationalId?.trim(),
-    user.national_id?.trim()
-  ].filter(Boolean);
-  return validInitialPasswords.includes(trimmed);
-}
-function normalizeDigits(val) {
-  if (!val) return "";
-  return String(val).trim().replace(/\D/g, "");
-}
-async function findUsersByIdentifier(identifier) {
-  const trimmedIdentifier = identifier.trim();
-  const identDigits = normalizeDigits(trimmedIdentifier);
-  const identLower = trimmedIdentifier.toLowerCase();
-  const pool2 = getDbPool();
-  if (pool2) {
-    try {
-      const users = await executeQuery(`
-        SELECT 
-          u.id, u.tenant_id, u.organization_id, u.name, u.full_name, u.phone, u.email,
-          u.national_id, u.login_identifier, u.password_hash, u.role, u.staff_role, u.halaqah_id,
-          u.stage_id, u.student_id, u.teacher_id, u.student_ids, u.supervision_mode,
-          u.is_active, u.must_change_password, u.permission_mode, u.role_permissions_overrides,
-          u.custom_permissions, u.temporary_custom_permissions, u.supervisor_scope,
-          u.assigned_stage_ids, u.assigned_halaqah_ids, u.is_all_halaqahs, u.delegations,
-          u.is_archived
-        FROM users u
-        WHERE (u.is_archived = FALSE OR u.is_archived IS NULL)
-          AND (
-            u.phone = $1 OR u.national_id = $1 OR LOWER(u.email) = $2 
-            OR u.login_identifier = $1 OR u.id = $1
-          )
-      `, [trimmedIdentifier, identLower]);
-      if (users && users.length > 0) return users;
-    } catch (dbErr) {
-      console.warn("[AUTH] Direct DB query fallback to remote forwarder:", dbErr);
-    }
-  }
-  const user = config.devApiUsername;
-  const pass = config.devApiPassword;
-  const token = Buffer.from(user + ":" + pass).toString("base64");
-  const remoteUrl = config.devRemoteApiUrl || "https://qrms-dev.schoolscreen.sa/api";
-  const remoteMatches = [];
-  try {
-    const tenantsRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/tenants`, {
-      headers: {
-        Authorization: `Basic ${token}`,
-        Accept: "application/json"
-      }
-    });
-    let tenants = [];
-    if (tenantsRes.ok) {
-      const tenantsData = await tenantsRes.json();
-      tenants = tenantsData.data || [];
-    }
-    if (tenants.length === 0) {
-      tenants = [{ id: "tenant_1789350839237" }, { id: "tenant_1789346881267" }];
-    }
-    for (const t of tenants) {
-      const usersRes = await fetch(`${remoteUrl.replace(/\/+$/, "")}/users`, {
-        headers: {
-          Authorization: `Basic ${token}`,
-          Accept: "application/json",
-          "X-Tenant-Id": t.id
-        }
-      });
-      if (usersRes.ok) {
-        const usersData = await usersRes.json();
-        const userList = usersData.data || [];
-        for (const u of userList) {
-          const uPhone = (u.phone || "").trim();
-          const uPhoneDigits = normalizeDigits(uPhone);
-          const uNatId = (u.nationalId || u.national_id || "").trim();
-          const uEmail = (u.email || "").trim().toLowerCase();
-          const uLoginId = (u.loginIdentifier || u.login_identifier || "").trim().toLowerCase();
-          const uId = (u.id || "").trim().toLowerCase();
-          if (identDigits && uPhoneDigits) {
-            if (identDigits === uPhoneDigits) {
-              remoteMatches.push(u);
-              continue;
-            }
-            if (identDigits.startsWith("966") && identDigits.slice(3) === uPhoneDigits.replace(/^0/, "") || uPhoneDigits.startsWith("966") && uPhoneDigits.slice(3) === identDigits.replace(/^0/, "") || identDigits.replace(/^0/, "") === uPhoneDigits.replace(/^0/, "")) {
-              remoteMatches.push(u);
-              continue;
-            }
-          }
-          if (uNatId && (uNatId === trimmedIdentifier || identDigits && uNatId === identDigits)) {
-            remoteMatches.push(u);
-            continue;
-          }
-          if (uEmail && uEmail === identLower) {
-            remoteMatches.push(u);
-            continue;
-          }
-          if (uLoginId && uLoginId === identLower) {
-            remoteMatches.push(u);
-            continue;
-          }
-          if (uId && uId === identLower) {
-            remoteMatches.push(u);
-          }
-        }
-      }
-    }
-  } catch (remoteErr) {
-    console.error("[AUTH] Remote user fetch error:", remoteErr);
-  }
-  return remoteMatches;
-}
-authRouter.post("/login", async (req, res, next) => {
-  try {
-    const { identifier, password } = req.body;
-    if (!identifier || typeof identifier !== "string" || !identifier.trim()) {
-      res.status(400).json({ ok: false, error: "\u0645\u0639\u0631\u0641 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0637\u0644\u0648\u0628 (\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0637\u0646\u064A\u0629)." });
-      return;
-    }
-    if (!password || typeof password !== "string") {
-      res.status(400).json({ ok: false, error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629." });
-      return;
-    }
-    const candidates = await findUsersByIdentifier(identifier);
-    if (candidates.length === 0) {
-      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631." });
-      return;
-    }
-    const verified = candidates.filter((u) => verifyUserPassword(password, u));
-    const ROLE_PRIORITY = ["parent", "student"];
-    const userRow = [...verified].sort(
-      (a, b) => (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) - (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
-    )[0];
-    if (!userRow) {
-      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
-      return;
-    }
-    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
-      res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
-      return;
-    }
-    const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;
-    const { passwordHash, password_hash, ...safeUser } = userRow;
-    activeSessions.set(sessionId, {
-      user: safeUser,
-      createdAt: Date.now()
-    });
-    res.cookie("session_id", sessionId, {
-      httpOnly: true,
-      secure: config.isProduction,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 * 1e3
-    });
-    res.json({
-      ok: true,
-      user: safeUser,
-      token: sessionId,
-      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
-    });
-  } catch (err) {
-    console.error("[AUTH] Login unexpected error:", err);
-    next(err);
-  }
-});
-authRouter.get("/me", (req, res) => {
-  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (!sessionId) {
-    res.status(401).json({ ok: false, error: "Not authenticated" });
-    return;
-  }
-  const session = activeSessions.get(sessionId);
-  if (!session || !session.user) {
-    res.status(401).json({ ok: false, error: "Session expired or invalid" });
-    return;
-  }
-  res.json({ ok: true, user: session.user });
-});
-authRouter.post("/logout", (req, res) => {
-  const sessionId = req.cookies?.session_id || req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (sessionId) {
-    activeSessions.delete(sessionId);
-  }
-  res.clearCookie("session_id", { path: "/" });
-  res.json({ ok: true, message: "Logged out successfully" });
-});
-authRouter.post("/update-password", async (req, res) => {
-  try {
-    const { userId, newPassword } = req.body;
-    if (!userId || !newPassword) {
-      res.status(400).json({ ok: false, error: "User ID and new password are required" });
-      return;
-    }
-    const newHash = hashPasswordWithSalt(newPassword);
-    const pool2 = getDbPool();
-    if (pool2) {
-      await pool2.query("UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = NOW() WHERE id = $2", [newHash, userId]);
-    }
-    for (const [sId, sess] of activeSessions.entries()) {
-      if (sess.user.id === userId) {
-        sess.user.mustChangePassword = false;
-        activeSessions.set(sId, sess);
-      }
-    }
-    res.json({ ok: true, message: "Password updated successfully" });
-  } catch (err) {
-    console.error("[AUTH] Update password error:", err);
-    res.status(500).json({ ok: false, error: "Failed to update password" });
   }
 });
 
@@ -2488,10 +2593,15 @@ entityRouter.get("/:collection", validateCollection, async (req, res, next) => {
     const collection = req.params.collection;
     const tenantId = req.tenantId;
     const isSuperAdmin = req.isSuperAdmin;
+    if (req.tenantScopeViolation) {
+      res.json({ ok: true, count: 0, data: [] });
+      return;
+    }
     const items = await findMany(collection, {
       tenantId,
       queryParams: req.query,
-      isSuperAdmin
+      isSuperAdmin,
+      sessionUser: req.sessionUser
     });
     res.json({
       ok: true,
@@ -2506,7 +2616,14 @@ entityRouter.get("/:collection/:id", validateCollection, async (req, res, next) 
   try {
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
-    const item = await findById(collection, id, tenantId);
+    if (req.tenantScopeViolation) {
+      res.status(404).json({
+        ok: false,
+        error: `Record not found in '${collection}' with ID '${id}'`
+      });
+      return;
+    }
+    const item = await findById(collection, id, tenantId, req.sessionUser);
     if (!item) {
       res.status(404).json({
         ok: false,
@@ -2524,8 +2641,17 @@ entityRouter.get("/:collection/:id", validateCollection, async (req, res, next) 
 });
 entityRouter.post("/:collection/bulk", validateCollection, async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
     const collection = req.params.collection;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student")) {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const items = req.body.items || req.body.records || (Array.isArray(req.body) ? req.body : []);
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({
@@ -2546,8 +2672,17 @@ entityRouter.post("/:collection/bulk", validateCollection, async (req, res, next
 });
 entityRouter.post("/:collection", validateCollection, async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
     const collection = req.params.collection;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student")) {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const payload = req.body;
     if (!payload || typeof payload !== "object") {
       res.status(400).json({
@@ -2567,8 +2702,17 @@ entityRouter.post("/:collection", validateCollection, async (req, res, next) => 
 });
 entityRouter.put("/:collection/:id", validateCollection, async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student")) {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const payload = { ...req.body, id };
     const saved = await upsert(collection, payload, tenantId);
     res.json({
@@ -2581,8 +2725,17 @@ entityRouter.put("/:collection/:id", validateCollection, async (req, res, next) 
 });
 entityRouter.delete("/:collection/:id", validateCollection, async (req, res, next) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: "Tenant scope violation: request rejected." });
+      return;
+    }
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === "parent" || req.sessionUser?.role === "student")) {
+      res.status(403).json({ ok: false, error: "This role does not have write access." });
+      return;
+    }
     const success = await deleteRecord(collection, id, tenantId);
     if (!success) {
       res.status(404).json({

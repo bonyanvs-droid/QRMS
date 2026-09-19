@@ -14,6 +14,17 @@ interface SessionData {
 const activeSessions = new Map<string, SessionData>();
 
 /**
+ * Resolves the authenticated user bound to a session id (cookie or bearer token).
+ * Returns null when no valid session exists (e.g. unauthenticated requests or
+ * sessions created on a different node in remote-proxy topologies).
+ */
+export function getSessionUser(sessionId: string | undefined | null): any | null {
+  if (!sessionId) return null;
+  const session = activeSessions.get(sessionId);
+  return session?.user ?? null;
+}
+
+/**
  * Computes salted SHA-256 hash
  */
 function hashPasswordWithSalt(password: string): string {

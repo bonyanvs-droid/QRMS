@@ -45,10 +45,18 @@ entityRouter.get('/:collection', validateCollection, async (req: Request, res: R
     const tenantId = req.tenantId;
     const isSuperAdmin = req.isSuperAdmin;
 
+    // Authenticated user attempted to query a tenant other than their own —
+    // return an empty set rather than another tenant's data.
+    if (req.tenantScopeViolation) {
+      res.json({ ok: true, count: 0, data: [] });
+      return;
+    }
+
     const items = await findMany(collection, {
       tenantId,
       queryParams: req.query as Record<string, any>,
       isSuperAdmin,
+      sessionUser: req.sessionUser,
     });
 
     res.json({
@@ -70,7 +78,15 @@ entityRouter.get('/:collection/:id', validateCollection, async (req: Request, re
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
 
-    const item = await findById(collection, id, tenantId);
+    if (req.tenantScopeViolation) {
+      res.status(404).json({
+        ok: false,
+        error: `Record not found in '${collection}' with ID '${id}'`,
+      });
+      return;
+    }
+
+    const item = await findById(collection, id, tenantId, req.sessionUser);
     if (!item) {
       res.status(404).json({
         ok: false,
@@ -94,8 +110,17 @@ entityRouter.get('/:collection/:id', validateCollection, async (req: Request, re
  */
 entityRouter.post('/:collection/bulk', validateCollection, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: 'Tenant scope violation: request rejected.' });
+      return;
+    }
     const collection = req.params.collection;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === 'parent' || req.sessionUser?.role === 'student')) {
+      res.status(403).json({ ok: false, error: 'This role does not have write access.' });
+      return;
+    }
     const items = req.body.items || req.body.records || (Array.isArray(req.body) ? req.body : []);
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -123,8 +148,17 @@ entityRouter.post('/:collection/bulk', validateCollection, async (req: Request, 
  */
 entityRouter.post('/:collection', validateCollection, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: 'Tenant scope violation: request rejected.' });
+      return;
+    }
     const collection = req.params.collection;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === 'parent' || req.sessionUser?.role === 'student')) {
+      res.status(403).json({ ok: false, error: 'This role does not have write access.' });
+      return;
+    }
     const payload = req.body;
 
     if (!payload || typeof payload !== 'object') {
@@ -151,8 +185,17 @@ entityRouter.post('/:collection', validateCollection, async (req: Request, res: 
  */
 entityRouter.put('/:collection/:id', validateCollection, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: 'Tenant scope violation: request rejected.' });
+      return;
+    }
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === 'parent' || req.sessionUser?.role === 'student')) {
+      res.status(403).json({ ok: false, error: 'This role does not have write access.' });
+      return;
+    }
     const payload = { ...req.body, id };
 
     const saved = await upsert(collection, payload, tenantId);
@@ -171,8 +214,17 @@ entityRouter.put('/:collection/:id', validateCollection, async (req: Request, re
  */
 entityRouter.delete('/:collection/:id', validateCollection, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.tenantScopeViolation) {
+      res.status(403).json({ ok: false, error: 'Tenant scope violation: request rejected.' });
+      return;
+    }
     const { collection, id } = req.params;
     const tenantId = req.tenantId;
+    const cfg = resolveTableConfig(collection);
+    if (cfg?.isTenantScoped && (req.sessionUser?.role === 'parent' || req.sessionUser?.role === 'student')) {
+      res.status(403).json({ ok: false, error: 'This role does not have write access.' });
+      return;
+    }
 
     const success = await deleteRecord(collection, id, tenantId);
     if (!success) {

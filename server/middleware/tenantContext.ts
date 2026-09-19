@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { getSessionUser } from '../routes/authRoutes';
 
 declare global {
   namespace Express {
@@ -6,9 +7,14 @@ declare global {
       tenantId?: string;
       organizationId?: string;
       isSuperAdmin?: boolean;
+      sessionUser?: any;
+      tenantScopeViolation?: boolean;
     }
   }
 }
+
+// Roles that are legitimately allowed to operate across tenant boundaries
+const CROSS_TENANT_ROLES = new Set(['system_admin', 'charity_supervisor']);
 
 /**
  * Extracts and validates tenant and organization context from request headers or query.
@@ -30,6 +36,27 @@ export function extractTenantContext(req: Request, res: Response, next: NextFunc
 
   if (rawOrgId && typeof rawOrgId === 'string') {
     req.organizationId = rawOrgId.trim();
+  }
+
+  // Bind tenant scope to the authenticated session so a client cannot spoof
+  // another tenant via X-Tenant-Id / ?tenantId=. When the session user's tenant
+  // is known and the role is tenant-bound:
+  //  - a missing tenant is auto-filled from the session (safe default), and
+  //  - a conflicting tenant is flagged as a scope violation for route handlers.
+  const sessionId =
+    req.cookies?.session_id ||
+    req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  const sessionUser = sessionId ? getSessionUser(sessionId) : null;
+  if (sessionUser) {
+    req.sessionUser = sessionUser;
+    const sessionTenantId = sessionUser.tenantId || sessionUser.tenant_id;
+    if (sessionTenantId && !CROSS_TENANT_ROLES.has(sessionUser.role)) {
+      if (!req.tenantId) {
+        req.tenantId = String(sessionTenantId);
+      } else if (req.tenantId !== sessionTenantId) {
+        req.tenantScopeViolation = true;
+      }
+    }
   }
 
   next();

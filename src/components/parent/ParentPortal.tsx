@@ -65,6 +65,7 @@ export const ParentPortal: React.FC = () => {
     getStudentQuranPlans,
     educationalPlan,
     activeTenant,
+    activeTenantId,
     remedialPlans,
     tracks,
     trackNominations,
@@ -148,8 +149,11 @@ export const ParentPortal: React.FC = () => {
         setSelectedStudentId((prev) => (prev && inMemoryMatches.some((s) => s.id === prev) ? prev : inMemoryMatches[0].id));
       }
 
-      // Query service (Firestore / Seed fallback)
-      const result = await queryStudentsForParent(targetPhone);
+      // Query service scoped to the authenticated parent's tenant
+      const result = await queryStudentsForParent(
+        targetPhone,
+        effectiveUser?.tenantId || activeTenantId
+      );
       if (result.success && result.students.length > 0) {
         setStudents(result.students);
         setRecordsMap(result.records);

@@ -230,6 +230,7 @@ import {
   DEFAULT_FINANCE_SETTINGS,
 } from '../lib/financeService';
 import { recordAuditLog } from '../lib/auditService';
+import { apiClient } from '../lib/api/apiClient';
 import { calculateDistanceMeters, isRegularAttendanceDay, getLocalDateString, isRecordForDate } from '../utils/geoAttendance';
 import { getHalaqahActiveDays } from '../utils/scheduleCalculator';
 import { StudentQuranPlan } from '../quran/types/plan';
@@ -1144,6 +1145,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const activeTenant = useMemo(() => {
     return tenants.find((t) => t.id === activeTenantId) || tenants[0] || null;
   }, [tenants, activeTenantId]);
+
+  // Keep the API client's tenant context synchronized with the active tenant so
+  // every request carries X-Tenant-Id. Cross-tenant roles keep a null context
+  // and continue passing tenant explicitly per query to preserve global views.
+  useEffect(() => {
+    const isCrossTenantRole =
+      currentUser?.role === 'system_admin' || (currentUser?.role as any) === 'charity_supervisor';
+    apiClient.setTenantContext(isCrossTenantRole ? null : activeTenantId || null);
+  }, [activeTenantId, currentUser?.role]);
 
   const resolvedIdentity = useMemo(() => {
     return resolveContextIdentity({
@@ -4033,7 +4043,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (active) return active;
 
       // Query database if not found in current memory state
-      const fromDb = await getQuranPlansForStudentFromDb(studentId);
+      const fromDb = await getQuranPlansForStudentFromDb(studentId, activeTenantId);
       if (fromDb.length > 0) {
         if (planId) {
           const matched = fromDb.find((p) => p.id === planId);
@@ -4043,7 +4053,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return null;
     },
-    [quranPlans, getActiveStudentQuranPlan]
+    [quranPlans, getActiveStudentQuranPlan, activeTenantId]
   );
 
   const createStudentQuranPlan = useCallback(
@@ -4201,7 +4211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Locate plan — always recalculate on top of the latest persisted copy
       // from PostgreSQL so a stale in-memory state can never overwrite a newer
       // plan (last recorded achievement = source of truth).
-      let targetPlan = await getQuranPlanByIdFromDb(params.planId).catch(() => null);
+      let targetPlan = await getQuranPlanByIdFromDb(params.planId, activeTenantId).catch(() => null);
       if (!targetPlan) {
         targetPlan = quranPlans.find((p) => p.id === params.planId) || null;
       }
@@ -4287,7 +4297,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return updatedPlan;
     },
-    [quranPlans, currentActor, saveStudentQuranPlan, students, updateStudent, recordDailySession, integrationManager]
+    [quranPlans, currentActor, saveStudentQuranPlan, students, updateStudent, recordDailySession, integrationManager, activeTenantId]
   );
 
   // -------------------------------------------------------------

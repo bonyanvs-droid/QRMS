@@ -90,7 +90,7 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
     "url": "index.html",
-    "revision": "c9dd670babb5e411ccad0e0649bdadae"
+    "revision": "774b37fb49ca177ebb974f7cef1be774"
   }, {
     "url": "baraem-logo.png",
     "revision": "4bf6076164ca208370920aac94f60872"
@@ -122,7 +122,7 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/vendor-common-C1kVHX9k.js",
     "revision": null
   }, {
-    "url": "assets/index-WSE-H3E7.js",
+    "url": "assets/index-DALFUBDK.js",
     "revision": null
   }, {
     "url": "assets/index-BYq1EFHs.css",

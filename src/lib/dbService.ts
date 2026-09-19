@@ -651,13 +651,13 @@ export async function saveQuranPlanToDb(plan: StudentQuranPlan, _actor?: any): P
   await AcademicRepository.saveQuranPlan(plan);
 }
 
-export async function getQuranPlansForStudentFromDb(studentId: string): Promise<StudentQuranPlan[]> {
-  const plans = await AcademicRepository.getQuranPlans();
+export async function getQuranPlansForStudentFromDb(studentId: string, tenantId?: string): Promise<StudentQuranPlan[]> {
+  const plans = await AcademicRepository.getQuranPlans(tenantId);
   return plans.filter((p) => p.studentId === studentId);
 }
 
-export async function getQuranPlanByIdFromDb(planId: string): Promise<StudentQuranPlan | null> {
-  const plans = await AcademicRepository.getQuranPlans();
+export async function getQuranPlanByIdFromDb(planId: string, tenantId?: string): Promise<StudentQuranPlan | null> {
+  const plans = await AcademicRepository.getQuranPlans(tenantId);
   return plans.find((p) => p.id === planId) || null;
 }
 
