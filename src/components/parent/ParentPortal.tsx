@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { queryStudentsForParent, normalizePhone } from '../../lib/parentService';
 import { Student, DailySessionRecord, StudentBadge, Halaqah } from '../../types';
 import { StudentQuranPlan } from '../../quran/types/plan';
-import { normalizeStudentQuranPlan } from '../../quran/utils/planNormalizer';
+import { normalizeStudentQuranPlan, selectActiveStudentPlan } from '../../quran/utils/planNormalizer';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
 import { SEED_BARAEM_STUDENTS } from '../../data/studentsRoster';
 import { COMPREHENSIVE_HALAQAHS } from '../../data/multiStageRoster';
@@ -245,10 +245,11 @@ export const ParentPortal: React.FC = () => {
     if (fromCtx) {
       found = fromCtx;
     } else if (parentQuranPlans[selectedStudent.id]?.length > 0) {
-      const list = parentQuranPlans[selectedStudent.id];
-      found = list.find((p) => p.isCurrentActive || p.status === 'active') || list[0];
+      found = selectActiveStudentPlan(parentQuranPlans[selectedStudent.id]);
     } else {
-      found = quranPlans.find((p) => p.studentId === selectedStudent.id) || null;
+      found = selectActiveStudentPlan(
+        quranPlans.filter((p) => p.studentId === selectedStudent.id)
+      );
     }
     return found ? normalizeStudentQuranPlan(found, selectedStudent) : null;
   }, [selectedStudent, getActiveStudentQuranPlan, parentQuranPlans, quranPlans]);

@@ -4,6 +4,7 @@ import { StudentPlanDashboard } from '../quran/StudentPlanDashboard';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { OnlineModeStudentWidget } from './OnlineModeStudentWidget';
 import { TrackNominationCardModal } from '../common/TrackNominationCardModal';
+import { selectActiveStudentPlan } from '../../quran/utils/planNormalizer';
 import { TrackNomination, Student } from '../../types';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import {
@@ -64,7 +65,11 @@ export const StudentPortalView: React.FC = () => {
   // Resolve plan
   const plan = useMemo(() => {
     if (!student) return null;
-    return (quranPlans || []).find((p) => p.studentId === student.id) || null;
+    // Canonical active-plan selection — never "first row found"; archived
+    // plans are excluded and populated payloads win over gutted duplicates.
+    return selectActiveStudentPlan(
+      (quranPlans || []).filter((p) => p.studentId === student.id)
+    );
   }, [student, quranPlans]);
 
   const halaqah = useMemo(() => {

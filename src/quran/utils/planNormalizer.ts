@@ -88,6 +88,32 @@ export function normalizeQuranPosition(rawPos: any, fallbackSurah = 114, fallbac
 }
 
 /**
+ * Selects THE active plan for a student from a candidate list — the single
+ * canonical pick used by every view (never "first row found").
+ *
+ * Preference order:
+ *   1. active/at_risk plan WITH generated daily items (fully persisted)
+ *   2. any active/at_risk plan
+ *   3. a completed plan with data (displayable history)
+ *   4. null — archived/inactive plans are never returned
+ */
+export function selectActiveStudentPlan(
+  plans: Array<StudentQuranPlan | null | undefined>
+): StudentQuranPlan | null {
+  const candidates = plans.filter((p): p is StudentQuranPlan => !!p);
+  const isActive = (p: StudentQuranPlan) =>
+    p.isCurrentActive === true || p.status === 'active' || p.status === 'at_risk';
+  const hasData = (p: StudentQuranPlan) =>
+    (p.generatedPlan?.dailyPlans?.length ?? 0) > 0;
+  return (
+    candidates.find((p) => isActive(p) && hasData(p)) ||
+    candidates.find(isActive) ||
+    candidates.find((p) => p.status === 'completed' && hasData(p)) ||
+    null
+  );
+}
+
+/**
  * Normalizes any StudentQuranPlan (including legacy Firestore documents or incomplete stubs)
  * to ensure all fields, coordinates, and positions are strictly defined and type-safe.
  */

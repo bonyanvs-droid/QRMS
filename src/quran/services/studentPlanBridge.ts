@@ -1,5 +1,9 @@
-import { Student, AcademicYearConfig } from '../../types';
+import { Student, AcademicYearConfig, DailySessionRecord } from '../../types';
 import { QuranPosition, Surah, IQuranDataProvider } from '../types';
+import {
+  getSurahAyahsCount,
+  getSurahsByDirection,
+} from '../../utils/quranMetadata';
 import {
   StudentQuranPlan,
   PlanDirection,
@@ -64,6 +68,8 @@ export interface CreateRealStudentPlanParams {
   manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
   customTargetStart?: QuranPosition;
   customTargetEnd?: QuranPosition;
+  /** Daily session records — the canonical audit trail of actual achievement */
+  sessionRecords?: DailySessionRecord[];
   provider: IQuranDataProvider;
   memorizationEngine: QuranMemorizationPlanningEngine;
 }
@@ -108,6 +114,79 @@ export function matchSurahByName(
     if (sNormWithoutAl === inputWithoutAl) return s;
   }
 
+  // 3. English/transliteration name fallback (student records may store "Al-Faatiha")
+  const inputLower = rawName.trim().toLowerCase().replace(/^surah\s+/, '').replace(/[\s\-_]+/g, '');
+  if (inputLower) {
+    for (const s of surahs) {
+      const sNameLower = (s.name || '').toLowerCase().replace(/[\s\-_]+/g, '');
+      const sNameWithoutAl = sNameLower.replace(/^al/, '');
+      const inputWithoutAlEn = inputLower.replace(/^al/, '');
+      if (sNameLower === inputLower || (inputWithoutAlEn && sNameWithoutAl === inputWithoutAlEn)) {
+        return s;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the LAST ACTUAL ACHIEVED position for a student.
+ *
+ * Canonical order:
+ *   1. Latest memorization session record (surahTo/ayahTo) — the audit trail
+ *      written by teachers during daily recording.
+ *   2. student.currentSurah/currentAyah — mirrors the same pointer.
+ *
+ * Returns null when nothing was ever recorded — the plan then starts from
+ * the stage-config default, never from a guessed position.
+ */
+export function resolveLastAchievedPosition(
+  student: { id?: string; currentSurah?: string; currentAyah?: number },
+  sessionRecords: DailySessionRecord[] | undefined,
+  surahs: Surah[]
+): QuranPosition | null {
+  const latestMemRec = (sessionRecords || [])
+    .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
+    .sort((a, b) => `${b.date}${b.id || ''}`.localeCompare(`${a.date}${a.id || ''}`))[0];
+
+  if (latestMemRec) {
+    const surah = matchSurahByName(latestMemRec.memorization!.surahTo, surahs);
+    if (surah) {
+      const ayah = Number(latestMemRec.memorization!.ayahTo) || 1;
+      return {
+        surahNumber: surah.surahNumber,
+        ayahNumber: Math.min(Math.max(ayah, 1), surah.ayahCount),
+      };
+    }
+  }
+
+  const res = convertStudentToQuranPosition(student, surahs);
+  return res.isValid && res.position ? res.position : null;
+}
+
+/**
+ * Returns the FIRST position AFTER the last achieved one in the plan's
+ * governed direction — e.g. achieved through Al-Faatiha:7 backward →
+ * next is Al-Faatiha:8, achieved through a surah's last ayah →
+ * next surah in direction ayah 1. Returns null past the final surah.
+ */
+export function nextPositionInDirection(
+  position: QuranPosition,
+  direction: PlanDirection,
+  surahs: Surah[]
+): QuranPosition | null {
+  const surah = surahs.find((s) => s.surahNumber === position.surahNumber);
+  const ayahCount = surah?.ayahCount ?? getSurahAyahsCount(position.surahNumber);
+  if (ayahCount > 0 && position.ayahNumber < ayahCount) {
+    return { surahNumber: position.surahNumber, ayahNumber: position.ayahNumber + 1 };
+  }
+
+  const ordered = getSurahsByDirection(direction);
+  const idx = ordered.findIndex((s) => s.number === position.surahNumber);
+  if (idx !== -1 && idx + 1 < ordered.length) {
+    return { surahNumber: ordered[idx + 1].number, ayahNumber: 1 };
+  }
   return null;
 }
 
@@ -220,13 +299,15 @@ export async function createRealStudentPlan(
   const dailyAmount =
     customDailyAmount ?? stageConfig.memorization.defaultDailyAmount;
 
-  // 3. Resolve Start Position
+  // 3. Resolve Start Position — from the LAST ACTUAL ACHIEVEMENT so a rebuilt
+  // plan always continues forward and never replays or loses recorded progress.
+  // Priority: explicit teacher choice → last achieved +1 → stage default.
   let targetStart: QuranPosition =
     params.customTargetStart || stageConfig.memorization.defaultTargetStart;
-  if (!params.customTargetStart && student.currentSurah && student.currentAyah) {
-    const res = convertStudentToQuranPosition(student, surahs);
-    if (res.isValid && res.position) {
-      targetStart = res.position;
+  if (!params.customTargetStart) {
+    const lastAchieved = resolveLastAchievedPosition(student, params.sessionRecords, surahs);
+    if (lastAchieved) {
+      targetStart = nextPositionInDirection(lastAchieved, direction, surahs) || lastAchieved;
     }
   }
 
@@ -356,6 +437,7 @@ export async function migrateRealStudentsToQuranPlans(params: {
   stageConfigs: StageQuranConfig[];
   academicConfig?: AcademicYearConfig;
   existingPlans: StudentQuranPlan[];
+  sessionRecords?: DailySessionRecord[];
   provider: IQuranDataProvider;
   memorizationEngine: QuranMemorizationPlanningEngine;
 }): Promise<MigrationReport> {
@@ -364,6 +446,7 @@ export async function migrateRealStudentsToQuranPlans(params: {
     stageConfigs,
     academicConfig,
     existingPlans,
+    sessionRecords,
     provider,
     memorizationEngine,
   } = params;
@@ -373,7 +456,10 @@ export async function migrateRealStudentsToQuranPlans(params: {
   // Index existing active plans by studentId
   const activePlanStudentIdSet = new Set<string>();
   for (const p of existingPlans) {
-    if (p.studentId && (p.status === 'active' || p.isCurrentActive)) {
+    if (
+      p.studentId &&
+      (p.status === 'active' || p.status === 'at_risk' || p.isCurrentActive)
+    ) {
       activePlanStudentIdSet.add(p.studentId);
     }
   }
@@ -413,6 +499,7 @@ export async function migrateRealStudentsToQuranPlans(params: {
         stageConfig,
         allStageConfigs: stageConfigs,
         academicConfig,
+        sessionRecords: (sessionRecords || []).filter((r) => r.studentId === student.id),
         provider,
         memorizationEngine,
       });

@@ -11,6 +11,7 @@ import { StudentPlanDashboard } from './StudentPlanDashboard';
 import { StageConfigModal } from './StageConfigModal';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
 import { getSurahsByDirection, getSurahAyahsCount } from '../../utils/quranMetadata';
+import { selectActiveStudentPlan } from '../../quran/utils/planNormalizer';
 import {
   BookOpen,
   Sparkles,
@@ -110,7 +111,10 @@ export const QuranPlanManager: React.FC = () => {
             p.generatedPlan.dailyPlans.length > 0
         );
         setAllPlans(validPlans);
-        const current = validPlans.find((p) => p.studentId === selectedStudentId) || validPlans[0];
+        const current =
+          selectActiveStudentPlan(validPlans.filter((p) => p.studentId === selectedStudentId)) ||
+          validPlans.find((p) => p.studentId === selectedStudentId) ||
+          validPlans[0];
         setActivePlan(current || null);
         if (current && current.generatedPlan?.dailyPlans?.length > 0) {
           setSimSelectedDayId(current.generatedPlan.dailyPlans[0].id);
@@ -126,7 +130,9 @@ export const QuranPlanManager: React.FC = () => {
 
   const handleSelectStudent = (studentId: string) => {
     setSelectedStudentId(studentId);
-    const plan = allPlans.find((p) => p.studentId === studentId);
+    const plan =
+      selectActiveStudentPlan(allPlans.filter((p) => p.studentId === studentId)) ||
+      allPlans.find((p) => p.studentId === studentId);
     setActivePlan(plan || null);
     if (plan && plan.generatedPlan?.dailyPlans?.length > 0) {
       setSimSelectedDayId(plan.generatedPlan.dailyPlans[0].id);

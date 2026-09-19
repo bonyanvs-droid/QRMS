@@ -175,6 +175,7 @@ import {
   saveQuranPlanToDb,
   getQuranPlansForStudentFromDb,
   getQuranPlanByIdFromDb,
+  archiveOtherStudentQuranPlans,
   deleteQuranPlanFromDb,
   subscribeToQuranStageConfigs,
   saveQuranStageConfigToDb,
@@ -234,6 +235,7 @@ import { apiClient } from '../lib/api/apiClient';
 import { calculateDistanceMeters, isRegularAttendanceDay, getLocalDateString, isRecordForDate } from '../utils/geoAttendance';
 import { getHalaqahActiveDays } from '../utils/scheduleCalculator';
 import { StudentQuranPlan } from '../quran/types/plan';
+import { selectActiveStudentPlan } from '../quran/utils/planNormalizer';
 import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../quran/models/stageConfig';
 import { BundledQuranProvider } from '../quran/providers/BundledQuranProvider';
 import { QuranMemorizationPlanningEngine } from '../quran/services/memorizationEngine';
@@ -4008,19 +4010,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // -------------------------------------------------------------
   const getActiveStudentQuranPlan = useCallback(
     (studentId: string): StudentQuranPlan | null => {
-      // Find active plan for the student — 'at_risk' is still an active plan.
-      // Among duplicates (legacy rows), prefer the one whose generated
-      // plan payload is actually populated.
-      const candidates = quranPlans.filter((p) => p.studentId === studentId);
-      const isActive = (p: StudentQuranPlan) =>
-        p.isCurrentActive || p.status === 'active' || p.status === 'at_risk';
-      const hasData = (p: StudentQuranPlan) =>
-        (p.generatedPlan?.dailyPlans?.length ?? 0) > 0;
-      return (
-        candidates.find((p) => isActive(p) && hasData(p)) ||
-        candidates.find(isActive) ||
-        candidates[0] ||
-        null
+      // Canonical active-plan selection — never "first row found"; archived
+      // plans are excluded and populated payloads win over gutted duplicates.
+      return selectActiveStudentPlan(
+        quranPlans.filter((p) => p.studentId === studentId)
       );
     },
     [quranPlans]
@@ -4049,7 +4042,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const matched = fromDb.find((p) => p.id === planId);
           if (matched) return matched;
         }
-        return fromDb.find((p) => p.isCurrentActive || p.status === 'active') || fromDb[0];
+        return selectActiveStudentPlan(fromDb);
       }
       return null;
     },
@@ -4067,11 +4060,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...params,
         allStageConfigs: quranStageConfigs,
         academicConfig,
+        sessionRecords: sessionRecords.filter((r) => r.studentId === params.student.id),
         provider,
         memorizationEngine,
       });
 
       await saveQuranPlanToDb(plan, currentActor);
+
+      // Enforce the single-active-plan invariant: archive every other plan
+      // this student owns. Archiving never deletes data — the old plan's
+      // plan_data (history, achievements) stays intact inside the row.
+      const archivedIds = await archiveOtherStudentQuranPlans(
+        plan.studentId,
+        plan.id,
+        currentActor,
+        activeTenantId
+      );
 
       // Link to student record if student doesn't have activeQuranPlanId yet
       if (params.student.activeQuranPlanId !== plan.id) {
@@ -4080,17 +4084,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setQuranPlans((prev) => {
         const idx = prev.findIndex((p) => p.id === plan.id);
+        const archivedSet = new Set(archivedIds);
+        const withArchived = prev.map((p) =>
+          archivedSet.has(p.id)
+            ? { ...p, status: 'archived' as const, isCurrentActive: false }
+            : p
+        );
         if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = plan;
-          return next;
+          withArchived[idx] = plan;
+          return withArchived;
         }
-        return [...prev, plan];
+        return [...withArchived, plan];
       });
 
       return plan;
     },
-    [currentActor, quranStageConfigs, academicConfig, updateStudent, integrationManager, guardDemoWrite]
+    [currentActor, quranStageConfigs, academicConfig, updateStudent, integrationManager, guardDemoWrite, sessionRecords, activeTenantId]
   );
 
   const saveStudentQuranPlan = useCallback(
@@ -4182,12 +4191,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stageConfigs: quranStageConfigs,
       academicConfig,
       existingPlans: quranPlans,
+      sessionRecords,
       provider,
       memorizationEngine,
     });
 
     for (const plan of report.migratedPlans) {
       await saveQuranPlanToDb(plan, currentActor);
+      // Single-active-plan invariant per student (archive, never delete)
+      await archiveOtherStudentQuranPlans(plan.studentId, plan.id, currentActor, activeTenantId);
       // Link to student
       updateStudent(plan.studentId, { activeQuranPlanId: plan.id });
     }
@@ -4197,7 +4209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return report;
-  }, [students, quranStageConfigs, academicConfig, quranPlans, currentActor, updateStudent, integrationManager]);
+  }, [students, quranStageConfigs, academicConfig, quranPlans, currentActor, updateStudent, integrationManager, sessionRecords, activeTenantId]);
 
   const recordQuranPlanAchievement = useCallback(
     async (params: {

@@ -211,16 +211,35 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   );
 
   // Auto-fill setup defaults when student changes — the suggested starting
-  // position is the LAST actually-recorded achievement (session records are
-  // the source of truth), falling back to the student record's position.
+  // position is the FIRST UNMEMORIZED verse after the last actually-recorded
+  // achievement (session records are the source of truth, student record is
+  // the fallback). A rebuilt plan always continues forward from actual
+  // achievement — it never replays or loses recorded progress.
   useEffect(() => {
     if (student) {
       const latestMemRec = sessionRecords
         .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
         .sort((a, b) => b.date.localeCompare(a.date))[0];
-      const recordedSurah = latestMemRec?.memorization?.surahTo || student.currentSurah;
-      const recordedAyah = latestMemRec?.memorization?.ayahTo || student.currentAyah || 1;
+      let recordedSurah = latestMemRec?.memorization?.surahTo || student.currentSurah;
+      let recordedAyah = latestMemRec?.memorization?.ayahTo || student.currentAyah || 1;
+
+      // Advance to the next position in the plan's direction: ayah+1 within
+      // the same surah, or the next surah's ayah 1 when the surah is done.
       if (recordedSurah) {
+        const directionForAdvance =
+          (quranStageConfigs.find((c) => c.targetGrades.includes(student.grade) && c.isActive) ||
+            quranStageConfigs[0])?.memorization?.defaultDirection || setupDirection;
+        const ayahsCount = getSurahAyahsCount(recordedSurah);
+        if (ayahsCount > 0 && recordedAyah < ayahsCount) {
+          recordedAyah = recordedAyah + 1;
+        } else if (ayahsCount > 0) {
+          const ordered = getSurahsByDirection(directionForAdvance);
+          const idx = ordered.findIndex((s) => s.name === recordedSurah);
+          if (idx !== -1 && idx + 1 < ordered.length) {
+            recordedSurah = ordered[idx + 1].name;
+            recordedAyah = 1;
+          }
+        }
         setSetupStartSurah(recordedSurah);
       } else {
         setSetupStartSurah('الناس');

@@ -661,6 +661,36 @@ export async function getQuranPlanByIdFromDb(planId: string, tenantId?: string):
   return plans.find((p) => p.id === planId) || null;
 }
 
+/**
+ * Enforces the single-active-plan invariant for a student: every plan other
+ * than `keepPlanId` whose status still claims "active" is archived in place.
+ * Records are NEVER deleted — plan_data and all achievement history stay
+ * intact inside the archived row. 'completed' plans are left untouched
+ * (terminal state, already excluded from active selection).
+ *
+ * Returns the ids of the plans that were archived.
+ */
+export async function archiveOtherStudentQuranPlans(
+  studentId: string,
+  keepPlanId: string,
+  _actor?: any,
+  tenantId?: string
+): Promise<string[]> {
+  const plans = await getQuranPlansForStudentFromDb(studentId, tenantId);
+  const archivedIds: string[] = [];
+  for (const p of plans) {
+    if (p.id === keepPlanId) continue;
+    if (p.status === 'archived' || p.status === 'completed') continue;
+    await AcademicRepository.saveQuranPlan({
+      ...p,
+      status: 'archived',
+      isCurrentActive: false,
+    });
+    archivedIds.push(p.id);
+  }
+  return archivedIds;
+}
+
 export async function deleteQuranPlanFromDb(planId: string, _actor?: any): Promise<void> {
   await apiClient.delete(`/quran_plans/${planId}`);
 }

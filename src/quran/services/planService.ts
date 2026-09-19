@@ -4,6 +4,7 @@ import { QuranMemorizationPlanningEngine } from './memorizationEngine';
 import { QuranRevisionPlanningEngine } from './revisionEngine';
 import { PlanRecalculationService } from './recalculationService';
 import { StudentQuranPlan } from '../types/plan';
+import { selectActiveStudentPlan } from '../utils/planNormalizer';
 import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../models/stageConfig';
 import { safeStorage } from '../../lib/safeStorage';
 
@@ -127,8 +128,7 @@ export class PlanService {
 
   async getPlanByStudentId(studentId: string): Promise<StudentQuranPlan | null> {
     const plans = await this.loadAllPlans();
-    return plans.find((p) => p.studentId === studentId && (p.isCurrentActive || p.status === 'active')) ||
-      plans.find((p) => p.studentId === studentId) || null;
+    return selectActiveStudentPlan(plans.filter((p) => p.studentId === studentId));
   }
 
   async getAllPlansForStudent(studentId: string): Promise<StudentQuranPlan[]> {
