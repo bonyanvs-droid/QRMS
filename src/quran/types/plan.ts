@@ -3,6 +3,21 @@ export type { PlanningUnitType };
 
 export type PlanDirection = 'forward' | 'backward';
 
+/**
+ * Which authority supplied the plan's end target — kept on the plan for audit
+ * so the UI can state exactly where the target came from instead of silently
+ * mixing personal, academic and template defaults.
+ */
+export type AcademicTargetSource =
+  | 'explicit' // teacher's explicit choice at plan setup
+  | 'personal' // student.personalTargetSurah (stretch goal)
+  | 'academic_year' // academicConfig.gradeTargets for the student's grade/stage
+  | 'student_minimum' // student.minimumTargetSurah
+  | 'halaqah' // halaqah.targetSurah
+  | 'stage' // EducationalStage.defaultTargetSurah
+  | 'tenant' // tenant.targetSurahDefault
+  | 'template'; // stageConfig.memorization.defaultTargetEnd
+
 export type PlanStatus = 'active' | 'completed' | 'paused' | 'at_risk' | 'archived';
 
 export type PlanScope = 'semester' | 'summer' | 'intensive' | 'remedial' | 'custom';
@@ -71,6 +86,17 @@ export interface DailyPlanItem {
   revisionDisplayLabel?: string;
   revisionPageStart?: number;
   revisionPageEnd?: number;
+
+  /**
+   * Planned spelling lesson for this day — only set when the student's
+   * halaqah subscribes to the spelling track. The actual recorded result
+   * stays in daily session records (never duplicated here).
+   */
+  spellingAssignment?: {
+    lessonId: string;
+    lessonNumber: number;
+    title: string;
+  };
 
   /** Historical locking flag */
   isHistorical: boolean;
@@ -244,6 +270,8 @@ export interface StudentQuranPlan {
   // Target coordinates
   targetStart: QuranPosition;
   targetEnd: QuranPosition;
+  /** Which authority resolved `targetEnd` (audit — see AcademicTargetSource) */
+  targetSource?: AcademicTargetSource;
   direction: PlanDirection;
   unitType: PlanningUnitType;
   dailyAmount: number;
@@ -263,6 +291,22 @@ export interface StudentQuranPlan {
    * the future revision cycle from the same fixed source range.
    */
   manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
+
+  /**
+   * Independent revision direction — logically separate from `direction`
+   * (memorization). 'forward' rolls the revision window in learning order
+   * (oldest → newest); 'backward' reviews the most recently memorized
+   * content first. Undefined on legacy plans → resolved from the stage
+   * template's revision.defaultDirection at recalculation time.
+   */
+  revisionDirection?: PlanDirection;
+
+  /**
+   * Active educational tracks resolved from the student's halaqah
+   * subscription at plan creation (e.g. ['track_quran','track_spelling']).
+   * Drives which auxiliary tracks (e.g. spelling) appear inside the plan.
+   */
+  activeTrackIds?: string[];
 
   // Schedule
   schedule: WorkingDaysSchedule;
@@ -298,6 +342,10 @@ export interface StudentQuranPlan {
     mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
     surahList?: number[]; // Specific surah numbers when revising by surah
     surahsPerDay?: number;
+    /** Rolling-window granularity actually used by the engine */
+    unitType?: 'page' | 'surah';
+    /** Independent revision direction snapshot persisted with the plan */
+    direction?: PlanDirection;
   };
 
   updatedAt: string;

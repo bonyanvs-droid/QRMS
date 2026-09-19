@@ -30,6 +30,8 @@ import {
   computeWeekNumber,
   computeMonthNumber,
 } from '../utils/dateUtils';
+import { redistributeSpellingForFutureDays } from '../utils/spellingDistribution';
+import { SpellingLesson, DailySessionRecord } from '../../types';
 
 export interface RecordAchievementParams {
   plan: StudentQuranPlan;
@@ -39,6 +41,10 @@ export interface RecordAchievementParams {
   recordedBy: string;
   evaluation?: 'excellent' | 'very_good' | 'good' | 'needs_practice';
   notes?: string;
+  /** Spelling lessons — future-day redistribution when the spelling track is active */
+  spellingLessons?: SpellingLesson[];
+  /** Student session records — used to resume spelling after the last recorded lesson */
+  sessionRecords?: DailySessionRecord[];
 }
 
 export interface ApplyTeacherOverrideParams {
@@ -246,6 +252,19 @@ export class PlanRecalculationService {
       }
     }
 
+    // 5b. Spelling track: redistribute the remaining EXISTING lessons over the
+    // rebuilt future days, resuming after the last recorded/planned lesson —
+    // only when the plan carries an active spelling subscription.
+    if (params.spellingLessons?.length && planClone.activeTrackIds?.includes('track_spelling')) {
+      redistributeSpellingForFutureDays(
+        dailyPlans,
+        dayIndex,
+        params.spellingLessons,
+        params.sessionRecords,
+        planClone.studentId
+      );
+    }
+
     // 6. Check if target is now at risk
     const remainingWorkingDays = dailyPlans.filter(
       (d, idx) => idx > dayIndex && !d.isHistorical && !d.isLocked
@@ -295,10 +314,10 @@ export class PlanRecalculationService {
     const trigger: RecalculationEvent['trigger'] =
       status === 'overachieved'
         ? 'achievement_surplus'
-        : status === 'absent'
-          ? 'absence'
-          : status === 'partial'
-            ? 'achievement_deficit'
+        : status === 'partial'
+          ? 'achievement_deficit'
+          : status === 'absent' || status === 'excused' || status === 'unrecited'
+            ? 'absence'
             : 'achievement_surplus';
 
     const prevRemaining = plan.targetAtRiskDiagnostic?.remainingUnits ?? plan.originalTarget.totalUnits;
@@ -465,8 +484,20 @@ export class PlanRecalculationService {
   }
 
   /**
-   * Builds the revision seed = accumulated memorized verses up to the given
-   * position (Auto Minor Revision) or the plan's fixed manual revision range.
+   * Resolves the plan's effective revision direction — the plan-level field
+   * wins, then the persisted revisionSettings snapshot, then the default
+   * backward (newest-first) rolling used by all current stage templates.
+   */
+  private resolveRevisionDirection(plan: StudentQuranPlan): 'forward' | 'backward' {
+    return plan.revisionDirection || plan.revisionSettings?.direction || 'backward';
+  }
+
+  /**
+   * Builds the revision seed = fully memorized surahs up to the given
+   * position (Auto Minor Revision) or the plan's fixed manual revision
+   * range ordered by the plan's INDEPENDENT revision direction.
+   * The current incomplete surah is never seeded — it only becomes
+   * revision-eligible once fully memorized.
    */
   private async buildRevisionSeed(
     plan: StudentQuranPlan,
@@ -474,17 +505,16 @@ export class PlanRecalculationService {
   ): Promise<Ayah[]> {
     try {
       if (plan.autoMinorRevisionMode) {
-        const boundaryStart: QuranPosition =
-          plan.direction === 'backward'
-            ? { surahNumber: 114, ayahNumber: 1 }
-            : { surahNumber: 1, ayahNumber: 1 };
-        return await this.provider.getAyahsInRange(boundaryStart, upToPosition, plan.direction);
+        return await this.rangeCalculator.getCompletedMemorizedVerses(
+          upToPosition,
+          plan.direction
+        );
       }
       if (plan.manualRevisionRange) {
         return await this.provider.getAyahsInRange(
           plan.manualRevisionRange.start,
           plan.manualRevisionRange.end,
-          plan.direction
+          this.resolveRevisionDirection(plan)
         );
       }
     } catch {
@@ -510,6 +540,10 @@ export class PlanRecalculationService {
     const seed = await this.buildRevisionSeed(plan, currentPosition);
     const revisionPages = plan.revisionDailyPages ?? 1;
     const consolidationDays = plan.consolidationDaysPerSurah ?? 3;
+    const revisionDirection = this.resolveRevisionDirection(plan);
+    const revisionUnitKind = plan.revisionSettings?.unitType ?? 'page';
+    const revisionUnitsPerWindow =
+      revisionUnitKind === 'surah' ? plan.revisionSettings?.surahsPerDay ?? 1 : undefined;
 
     const units = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
       fromPosition,
@@ -519,7 +553,10 @@ export class PlanRecalculationService {
       plan.direction,
       consolidationDays,
       revisionPages,
-      seed
+      seed,
+      revisionDirection,
+      revisionUnitKind,
+      revisionUnitsPerWindow
     );
 
     if (!completedSurahEnd || consolidationDays <= 0) return units;
@@ -532,14 +569,20 @@ export class PlanRecalculationService {
     if (!firstVerse || !lastVerse) return units;
 
     const acc: Ayah[] = [...seed];
-    let offset =
-      acc.length > 0
-        ? Math.max(0, new Set(acc.map((v) => v.pageNumber)).size - Math.max(1, Math.round(revisionPages)))
-        : 0;
+    // Offset 0 targets the first window in the resolved revision direction
+    // ('backward' walks the pool newest → oldest internally).
+    let offset = 0;
 
     const consolidationUnits: PlanningUnit[] = [];
     for (let c = 1; c <= consolidationDays; c++) {
-      const rev = this.rangeCalculator.computeRollingRevision(acc, revisionPages, offset);
+      const rev = this.rangeCalculator.computeRollingRevision(
+        acc,
+        revisionPages,
+        offset,
+        revisionDirection,
+        revisionUnitKind,
+        revisionUnitsPerWindow
+      );
       offset = rev.nextOffset;
       consolidationUnits.push({
         type: plan.unitType,

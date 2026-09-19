@@ -1,4 +1,12 @@
-import { Student, AcademicYearConfig, DailySessionRecord } from '../../types';
+import {
+  Student,
+  AcademicYearConfig,
+  DailySessionRecord,
+  Halaqah,
+  EducationalStage,
+  MosqueComplexTenant,
+  SpellingLesson,
+} from '../../types';
 import { QuranPosition, Surah, IQuranDataProvider } from '../types';
 import {
   getSurahAyahsCount,
@@ -10,6 +18,8 @@ import {
   PlanScope,
   OriginalTargetSnapshot,
   PlanningUnitType,
+  AcademicTargetSource,
+  WorkingDaysSchedule,
 } from '../types/plan';
 import { StageQuranConfig, findStageConfigForStudent } from '../models/stageConfig';
 import { QuranMemorizationPlanningEngine } from './memorizationEngine';
@@ -18,6 +28,10 @@ import {
   getStudentPreferredWorkingDays,
 } from '../utils/studentSchedule';
 import { isDateWorkingDay, addDaysToDate } from '../utils/dateUtils';
+import { assignSpellingLessonsToPlan } from '../utils/spellingDistribution';
+
+/** Default track subscription — mirrors the `halaqahs.active_track_ids` DB default */
+export const DEFAULT_HALAQAH_TRACK_IDS = ['track_quran', 'track_spelling', 'track_virtues'];
 
 export interface StudentPositionResolutionResult {
   position: QuranPosition | null;
@@ -70,6 +84,16 @@ export interface CreateRealStudentPlanParams {
   customTargetEnd?: QuranPosition;
   /** Daily session records — the canonical audit trail of actual achievement */
   sessionRecords?: DailySessionRecord[];
+  /** Student's halaqah — the source of the ACTIVE TRACK subscription */
+  halaqah?: Halaqah;
+  /** Educational stages catalog — used by the academic target resolver */
+  stages?: EducationalStage[];
+  /** Active tenant — used by the academic target resolver */
+  tenant?: MosqueComplexTenant | null;
+  /** Existing spelling lessons distributed on plan days when the spelling track is active */
+  spellingLessons?: SpellingLesson[];
+  /** Explicit revision direction override (independent of memorization direction) */
+  customRevisionDirection?: PlanDirection;
   provider: IQuranDataProvider;
   memorizationEngine: QuranMemorizationPlanningEngine;
 }
@@ -263,45 +287,175 @@ export function resolveTargetEndPosition(
   return stageConfig.memorization.defaultTargetEnd;
 }
 
+// =====================================================================
+// Resolved Plan Configuration — Template + Student Setup + Actual State
+// =====================================================================
+
 /**
- * Creates a fully validated, canonical StudentQuranPlan for a real registered student.
+ * The fully-resolved plan configuration — the single deterministic output
+ * consumed by the engine. Every field records WHICH authority produced it so
+ * preview/save/recalculation all agree on the same values.
  */
-export async function createRealStudentPlan(
-  params: CreateRealStudentPlanParams
-): Promise<StudentQuranPlan> {
-  const {
-    student,
-    academicConfig,
-    customStartDate,
-    customEndDate,
-    customDailyAmount,
-    customUnitType,
-    customDirection,
-    customWorkingDays,
-    scope = 'semester',
-    title,
-    provider,
-    memorizationEngine,
-  } = params;
+export interface ResolvedPlanConfiguration {
+  stageConfig: StageQuranConfig;
+  // Memorization
+  direction: PlanDirection;
+  unitType: PlanningUnitType;
+  dailyAmount: number;
+  targetStart: QuranPosition;
+  targetEnd: QuranPosition;
+  /** Which authority produced targetEnd (audit trail) */
+  targetSource: AcademicTargetSource;
+  /** The academic-year grade target when it exists (for warnings/preview) */
+  academicTarget?: QuranPosition;
+  // Revision (independent configuration)
+  revisionMode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+  revisionUnitKind: 'page' | 'surah';
+  revisionDailyPages: number;
+  revisionUnitsPerWindow?: number;
+  revisionDirection: PlanDirection;
+  autoMinorRevisionMode: boolean;
+  manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
+  // Consolidation & schedule
+  consolidationDays: number;
+  schedule: WorkingDaysSchedule;
+  startDate: string;
+  endDate: string;
+  // Tracks
+  activeTrackIds: string[];
+  spellingEnabled: boolean;
+  warnings: string[];
+}
 
-  const surahs = await provider.getSurahs();
+/**
+ * Maps a student's grade/stage to the matching `gradeTargets` key written by
+ * the admin academic-year settings (tamheedi/grade1/grade2/stage keys…).
+ */
+function resolveGradeTargetKeys(
+  student: { grade?: string; stageId?: string },
+  stageConfig: StageQuranConfig
+): string[] {
+  const keys: string[] = [];
+  if (student.stageId) keys.push(student.stageId);
+  if (stageConfig.id) keys.push(stageConfig.id);
+  if (stageConfig.code) keys.push(stageConfig.code);
+  const g = (student.grade || '').trim();
+  const gradeMap: Record<string, string> = {
+    'تمهيدي': 'tamheedi',
+    'تحضيري': 'tamheedi',
+    'صف أول': 'grade1',
+    'الصف الأول': 'grade1',
+    'أول': 'grade1',
+    'صف ثاني': 'grade2',
+    'الصف الثاني': 'grade2',
+    'ثاني': 'grade2',
+    'صف ثالث': 'grade3',
+    'الصف الثالث': 'grade3',
+    'صف رابع': 'grade4',
+    'الصف الرابع': 'grade4',
+    'صف خامس': 'grade5',
+    'الصف الخامس': 'grade5',
+    'صف سادس': 'grade6',
+    'الصف السادس': 'grade6',
+  };
+  if (gradeMap[g]) keys.push(gradeMap[g]);
+  if (g) keys.push(g);
+  return [...new Set(keys)];
+}
 
-  // 1. Determine Stage Configuration
+/**
+ * Academic Target Resolver — resolves the plan's end target through the
+ * documented precedence chain, never silently mixing sources:
+ *
+ *   1. explicit teacher choice (customTargetEnd)
+ *   2. student.personalTargetSurah  — stretch goal
+ *   3. academicConfig.gradeTargets[grade/stage].minSurah — academic target
+ *   4. student.minimumTargetSurah   — student minimum
+ *   5. halaqah.targetSurah          — halaqah-level target
+ *   6. EducationalStage.defaultTargetSurah — stage default
+ *   7. tenant.targetSurahDefault    — complex default
+ *   8. stageConfig.memorization.defaultTargetEnd — template default
+ */
+export function resolveAcademicTarget(
+  params: Pick<
+    CreateRealStudentPlanParams,
+    'student' | 'customTargetEnd' | 'academicConfig' | 'halaqah' | 'stages' | 'tenant'
+  >,
+  stageConfig: StageQuranConfig,
+  surahs: Surah[]
+): { position: QuranPosition; source: AcademicTargetSource; academicTarget?: QuranPosition } {
+  const { student, customTargetEnd, academicConfig, halaqah, stages, tenant } = params;
+
+  if (customTargetEnd?.surahNumber) {
+    return { position: customTargetEnd, source: 'explicit' };
+  }
+
+  const toPosition = (surahName: string | undefined): QuranPosition | null => {
+    if (!surahName) return null;
+    const s = matchSurahByName(surahName, surahs);
+    return s ? { surahNumber: s.surahNumber, ayahNumber: s.ayahCount } : null;
+  };
+
+  // Academic-year grade target (kept aside for warnings even if overridden)
+  let academicTarget: QuranPosition | undefined;
+  const gradeTargets = academicConfig?.gradeTargets || {};
+  for (const key of resolveGradeTargetKeys(student, stageConfig)) {
+    const entry = gradeTargets[key];
+    const pos = toPosition(entry?.minSurah);
+    if (pos) {
+      academicTarget = pos;
+      break;
+    }
+  }
+
+  const personal = toPosition(student.personalTargetSurah);
+  if (personal) return { position: personal, source: 'personal', academicTarget };
+  if (academicTarget) return { position: academicTarget, source: 'academic_year', academicTarget };
+
+  const minimum = toPosition(student.minimumTargetSurah);
+  if (minimum) return { position: minimum, source: 'student_minimum', academicTarget };
+
+  const fromHalaqah = toPosition(halaqah?.targetSurah);
+  if (fromHalaqah) return { position: fromHalaqah, source: 'halaqah', academicTarget };
+
+  const eduStage = stages?.find((s) => s.id === student.stageId);
+  const fromStage = toPosition(eduStage?.defaultTargetSurah);
+  if (fromStage) return { position: fromStage, source: 'stage', academicTarget };
+
+  const fromTenant = toPosition(tenant?.targetSurahDefault);
+  if (fromTenant) return { position: fromTenant, source: 'tenant', academicTarget };
+
+  return {
+    position: stageConfig.memorization.defaultTargetEnd,
+    source: 'template',
+    academicTarget,
+  };
+}
+
+/**
+ * Resolves the complete plan configuration from Template + Student Setup +
+ * Actual Achievement + Halaqah subscription. This is the ONLY authority that
+ * turns configuration into engine inputs — the engine itself stays dumb.
+ */
+export function resolveQuranPlanConfiguration(
+  params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>,
+  surahs: Surah[]
+): ResolvedPlanConfiguration {
+  const { student, academicConfig } = params;
+  const warnings: string[] = [];
+
+  // 1. Stage template — the default source for every field
   const stageConfig =
-    params.stageConfig ||
-    findStageConfigForStudent(student, params.allStageConfigs);
+    params.stageConfig || findStageConfigForStudent(student, params.allStageConfigs);
 
-  // 2. Determine Plan Direction and Units
+  // 2. Memorization — explicit setup > template default
   const direction: PlanDirection =
-    customDirection || stageConfig.memorization.defaultDirection;
-  const unitType =
-    customUnitType || stageConfig.memorization.unitType;
+    params.customDirection || stageConfig.memorization.defaultDirection;
+  const unitType = params.customUnitType || stageConfig.memorization.unitType;
   const dailyAmount =
-    customDailyAmount ?? stageConfig.memorization.defaultDailyAmount;
+    params.customDailyAmount ?? stageConfig.memorization.defaultDailyAmount;
 
-  // 3. Resolve Start Position — from the LAST ACTUAL ACHIEVEMENT so a rebuilt
-  // plan always continues forward and never replays or loses recorded progress.
-  // Priority: explicit teacher choice → last achieved +1 → stage default.
+  // 3. Start position — explicit > last ACTUAL achievement +1 > template default
   let targetStart: QuranPosition =
     params.customTargetStart || stageConfig.memorization.defaultTargetStart;
   if (!params.customTargetStart) {
@@ -311,54 +465,78 @@ export async function createRealStudentPlan(
     }
   }
 
-  // 4. Resolve Target End Position
-  let targetEnd: QuranPosition =
-    params.customTargetEnd ||
-    resolveTargetEndPosition(
-      student.personalTargetSurah || student.minimumTargetSurah,
-      surahs,
-      stageConfig,
-      direction
+  // 4. Target end — full academic precedence chain (see resolveAcademicTarget)
+  const targetResolution = resolveAcademicTarget(params, stageConfig, surahs);
+  const targetEnd = targetResolution.position;
+  if (targetResolution.source === 'template') {
+    warnings.push(
+      'لم يُعثر على مستهدف أكاديمي أو شخصي لهذا الطالب — استُخدم المستهدف الافتراضي للنموذج.'
     );
+  }
 
-  // 5. Schedule & Dates — resolve per-student working days
-  // (subset of halaqah days; plan.schedule becomes the single source for
-  // recalculation, next-working-day, and future plan dates)
-  const halaqahWorkingDays =
-    customWorkingDays || stageConfig.schedule.workingDays;
-  const studentDaysResolution = resolveStudentWorkingDays(
+  // 5. Revision — independent configuration from the template's revision block
+  const revCfg = stageConfig.revision || ({} as StageQuranConfig['revision']);
+  const revisionMode = revCfg.mode || 'pages';
+  const revisionUnitKind: 'page' | 'surah' =
+    revisionMode === 'surahs' || revCfg.unitType === 'surah' ? 'surah' : 'page';
+  const revisionDailyPages =
+    params.customRevisionDailyPages !== undefined
+      ? params.customRevisionDailyPages
+      : revCfg.defaultDailyPages ?? revCfg.defaultDailyAmount ?? 1;
+  const revisionUnitsPerWindow =
+    revisionUnitKind === 'surah'
+      ? revCfg.surahsPerDay ?? revCfg.defaultDailyAmount ?? 1
+      : undefined;
+  if (revisionMode !== 'pages' && revisionMode !== 'surahs') {
+    warnings.push(
+      `نمط المراجعة "${revisionMode}" في النموذج غير مدعوم بعد — طُبّقت مراجعة الصفحات المتدحرجة.`
+    );
+  }
+  // Independent revision direction: explicit setup > template revision default
+  // > memorization direction (documented last-resort fallback).
+  const revisionDirection: PlanDirection =
+    params.customRevisionDirection || revCfg.defaultDirection || direction;
+  const autoMinorRevisionMode =
+    params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true;
+  // Manual range: explicit teacher range > template default revision range
+  const manualRevisionRange =
+    !autoMinorRevisionMode &&
+    (params.manualRevisionRange ||
+      (revCfg.defaultTargetStart && revCfg.defaultTargetEnd
+        ? { start: revCfg.defaultTargetStart, end: revCfg.defaultTargetEnd }
+        : undefined)) ||
+    undefined;
+
+  // 6. Consolidation + schedule
+  const consolidationDays =
+    params.customConsolidationDays !== undefined
+      ? params.customConsolidationDays
+      : stageConfig.consolidationDays !== undefined
+        ? stageConfig.consolidationDays
+        : 3;
+  const halaqahWorkingDays = params.customWorkingDays || stageConfig.schedule.workingDays;
+  const workingDays = resolveStudentWorkingDays(
     getStudentPreferredWorkingDays(student),
     halaqahWorkingDays
-  );
-  const workingDays = studentDaysResolution.days;
+  ).days;
   const holidays = academicConfig?.holidays || [];
 
-  // Local "today" (YYYY-MM-DD) — no UTC drift.
+  // 7. Dates
   const now = new Date();
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
     now.getDate()
   ).padStart(2, '0')}`;
-
-  // Plan start = the first ACTUAL day of the plan. A newly created plan must
-  // never back-fill days that existed before its creation, so we anchor at
-  // today (or the academic term start when the term has not begun yet), then
-  // snap forward to the student's first working day.
-  let startDate = customStartDate || '';
+  let startDate = params.customStartDate || '';
   if (!startDate) {
     const termStart = academicConfig?.startDate;
     startDate = termStart && termStart > todayIso ? termStart : todayIso;
   }
-
-  // Default end date: ~12 weeks out if academicConfig not provided
-  let endDate = customEndDate || academicConfig?.endDate;
+  let endDate = params.customEndDate || academicConfig?.endDate;
   if (!endDate) {
     const d = new Date(startDate);
     d.setDate(d.getDate() + (stageConfig.defaultTermWeeks || 12) * 7);
     endDate = d.toISOString().slice(0, 10);
   }
-
-  // Snap the plan start forward to the first student working day so day 1 of
-  // the plan is a real attendance day (non-working days and holidays skipped).
   {
     const sched = { workingDays, holidays };
     let probe = startDate;
@@ -370,39 +548,79 @@ export async function createRealStudentPlan(
     }
   }
 
-  // 6. Generate Core Universal Plan via Engine
-  const basePlan = await memorizationEngine.createPlan({
-    studentId: student.id,
-    startDate,
-    endDate,
-    targetStart,
-    targetEnd,
+  // 8. Active tracks — the halaqah subscription is the ONLY source of truth.
+  //    Undefined subscription → the platform default set (same as the DB
+  //    column default); an explicit subscription is honored exactly.
+  const halaqah = params.halaqah;
+  const activeTrackIds =
+    halaqah?.activeTrackIds && halaqah.activeTrackIds.length > 0
+      ? [...halaqah.activeTrackIds]
+      : [...DEFAULT_HALAQAH_TRACK_IDS];
+  const spellingEnabled = activeTrackIds.includes('track_spelling');
+
+  return {
+    stageConfig,
     direction,
     unitType,
     dailyAmount,
-    revisionDailyPages:
-      params.customRevisionDailyPages !== undefined
-        ? params.customRevisionDailyPages
-        : stageConfig.revision.defaultDailyPages || 1,
-    consolidationDaysPerSurah:
-      params.customConsolidationDays !== undefined
-        ? params.customConsolidationDays
-        : stageConfig.consolidationDays !== undefined
-        ? stageConfig.consolidationDays
-        : 3,
-    schedule: {
-      workingDays,
-      holidays,
-    },
-    autoMinorRevisionMode:
-      params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true,
-    manualRevisionRange: params.manualRevisionRange,
+    targetStart,
+    targetEnd,
+    targetSource: targetResolution.source,
+    academicTarget: targetResolution.academicTarget,
+    revisionMode,
+    revisionUnitKind,
+    revisionDailyPages,
+    revisionUnitsPerWindow,
+    revisionDirection,
+    autoMinorRevisionMode,
+    manualRevisionRange,
+    consolidationDays,
+    schedule: { workingDays, holidays },
+    startDate,
+    endDate,
+    activeTrackIds,
+    spellingEnabled,
+    warnings,
+  };
+}
+
+/**
+ * Creates a fully validated, canonical StudentQuranPlan for a real registered student.
+ */
+export async function createRealStudentPlan(
+  params: CreateRealStudentPlanParams
+): Promise<StudentQuranPlan> {
+  const { student, academicConfig, scope = 'semester', title, provider, memorizationEngine } = params;
+
+  const surahs = await provider.getSurahs();
+
+  // Single deterministic resolution — Template + Setup + Actual State
+  const resolved = resolveQuranPlanConfiguration(params, surahs);
+  const { stageConfig } = resolved;
+
+  // Generate Core Universal Plan via Engine (dumb deterministic planner)
+  const basePlan = await memorizationEngine.createPlan({
+    studentId: student.id,
+    startDate: resolved.startDate,
+    endDate: resolved.endDate,
+    targetStart: resolved.targetStart,
+    targetEnd: resolved.targetEnd,
+    direction: resolved.direction,
+    unitType: resolved.unitType,
+    dailyAmount: resolved.dailyAmount,
+    revisionDailyPages: resolved.revisionDailyPages,
+    consolidationDaysPerSurah: resolved.consolidationDays,
+    schedule: resolved.schedule,
+    autoMinorRevisionMode: resolved.autoMinorRevisionMode,
+    manualRevisionRange: resolved.manualRevisionRange,
+    revisionDirection: resolved.revisionDirection,
+    revisionUnitKind: resolved.revisionUnitKind,
+    revisionUnitsPerWindow: resolved.revisionUnitsPerWindow,
+    revisionMode: resolved.revisionMode,
   });
 
-  // 7. Attach Real Student Metadata & Contextual Identifiers
-  const planTitle =
-    title ||
-    `خطة ${stageConfig.name} - ${student.fullName}`;
+  // Attach Real Student Metadata & Contextual Identifiers
+  const planTitle = title || `خطة ${stageConfig.name} - ${student.fullName}`;
 
   const finalPlan: StudentQuranPlan = {
     ...basePlan,
@@ -417,7 +635,19 @@ export async function createRealStudentPlan(
     teacherId: student.teacherId,
     tenantId: student.tenantId,
     status: 'active',
+    targetSource: resolved.targetSource,
+    activeTrackIds: resolved.activeTrackIds,
   };
+
+  // Spelling track: distribute the EXISTING lessons across plan working days
+  // only when the student's halaqah actually subscribes to the spelling track.
+  if (resolved.spellingEnabled && params.spellingLessons?.length) {
+    assignSpellingLessonsToPlan(
+      finalPlan.generatedPlan.dailyPlans,
+      params.spellingLessons,
+      0
+    );
+  }
 
   return finalPlan;
 }

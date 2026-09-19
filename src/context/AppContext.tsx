@@ -431,6 +431,10 @@ export interface AppContextType {
   getActiveStudentQuranPlan: (studentId: string) => StudentQuranPlan | null;
   getStudentQuranPlans: (studentId: string) => StudentQuranPlan[];
   createStudentQuranPlan: (params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>) => Promise<StudentQuranPlan>;
+  /** Builds the full plan WITHOUT persisting — the explicit preview step before approval */
+  previewStudentQuranPlan: (params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>) => Promise<StudentQuranPlan>;
+  /** Persists a previewed plan (save + single-active archive + student link) */
+  approveStudentQuranPlan: (plan: StudentQuranPlan, student: Student) => Promise<StudentQuranPlan>;
   updateStudentQuranPlan: (plan: StudentQuranPlan) => Promise<void>;
   saveStudentQuranPlan: (plan: StudentQuranPlan) => Promise<void>;
   deleteStudentQuranPlan: (planId: string) => Promise<void>;
@@ -4049,22 +4053,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [quranPlans, getActiveStudentQuranPlan, activeTenantId]
   );
 
-  const createStudentQuranPlan = useCallback(
+  // Shared plan builder — resolves Template + Student Setup + Actual State
+  // into one deterministic configuration, then runs the engine. Never persists.
+  const buildStudentQuranPlan = useCallback(
     async (
       params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>
     ): Promise<StudentQuranPlan> => {
-      if (guardDemoWrite('إنشاء خطة قرآنية جديدة')) throw new Error('وضع الديمو تجريبي للعرض فقط.');
       const provider = integrationManager.getActiveProvider();
       const memorizationEngine = new QuranMemorizationPlanningEngine(provider);
-      const plan = await createRealStudentPlan({
+      const studentHalaqah =
+        halaqahs.find((h) => h.id === params.student.halaqahId) ||
+        halaqahs.find((h) => h.name === params.student.halaqahName);
+      return createRealStudentPlan({
         ...params,
         allStageConfigs: quranStageConfigs,
         academicConfig,
         sessionRecords: sessionRecords.filter((r) => r.studentId === params.student.id),
+        halaqah: studentHalaqah,
+        stages,
+        tenant: activeTenant,
+        spellingLessons,
         provider,
         memorizationEngine,
       });
+    },
+    [quranStageConfigs, academicConfig, integrationManager, sessionRecords, halaqahs, stages, activeTenant, spellingLessons]
+  );
 
+  // Shared persistence — save + single-active archive + student link + state.
+  const persistStudentQuranPlan = useCallback(
+    async (plan: StudentQuranPlan, student: Student): Promise<StudentQuranPlan> => {
       await saveQuranPlanToDb(plan, currentActor);
 
       // Enforce the single-active-plan invariant: archive every other plan
@@ -4078,8 +4096,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       // Link to student record if student doesn't have activeQuranPlanId yet
-      if (params.student.activeQuranPlanId !== plan.id) {
-        updateStudent(params.student.id, { activeQuranPlanId: plan.id });
+      if (student.activeQuranPlanId !== plan.id) {
+        updateStudent(student.id, { activeQuranPlanId: plan.id });
       }
 
       setQuranPlans((prev) => {
@@ -4099,7 +4117,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return plan;
     },
-    [currentActor, quranStageConfigs, academicConfig, updateStudent, integrationManager, guardDemoWrite, sessionRecords, activeTenantId]
+    [currentActor, updateStudent, activeTenantId]
+  );
+
+  const createStudentQuranPlan = useCallback(
+    async (
+      params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>
+    ): Promise<StudentQuranPlan> => {
+      if (guardDemoWrite('إنشاء خطة قرآنية جديدة')) throw new Error('وضع الديمو تجريبي للعرض فقط.');
+      const plan = await buildStudentQuranPlan(params);
+      return persistStudentQuranPlan(plan, params.student);
+    },
+    [guardDemoWrite, buildStudentQuranPlan, persistStudentQuranPlan]
+  );
+
+  // Preview step — builds the full plan without persisting anything.
+  const previewStudentQuranPlan = useCallback(
+    async (
+      params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>
+    ): Promise<StudentQuranPlan> => {
+      return buildStudentQuranPlan(params);
+    },
+    [buildStudentQuranPlan]
+  );
+
+  // Approval step — persists a previously previewed plan.
+  const approveStudentQuranPlan = useCallback(
+    async (plan: StudentQuranPlan, student: Student): Promise<StudentQuranPlan> => {
+      if (guardDemoWrite('اعتماد خطة قرآنية جديدة')) throw new Error('وضع الديمو تجريبي للعرض فقط.');
+      return persistStudentQuranPlan(plan, student);
+    },
+    [guardDemoWrite, persistStudentQuranPlan]
   );
 
   const saveStudentQuranPlan = useCallback(
@@ -4242,6 +4290,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordedBy: currentActor?.name || 'المعلم المعتمد',
         evaluation: params.evaluation,
         notes: params.notes,
+        spellingLessons,
+        sessionRecords,
       });
 
       // 3. Persist to Firestore and local state
@@ -4273,6 +4323,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const isAbsent = params.status === 'absent';
         const isExcused = params.status === 'excused';
 
+        // Revision record — built from the day's REAL planned revision window
+        // (never fabricated); omitted entirely when the day has none.
+        let revisionRecord: DailySessionRecord['revision'] | undefined;
+        if (targetDayItem.revisionDisplayLabel || targetDayItem.revisionPageStart) {
+          let revFromName = '';
+          let revToName = '';
+          if (targetDayItem.revisionPageStart) {
+            const firstAyah = (await provider.getPage(targetDayItem.revisionPageStart))[0];
+            if (firstAyah) revFromName = (await provider.getSurah(firstAyah.surahNumber))?.name || '';
+          }
+          if (targetDayItem.revisionPageEnd) {
+            const pageAyahs = await provider.getPage(targetDayItem.revisionPageEnd);
+            const lastAyah = pageAyahs[pageAyahs.length - 1];
+            if (lastAyah) revToName = (await provider.getSurah(lastAyah.surahNumber))?.name || '';
+          }
+          revisionRecord = {
+            surahFrom: revFromName,
+            surahTo: revToName,
+            type: 'قريبة',
+            score: 95,
+            isAutoRange: true,
+            autoRangeLabel: targetDayItem.revisionDisplayLabel,
+          };
+        }
+
         recordDailySession({
           studentId: targetStudent.id,
           teacherId: currentActor?.id || targetStudent.teacherId || '',
@@ -4298,12 +4373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 : 65,
             notes: params.notes,
           },
-          revision: {
-            surahFrom: 'الناس',
-            surahTo: surahFromMeta?.name || '',
-            type: 'قريبة',
-            score: 95,
-          },
+          revision: revisionRecord,
         });
       }
 
@@ -5086,6 +5156,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getActiveStudentQuranPlan,
         getStudentQuranPlans,
         createStudentQuranPlan,
+        previewStudentQuranPlan,
+        approveStudentQuranPlan,
         updateStudentQuranPlan,
         saveStudentQuranPlan,
         deleteStudentQuranPlan,

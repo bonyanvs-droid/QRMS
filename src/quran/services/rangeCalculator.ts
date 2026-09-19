@@ -8,7 +8,12 @@ import {
 import { IQuranDataProvider } from '../providers/IQuranDataProvider';
 import { formatQuranPosition, formatQuranRange } from '../utils/positionFormatter';
 import { partitionVersesByLines } from '../data/madaniLineTable';
-import { getSurahsInRangeByDirection, getSurahArabicName } from '../../utils/quranMetadata';
+import {
+  getSurahsInRangeByDirection,
+  getSurahsByDirection,
+  getSurahAyahsCount,
+  getSurahArabicName,
+} from '../../utils/quranMetadata';
 
 /**
  * Range and Planning Unit Calculator
@@ -408,7 +413,10 @@ export class RangeCalculator {
     direction: 'forward' | 'backward' = 'backward',
     consolidationDays = 3,
     revisionDailyPages = 1,
-    initialMemorizedVerses: Ayah[] = []
+    initialMemorizedVerses: Ayah[] = [],
+    revisionDirection: 'forward' | 'backward' = 'backward',
+    revisionUnitKind: 'page' | 'surah' = 'page',
+    revisionUnitsPerWindow?: number
   ): Promise<PlanningUnit[]> {
     const surahs = getSurahsInRangeByDirection(start.surahNumber, end.surahNumber, direction);
     if (!surahs || surahs.length === 0) return [];
@@ -419,15 +427,9 @@ export class RangeCalculator {
     // Auto Minor Revision: seeded with the student's prior memorization so the rolling
     // window rotates across prior + new memorization as one pool.
     const memorizedVersesAccumulator: Ayah[] = [...initialMemorizedVerses];
+    // Offset 0 always targets the first revision window in the resolved
+    // revision direction — 'backward' walks the pool newest → oldest.
     let revisionWindowOffset = 0;
-    if (initialMemorizedVerses.length > 0) {
-      // Start the window at the most recently memorized pages (nearest to plan start)
-      const seedPageCount = new Set(initialMemorizedVerses.map((v) => v.pageNumber)).size;
-      revisionWindowOffset = Math.max(
-        0,
-        seedPageCount - Math.max(1, Math.round(revisionDailyPages))
-      );
-    }
 
     for (let sIdx = 0; sIdx < surahs.length; sIdx++) {
       const surahEntry = surahs[sIdx];
@@ -518,7 +520,10 @@ export class RangeCalculator {
         const revisionInfo = this.computeRollingRevision(
           memorizedVersesAccumulator,
           revisionDailyPages,
-          revisionWindowOffset
+          revisionWindowOffset,
+          revisionDirection,
+          revisionUnitKind,
+          revisionUnitsPerWindow
         );
         revisionWindowOffset = revisionInfo.nextOffset;
 
@@ -562,7 +567,10 @@ export class RangeCalculator {
           const revisionInfo = this.computeRollingRevision(
             memorizedVersesAccumulator,
             revisionDailyPages,
-            revisionWindowOffset
+            revisionWindowOffset,
+            revisionDirection,
+            revisionUnitKind,
+            revisionUnitsPerWindow
           );
           revisionWindowOffset = revisionInfo.nextOffset;
 
@@ -590,14 +598,56 @@ export class RangeCalculator {
   }
 
   /**
+   * Returns all verses of surahs that are FULLY memorized before the given
+   * position in the governed learning order — the canonical revision seed.
+   *
+   * Eligibility rule: the current INCOMPLETE surah is intentionally excluded;
+   * it only becomes revision-eligible once the whole surah is confirmed
+   * memorized. For backward plans the governed order is
+   * [الفاتحة، الناس، الفلق، …] so Al-Fatihah is correctly included whenever
+   * the student has progressed past it.
+   */
+  async getCompletedMemorizedVerses(
+    upToPosition: QuranPosition,
+    direction: 'forward' | 'backward'
+  ): Promise<Ayah[]> {
+    const ordered = getSurahsByDirection(direction);
+    const idx = ordered.findIndex((s) => s.number === upToPosition.surahNumber);
+    if (idx === -1) return [];
+
+    const ayahCount = ordered[idx].ayahsCount || getSurahAyahsCount(upToPosition.surahNumber);
+    // Include the current surah only when it is fully memorized
+    const completeCount = upToPosition.ayahNumber >= ayahCount ? idx + 1 : idx;
+
+    const verses: Ayah[] = [];
+    for (const s of ordered.slice(0, completeCount)) {
+      const count = s.ayahsCount || getSurahAyahsCount(s.number);
+      for (let a = 1; a <= count; a++) {
+        const v = await this.provider.getAyah(s.number, a);
+        if (v) verses.push(v);
+      }
+    }
+    return verses;
+  }
+
+  /**
    * Calculates the rolling revision window across accumulated memorized verses.
    * If accumulated memorized amount is smaller than the daily revision limit (e.g. 1 page),
-   * it reviews the total memorized so far. Once larger, it rolls sequentially across pages.
+   * it reviews the total memorized so far. Once larger, it rolls sequentially across
+   * the window units (pages by default, or whole surahs for 'surahs' mode).
+   *
+   * `revisionDirection` is independent of the memorization direction:
+   *  - 'forward'  → the window advances in learning order (oldest → newest)
+   *  - 'backward' → the window reviews the newest memorized content first
+   *                 and rolls back toward the oldest.
    */
   computeRollingRevision(
     memorizedVerses: Ayah[],
     revisionDailyPages: number,
-    currentOffset: number
+    currentOffset: number,
+    revisionDirection: 'forward' | 'backward' = 'forward',
+    unitKind: 'page' | 'surah' = 'page',
+    unitsPerWindow?: number
   ): {
     displayLabel: string;
     pageStart?: number;
@@ -611,18 +661,24 @@ export class RangeCalculator {
       };
     }
 
-    // Extract unique pages represented in the memorized verses (ordered by learning order)
-    const uniquePages: number[] = [];
+    // Extract unique window units in learning (insertion) order — page numbers
+    // for page-mode windows, surah numbers for surah-mode windows.
+    const learningOrderedKeys: number[] = [];
     for (const v of memorizedVerses) {
-      if (!uniquePages.includes(v.pageNumber)) {
-        uniquePages.push(v.pageNumber);
+      const key = unitKind === 'surah' ? v.surahNumber : v.pageNumber;
+      if (!learningOrderedKeys.includes(key)) {
+        learningOrderedKeys.push(key);
       }
     }
 
-    const targetPageCount = Math.max(1, Math.round(revisionDailyPages));
+    // Independent revision direction: 'backward' walks the pool newest → oldest.
+    const orderedKeys =
+      revisionDirection === 'backward' ? [...learningOrderedKeys].reverse() : learningOrderedKeys;
+
+    const targetUnitCount = Math.max(1, Math.round(unitsPerWindow ?? revisionDailyPages));
 
     // Case 1: Total memorized is within or equal to the daily limit (e.g. <= 1 page or few verses)
-    if (uniquePages.length <= targetPageCount) {
+    if (orderedKeys.length <= targetUnitCount) {
       const firstSurah = memorizedVerses[0];
       const lastSurah = memorizedVerses[memorizedVerses.length - 1];
 
@@ -640,24 +696,28 @@ export class RangeCalculator {
         displayLabel = `مراجعة: من ${startName} (${firstSurah.ayahNumber}) إلى ${endName} (${lastSurah.ayahNumber})`;
       }
 
+      const allPages = memorizedVerses.map((v) => v.pageNumber);
       return {
         displayLabel,
-        pageStart: uniquePages[0],
-        pageEnd: uniquePages[uniquePages.length - 1],
+        pageStart: Math.min(...allPages),
+        pageEnd: Math.max(...allPages),
         nextOffset: 0,
       };
     }
 
-    // Case 2: Total memorized exceeds daily revision limit -> rolling window across uniquePages
-    const safeOffset = currentOffset % uniquePages.length;
-    const windowPages: number[] = [];
-    for (let i = 0; i < targetPageCount; i++) {
-      const pIdx = (safeOffset + i) % uniquePages.length;
-      windowPages.push(uniquePages[pIdx]);
+    // Case 2: Total memorized exceeds daily revision limit -> rolling window across units
+    const safeOffset = currentOffset % orderedKeys.length;
+    const windowKeys: number[] = [];
+    for (let i = 0; i < targetUnitCount; i++) {
+      const pIdx = (safeOffset + i) % orderedKeys.length;
+      windowKeys.push(orderedKeys[pIdx]);
     }
 
-    // Find verses matching these window pages to format detailed label
-    const windowVerses = memorizedVerses.filter((v) => windowPages.includes(v.pageNumber));
+    // Find verses matching these window units to format detailed label
+    const windowKeySet = new Set(windowKeys);
+    const windowVerses = memorizedVerses.filter((v) =>
+      windowKeySet.has(unitKind === 'surah' ? v.surahNumber : v.pageNumber)
+    );
     const firstVerse = windowVerses[0] || memorizedVerses[0];
     const lastVerse = windowVerses[windowVerses.length - 1] || memorizedVerses[memorizedVerses.length - 1];
 
@@ -675,9 +735,10 @@ export class RangeCalculator {
       displayLabel = `مراجعة: من ${sStart} (${firstVerse.ayahNumber}) إلى ${sEnd} (${lastVerse.ayahNumber})`;
     }
 
+    const windowPages = windowVerses.map((v) => v.pageNumber);
     const minPage = Math.min(...windowPages);
     const maxPage = Math.max(...windowPages);
-    const nextOffset = (safeOffset + targetPageCount) % uniquePages.length;
+    const nextOffset = (safeOffset + targetUnitCount) % orderedKeys.length;
 
     return {
       displayLabel,

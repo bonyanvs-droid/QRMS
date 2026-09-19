@@ -16,7 +16,6 @@ import {
 } from '../types/plan';
 import { Ayah } from '../types';
 import { IQuranDataProvider } from '../providers/IQuranDataProvider';
-import { getSurahAyahsCount } from '../../utils/quranMetadata';
 import { RangeCalculator } from './rangeCalculator';
 import {
   generateWorkingDates,
@@ -47,6 +46,18 @@ export interface CreateMemorizationPlanParams {
   autoMinorRevisionMode?: boolean;
   /** Manual minor-revision range — used when autoMinorRevisionMode is false */
   manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
+  /**
+   * Independent revision direction — 'forward' reviews in learning order,
+   * 'backward' reviews newest memorized content first. Persisted on the plan
+   * so recalculation keeps the same direction.
+   */
+  revisionDirection?: 'forward' | 'backward';
+  /** Rolling-window granularity: 'page' (default) or 'surah' (surah-mode revision) */
+  revisionUnitKind?: 'page' | 'surah';
+  /** Units per rolling window when revisionUnitKind = 'surah' (template surahsPerDay) */
+  revisionUnitsPerWindow?: number;
+  /** Template revision mode persisted into plan.revisionSettings */
+  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
 }
 
 export class QuranMemorizationPlanningEngine {
@@ -67,49 +78,34 @@ export class QuranMemorizationPlanningEngine {
     const revisionDailyPages = params.revisionDailyPages !== undefined ? params.revisionDailyPages : 1;
     const autoMinorRevision = params.autoMinorRevisionMode !== false; // ON by default for newly created plans
 
+    const revisionDirection: 'forward' | 'backward' = params.revisionDirection || 'backward';
+    const revisionUnitKind: 'page' | 'surah' = params.revisionUnitKind || 'page';
+
     // Seed the revision pool with prior memorization (before plan start) when Auto Minor
     // Revision is enabled — prior + new memorization form one revision set.
+    // Eligibility: only FULLY memorized surahs before the plan start are seeded —
+    // the current incomplete surah is never revision-eligible.
     let priorMemorizedVerses: Ayah[] = [];
     if (autoMinorRevision) {
-      const priorStart: QuranPosition =
-        params.direction === 'backward'
-          ? { surahNumber: 114, ayahNumber: 1 }
-          : { surahNumber: 1, ayahNumber: 1 };
-      let priorEnd: QuranPosition | null = null;
-      if (params.targetStart.ayahNumber > 1) {
-        priorEnd = {
-          surahNumber: params.targetStart.surahNumber,
-          ayahNumber: params.targetStart.ayahNumber - 1,
-        };
-      } else if (params.direction === 'backward' && params.targetStart.surahNumber < 114) {
-        priorEnd = {
-          surahNumber: params.targetStart.surahNumber + 1,
-          ayahNumber: getSurahAyahsCount(params.targetStart.surahNumber + 1),
-        };
-      } else if (params.direction === 'forward' && params.targetStart.surahNumber > 1) {
-        priorEnd = {
-          surahNumber: params.targetStart.surahNumber - 1,
-          ayahNumber: getSurahAyahsCount(params.targetStart.surahNumber - 1),
-        };
-      }
-      if (priorEnd) {
-        try {
-          priorMemorizedVerses = await this.provider.getAyahsInRange(
-            priorStart,
-            priorEnd,
-            params.direction
-          );
-        } catch {
-          priorMemorizedVerses = [];
-        }
+      try {
+        priorMemorizedVerses = await this.rangeCalculator.getCompletedMemorizedVerses(
+          {
+            surahNumber: params.targetStart.surahNumber,
+            ayahNumber: Math.max(0, params.targetStart.ayahNumber - 1),
+          },
+          params.direction
+        );
+      } catch {
+        priorMemorizedVerses = [];
       }
     } else if (params.manualRevisionRange) {
-      // Manual mode: seed the revision pool from the explicitly chosen range
+      // Manual mode: seed the revision pool from the explicitly chosen range,
+      // ordered by the INDEPENDENT revision direction (not memorization direction)
       try {
         priorMemorizedVerses = await this.provider.getAyahsInRange(
           params.manualRevisionRange.start,
           params.manualRevisionRange.end,
-          params.direction
+          revisionDirection
         );
       } catch {
         priorMemorizedVerses = [];
@@ -131,7 +127,10 @@ export class QuranMemorizationPlanningEngine {
       params.direction,
       consolidationDays,
       revisionDailyPages,
-      priorMemorizedVerses
+      priorMemorizedVerses,
+      revisionDirection,
+      revisionUnitKind,
+      params.revisionUnitsPerWindow
     );
 
     if (units.length === 0) {
@@ -353,6 +352,13 @@ export class QuranMemorizationPlanningEngine {
       consolidationDaysPerSurah: consolidationDays,
       autoMinorRevisionMode: autoMinorRevision,
       manualRevisionRange: params.manualRevisionRange,
+      revisionDirection,
+      revisionSettings: {
+        mode: params.revisionMode || 'pages',
+        surahsPerDay: params.revisionUnitsPerWindow,
+        unitType: revisionUnitKind,
+        direction: revisionDirection,
+      },
       schedule: params.schedule,
       originalTarget: originalSnapshot,
       currentPosition: params.targetStart,
