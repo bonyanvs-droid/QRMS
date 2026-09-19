@@ -1004,7 +1004,7 @@ export const CurriculumTemplatesTab: React.FC = () => {
       {/* Add SubLesson Modal */}
       {selectedLessonForSub && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 animate-fadeIn max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-black text-sm text-slate-900">إضافة فقرة فرعية للدرس</h3>
               <button

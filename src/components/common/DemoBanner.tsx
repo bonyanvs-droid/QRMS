@@ -201,7 +201,7 @@ export const DemoBanner: React.FC = () => {
           id="demo-write-blocked-modal"
           className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
         >
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-amber-300 animate-in zoom-in-95 text-right font-sans">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-amber-300 animate-in zoom-in-95 text-right font-sans max-h-[92vh] overflow-y-auto">
             <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mb-4 mx-auto">
               <Lock className="w-6 h-6" />
             </div>

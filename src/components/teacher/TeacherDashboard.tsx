@@ -76,7 +76,7 @@ const ToolModal: React.FC<ToolModalProps> = ({ title, icon, onClose, children, w
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className={`bg-white rounded-2xl w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} shadow-2xl border border-slate-200 my-auto`}
+      className={`bg-white rounded-2xl w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} shadow-2xl border border-slate-200 my-auto max-h-[92vh] overflow-y-auto`}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">

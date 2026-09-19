@@ -91,7 +91,7 @@ export function TenantAdMarquee({ config }: Props) {
       {/* Video Modal Player */}
       {selectedVideoAd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 rounded-3xl max-w-3xl w-full overflow-hidden border border-slate-700 shadow-2xl">
+          <div className="bg-slate-900 rounded-3xl max-w-3xl w-full overflow-hidden border border-slate-700 shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-slate-800 text-white">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <Video className="w-4 h-4 text-amber-400" />

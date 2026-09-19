@@ -2097,7 +2097,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Payment Modal */}
       {isPaymentModalOpen && selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h4 className="font-bold text-slate-900 text-sm">تسجيل سداد رسوم للطالب</h4>
@@ -2239,7 +2239,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Payment History Modal */}
       {viewingPaymentsRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h4 className="font-bold text-slate-900 text-sm">سجل دفعات الطالب</h4>
@@ -2309,7 +2309,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Revenue Modal */}
       {isRevenueModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h4 className="font-bold text-slate-900 text-sm">تسجيل إيراد جديد</h4>
               <button onClick={() => setIsRevenueModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -2383,7 +2383,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Expense Modal */}
       {isExpenseModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h4 className="font-bold text-slate-900 text-sm">تسجيل مصروف عام</h4>
               <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -2471,7 +2471,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Custody Modal */}
       {isCustodyModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h4 className="font-bold text-slate-900 text-sm">إنشاء عهدة مالية جديدة</h4>
               <button onClick={() => setIsCustodyModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -2536,7 +2536,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Custody Expense Modal */}
       {isCustodyExpenseModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h4 className="font-bold text-slate-900 text-sm">تسجيل فاتورة / بند مصروف للعهدة</h4>
               <button onClick={() => setIsCustodyExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -2611,7 +2611,7 @@ export const FinancialManagementTab: React.FC = () => {
       {/* Budget Request Modal */}
       {isBudgetModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h4 className="font-bold text-slate-900 text-sm">طلب ميزانية لبرنامج أو نشاط</h4>
               <button onClick={() => setIsBudgetModalOpen(false)} className="text-slate-400 hover:text-slate-600">

@@ -799,7 +799,7 @@ const MainLayout: React.FC = () => {
 
       {/* Mobile Bottom Bar for Quick Navigation (Strict 1:1 Parity with Sidebar) */}
       {effectiveUser && (
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-xl px-1 sm:px-2 py-1 flex items-center justify-around overflow-x-auto scrollbar-none">
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-xl px-1 sm:px-2 pt-1 qrms-safe-bottom flex items-center justify-around overflow-x-auto scrollbar-none">
           {bottomNavItems.map((item) => {
             const Icon = item.icon;
             const itemPath = item.path || '';

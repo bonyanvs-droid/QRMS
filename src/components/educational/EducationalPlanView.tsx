@@ -1017,7 +1017,7 @@ export const EducationalPlanView: React.FC = () => {
       {/* Confirmation Modal (In-App Dialog) */}
       {confirmModal && confirmModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-scale-up text-right">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-scale-up text-right max-h-[92vh] overflow-y-auto">
             <div className="flex items-start gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-6 h-6" />

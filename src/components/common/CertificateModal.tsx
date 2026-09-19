@@ -45,7 +45,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white print:static">
-      <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-8 print:shadow-none print:border-none print:m-0 print:max-w-none">
+      <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-8 print:shadow-none print:border-none print:m-0 print:max-w-none max-h-[92vh] overflow-y-auto">
         {/* Top Screen Control Bar (Hidden on print) */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white print:hidden">
           <div className="flex items-center gap-2">

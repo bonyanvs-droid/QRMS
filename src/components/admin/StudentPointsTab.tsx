@@ -387,7 +387,7 @@ export const StudentPointsTab: React.FC = () => {
       {/* MODAL: Rule Add / Edit */}
       {isRuleModalOpen && (
         <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-xl border border-slate-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900">
                 {editingRule ? 'تعديل قاعدة نقاط' : 'إضافة قاعدة نقاط جديدة'}
@@ -489,7 +489,7 @@ export const StudentPointsTab: React.FC = () => {
       {/* MODAL: Award Points */}
       {isAwardModalOpen && (
         <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-xl border border-slate-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900">منح نقاط تحفيزية لطالب</h3>
               <button

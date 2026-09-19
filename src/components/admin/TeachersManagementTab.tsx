@@ -533,7 +533,7 @@ export const TeachersManagementTab: React.FC = () => {
       {/* Add / Edit Teacher Modal */}
       {(isAddModalOpen || editingTeacher) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h3 className="text-base font-black text-slate-900">
                 {editingTeacher ? 'تعديل بيانات المعلم' : 'إضافة معلم جديد'}
@@ -713,7 +713,7 @@ export const TeachersManagementTab: React.FC = () => {
       {/* Archive Confirmation Modal */}
       {archivingTeacherTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center gap-3 text-amber-800 pb-3 border-b border-slate-100">
               <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
                 <Archive className="w-5 h-5 text-amber-700" />
@@ -854,7 +854,7 @@ export const TeachersManagementTab: React.FC = () => {
       {/* Permanent Delete Confirmation */}
       {deleteConfirmTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-rose-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-rose-200 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center gap-2.5 text-rose-700 pb-3 border-b border-slate-100">
               <ShieldAlert className="w-5 h-5" />
               <h3 className="text-sm font-black text-rose-900">تأكيد الحذف النهائي</h3>

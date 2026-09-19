@@ -33,7 +33,7 @@ export const TrackNominationCardModal: React.FC<TrackNominationCardModalProps> =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 print:shadow-none print:border-none print:p-0 print:max-w-none">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 print:shadow-none print:border-none print:p-0 print:max-w-none max-h-[92vh] overflow-y-auto">
         {/* Header - Screen only */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
           <div className="flex items-center gap-2">

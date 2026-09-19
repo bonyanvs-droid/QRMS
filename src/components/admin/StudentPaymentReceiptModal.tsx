@@ -167,7 +167,7 @@ export const StudentPaymentReceiptModal: React.FC<StudentPaymentReceiptModalProp
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-3 md:p-6 overflow-y-auto print:p-0 print:bg-white print:fixed print:inset-0">
       {/* Container Box */}
-      <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl border border-slate-200 my-auto print:border-none print:shadow-none print:rounded-none print:w-full print:max-w-none">
+      <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl border border-slate-200 my-auto print:border-none print:shadow-none print:rounded-none print:w-full print:max-w-none max-h-[92vh] overflow-y-auto">
         {/* Top Control Bar (Hidden on Print) */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900 text-white print:hidden">
           <div className="flex items-center gap-2">

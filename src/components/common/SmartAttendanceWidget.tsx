@@ -750,7 +750,7 @@ export const SmartAttendanceWidget: React.FC = () => {
       {/* 5. POPUP MODAL 1: Geo Attendance Failure Notification */}
       {geoErrorModal.open && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-slate-100 relative">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-slate-100 relative max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setGeoErrorModal({ open: false, message: '' })}
               className="absolute left-4 top-4 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"
@@ -814,7 +814,7 @@ export const SmartAttendanceWidget: React.FC = () => {
       {/* 6. POPUP MODAL 2: Manual Check-in Reason Modal */}
       {reasonModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100 max-h-[92vh] overflow-y-auto">
             <h3 className="text-sm font-bold text-slate-900">تسجيل حضور يدوي / عذر موقع</h3>
             <p className="text-xs text-slate-600">
               يرجى تحديد أو اختيار سبب الحضور اليدوي ليتم اعتماده وإرساله للمشرف والمدير:

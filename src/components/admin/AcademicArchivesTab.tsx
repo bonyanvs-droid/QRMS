@@ -98,7 +98,7 @@ export const AcademicArchivesTab: React.FC = () => {
       {/* Confirmation Modal for Term Archive */}
       {isConfirmingArchive && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
               <div className="p-2.5 rounded-2xl bg-amber-100 text-amber-900">
                 <Archive className="w-6 h-6 text-amber-800" />

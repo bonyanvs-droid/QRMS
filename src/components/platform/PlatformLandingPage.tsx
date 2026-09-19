@@ -1126,7 +1126,7 @@ export const PlatformLandingPage: React.FC<PlatformLandingPageProps> = ({
       {/* 12. INQUIRY / LIVE DEMO REQUEST MODAL */}
       {showInquiryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setShowInquiryModal(false)}
               className="absolute top-5 left-5 p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700"

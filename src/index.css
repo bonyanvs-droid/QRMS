@@ -161,3 +161,16 @@
     display: table-footer-group !important;
   }
 }
+
+/* QRMS platform-wide responsive guards */
+html, body {
+  overflow-x: hidden;
+}
+
+/* iPhone notch safe areas — keeps fixed bars/buttons reachable */
+.qrms-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.qrms-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
