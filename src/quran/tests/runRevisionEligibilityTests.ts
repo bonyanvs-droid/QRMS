@@ -19,6 +19,7 @@ import {
 } from '../services/studentPlanBridge';
 import { StageQuranConfig } from '../models/stageConfig';
 import { Student, Halaqah, AcademicYearConfig } from '../../types';
+import { Ayah } from '../types';
 
 const provider = new BundledQuranProvider();
 const engine = new QuranMemorizationPlanningEngine(provider);
@@ -505,23 +506,51 @@ async function main() {
       'TEST15b: دورة اليدوي تعمل على نطاق المستخدم',
       m1
     );
-    // Recalc on a manual plan must also NOT anchor the newly eligible surah.
-    const d2 = mDays[1];
+    // Recalc on a manual plan with FORWARD revision direction: the rebuilt
+    // cycle must start at the configured cycle start (oldest of the manual
+    // range = الكافرون), NOT anchored at the newly-eligible الكوثر — in forward
+    // traversal الكوثر sits at the END of orderedKeys, so an anchor there is
+    // observable and must not happen in manual mode.
+    const manualFwd = await engine.createPlan({
+      studentId: 's_manual_fwd',
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 108, ayahNumber: 1 },
+      targetEnd: { surahNumber: 106, ayahNumber: 4 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: false,
+      manualRevisionRange: {
+        start: { surahNumber: 114, ayahNumber: 1 },
+        end: { surahNumber: 109, ayahNumber: 6 },
+      },
+      revisionDirection: 'forward',
+      revisionUnitKind: 'surah',
+      revisionUnitsPerWindow: 2,
+    });
+    const mfDays = manualFwd.generatedPlan.dailyPlans;
     const mUpdated = await recalc.recordDailyAchievement({
-      plan: manualPlan,
-      dayDate: d2.date,
+      plan: manualFwd,
+      dayDate: mfDays[1].date,
       status: 'completed',
       actualEndPosition: { surahNumber: 108, ayahNumber: 3 },
       recordedBy: 'اختبار',
     });
-    const mFuture = mUpdated.generatedPlan.dailyPlans;
-    const mFirstMaun = mFuture.find(
+    const mFirstMaun = mUpdated.generatedPlan.dailyPlans.find(
       (d) => !d.isHistorical && !d.isConsolidationDay && d.targetUnit.start.surahNumber === 107
     );
+    // Manual seed preserves the user range's own orientation (الناس→الكافرون);
+    // forward revision keeps it → the rebuilt cycle restarts at الناس (cycle
+    // head), never anchored at the newly-eligible surah.
     assert(
-      !!mFirstMaun && !hasSurah(revLabel(mFirstMaun), 'الكوثر') ||
-        (mFirstMaun && revLabel(mFirstMaun).indexOf('الكوثر') > 0),
-      'TEST15c: إعادة حساب الوضع اليدوي لا تثبّت الدورة على السورة الجديدة',
+      !!mFirstMaun &&
+        revLabel(mFirstMaun).startsWith('مراجعة: الناس') &&
+        !hasSurah(revLabel(mFirstMaun), 'الكوثر'),
+      'TEST15c: إعادة حساب الوضع اليدوي تبدأ من بداية دورة المستخدم (الناس) وليس الكوثر',
       mFirstMaun ? revLabel(mFirstMaun) : 'not found'
     );
   }
@@ -573,13 +602,20 @@ async function main() {
       'TEST10s: نافذة سورتين تعرض مقطعين منفصلين بـ"+" وليس "من..إلى"',
       l1
     );
-    const wrapDay = days.find(
-      (d) => hasSurah(revLabel(d), 'الفاتحة') && hasSurah(revLabel(d), 'الكافرون')
-    );
+    // Cycle boundary: الفاتحة is the LAST unit of the backward traversal — the
+    // day it is reached takes ONLY الفاتحة, and the next day opens a new cycle.
+    const fatihaDay = days.find((d) => revLabel(d) === 'مراجعة: الفاتحة (1 - 7)');
     assert(
-      !!wrapDay && revLabel(wrapDay).includes('الفاتحة (1 - 7)') && revLabel(wrapDay).includes('الكافرون (1 - 6)'),
-      'TEST10s2: الفاتحة (1-7) + الكافرون (1-6) — سورتان كاملتان بنطاقاتهما',
-      wrapDay ? revLabel(wrapDay) : 'not found'
+      !!fatihaDay,
+      'TEST10s2: نهاية الدورة تأخذ الفاتحة وحدها — لا التفاف داخل اليوم',
+      days.map(revLabel).find((l) => l.includes('الفاتحة'))
+    );
+    const fatihaIdx = fatihaDay ? days.indexOf(fatihaDay) : -1;
+    const nextAfter = fatihaIdx >= 0 ? days[fatihaIdx + 1] : undefined;
+    assert(
+      !!nextAfter && revLabel(nextAfter).includes('الكافرون'),
+      'TEST10s3: اليوم التالي يبدأ دورة جديدة من بدايتها (الكافرون)',
+      nextAfter ? revLabel(nextAfter) : 'none'
     );
   }
 
@@ -686,6 +722,72 @@ async function main() {
       anchored.displayLabel.includes('الكافرون') && !anchored.displayLabel.includes('الكوثر'),
       'TEST12b: forward مع anchor=109 يبدأ من الكافرون (موضعها في traversal)',
       anchored.displayLabel
+    );
+  }
+
+  console.log('\n=== TEST 16. Cycle boundary — no cross-cycle window (A B C D E / 2 per day) ===');
+  {
+    // Pool of 5 surahs → windows of 2 must produce: [A B] [C D] [E] [A B] [C D]
+    const pool: Ayah[] = [];
+    for (const s of [108, 109, 110, 111, 112]) {
+      const cnt = s === 108 ? 3 : s === 112 ? 4 : 5;
+      for (let a = 1; a <= cnt; a++) {
+        const v = await provider.getAyah(s, a);
+        if (v) pool.push(v);
+      }
+    }
+    const seq: string[] = [];
+    let off = 0;
+    for (let d = 0; d < 5; d++) {
+      const r = rangeCalc.computeRollingRevision(pool, 1, off, 'forward', 'surah', 2);
+      seq.push(r.displayLabel);
+      off = r.nextOffset;
+    }
+    assert(
+      seq[0].includes('الكوثر') && seq[0].includes('الكافرون'),
+      'TEST16a: اليوم 1 = A+B', seq[0]);
+    assert(
+      seq[1].includes('النصر') && seq[1].includes('المسد'),
+      'TEST16b: اليوم 2 = C+D', seq[1]);
+    assert(
+      seq[2].includes('الإخلاص') && !seq[2].includes('+'),
+      'TEST16c: اليوم 3 = E فقط — لا تعبُر إلى بداية الدورة', seq[2]);
+    assert(
+      seq[3].includes('الكوثر') && seq[3].includes('الكافرون'),
+      'TEST16d: اليوم 4 يبدأ دورة جديدة A+B', seq[3]);
+    assert(
+      seq[4].includes('النصر') && seq[4].includes('المسد'),
+      'TEST16e: اليوم 5 = C+D', seq[4]);
+  }
+
+  console.log('\n=== TEST 17. Cycle boundary in page mode ===');
+  {
+    // Pool = العلق (page 597) + القدر (598) + البينة (598-599) → keys
+    // [597,598,599], 2 pages/day → day2 gets only the last page, day3 restarts.
+    const pool: Ayah[] = [];
+    for (const s of [96, 97, 98]) {
+      const cnt = s === 96 ? 19 : s === 97 ? 5 : 8;
+      for (let a = 1; a <= cnt; a++) {
+        const v = await provider.getAyah(s, a);
+        if (v) pool.push(v);
+      }
+    }
+    const seq: { label: string; ps?: number; pe?: number }[] = [];
+    let off = 0;
+    for (let d = 0; d < 4; d++) {
+      const r = rangeCalc.computeRollingRevision(pool, 2, off, 'forward', 'page');
+      seq.push({ label: r.displayLabel, ps: r.pageStart, pe: r.pageEnd });
+      off = r.nextOffset;
+    }
+    assert(
+      seq[1].ps === 599 && seq[1].pe === 599,
+      'TEST17a: اليوم 2 = آخر صفحة فقط (599) بلا التفاف',
+      `${seq[1].label} p${seq[1].ps}-${seq[1].pe}`
+    );
+    assert(
+      seq[2].ps === 597 && seq[2].pe === 598,
+      'TEST17b: اليوم 3 يبدأ دورة جديدة من أول صفحة (597)',
+      `${seq[2].label} p${seq[2].ps}-${seq[2].pe}`
     );
   }
 

@@ -741,10 +741,14 @@ export class RangeCalculator {
       );
       if (anchored >= 0) safeOffset = anchored;
     }
+    // Cycle boundary rule: a daily window NEVER crosses the end of the
+    // revision cycle — it takes only what remains of the current cycle, and
+    // the next working day starts a new cycle from its beginning.
+    const remainingInCycle = orderedKeys.length - safeOffset;
+    const take = Math.min(targetUnitCount, remainingInCycle);
     const windowKeys: number[] = [];
-    for (let i = 0; i < targetUnitCount; i++) {
-      const pIdx = (safeOffset + i) % orderedKeys.length;
-      windowKeys.push(orderedKeys[pIdx]);
+    for (let i = 0; i < take; i++) {
+      windowKeys.push(orderedKeys[safeOffset + i]);
     }
 
     // Find verses matching these window units to format detailed label
@@ -766,7 +770,9 @@ export class RangeCalculator {
     const windowPages = windowVerses.map((v) => v.pageNumber);
     const minPage = Math.min(...windowPages);
     const maxPage = Math.max(...windowPages);
-    const nextOffset = (safeOffset + targetUnitCount) % orderedKeys.length;
+    // Reaching the cycle end rolls nextOffset to 0 → the next day opens a new
+    // cycle at its start; the window itself never wraps mid-day.
+    const nextOffset = (safeOffset + take) % orderedKeys.length;
 
     return {
       displayLabel,
