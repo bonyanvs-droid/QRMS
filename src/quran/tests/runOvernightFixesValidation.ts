@@ -229,12 +229,16 @@ async function main() {
 
     // Once the plan covers the surah cumulatively it becomes eligible — the
     // seed fix only controls what was memorized BEFORE the plan.
+    // Auto Minor Revision now restarts the cycle at each newly-eligible surah
+    // (newest-first), so a large prior pool's tail may not be reached within a
+    // restart-heavy plan. Use a small pool (plan starts at الناس → seed = الفاتحة
+    // only) to verify الفاتحة still cycles inside the eligible pool.
     const plan = await engine.createPlan({
       studentId: 's2',
       startDate: '2026-02-01',
       endDate: '2026-04-30',
-      targetStart: { surahNumber: 81, ayahNumber: 16 },
-      targetEnd: { surahNumber: 78, ayahNumber: 40 },
+      targetStart: { surahNumber: 114, ayahNumber: 1 },
+      targetEnd: { surahNumber: 112, ayahNumber: 4 },
       direction: 'backward',
       unitType: 'ayah',
       dailyAmount: 5,
@@ -438,25 +442,25 @@ async function main() {
     const records: DailySessionRecord[] = [
       // in-window record of THIS student (related)
       {
-        id: 'rec_a', studentId: 'std_arch', teacherId: 't1', date: '2026-02-03',
+        id: 'rec_a', studentId: 'std_arch', teacherId: 't1', halaqahId: 'hq_1', date: '2026-02-03',
         weekNumber: 1, attendance: 'present',
         memorization: { surahFrom: 'الناس', ayahFrom: 1, surahTo: 'الناس', ayahTo: 4, score: 90 },
       } as DailySessionRecord,
       // record of ANOTHER student in same window (not related)
       {
-        id: 'rec_b', studentId: 'other', teacherId: 't1', date: '2026-02-03',
+        id: 'rec_b', studentId: 'other', teacherId: 't1', halaqahId: 'hq_1', date: '2026-02-03',
         weekNumber: 1, attendance: 'present',
         memorization: { surahFrom: 'الناس', ayahFrom: 1, surahTo: 'الناس', ayahTo: 4, score: 90 },
       } as DailySessionRecord,
       // same student but BEFORE plan window (not related — older history)
       {
-        id: 'rec_c', studentId: 'std_arch', teacherId: 't1', date: '2026-01-01',
+        id: 'rec_c', studentId: 'std_arch', teacherId: 't1', halaqahId: 'hq_1', date: '2026-01-01',
         weekNumber: 1, attendance: 'present',
         memorization: { surahFrom: 'الفاتحة', ayahFrom: 1, surahTo: 'الفاتحة', ayahTo: 7, score: 90 },
       } as DailySessionRecord,
       // explicitly linked via _quranPlanId even if outside window (related)
       {
-        id: 'rec_d', studentId: 'std_arch', teacherId: 't1', date: '2026-05-01',
+        id: 'rec_d', studentId: 'std_arch', teacherId: 't1', halaqahId: 'hq_1', date: '2026-05-01',
         weekNumber: 1, attendance: 'present',
         memorization: { surahFrom: 'الكوثر', ayahFrom: 1, surahTo: 'الكوثر', ayahTo: 3, score: 90 },
         customTracks: { _quranPlanId: plan.id },

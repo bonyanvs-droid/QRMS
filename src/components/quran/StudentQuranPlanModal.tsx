@@ -1077,6 +1077,22 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                       </span>
                     </div>
                     <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">نمط المراجعة</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.autoMinorRevisionMode !== false
+                          ? 'تلقائية (الأحدث أولوية)'
+                          : 'يدوية (نطاق ثابت)'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">وحدة المراجعة</span>
+                      <span className="font-black text-slate-900">
+                        {previewPlan.revisionSettings?.unitType === 'surah'
+                          ? `${previewPlan.revisionSettings?.surahsPerDay ?? 1} سور يوميًا`
+                          : `${previewPlan.revisionDailyPages ?? 1} صفحة يوميًا`}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
                       <span className="text-[10px] text-slate-500 block">المسارات المفعلة</span>
                       <span className="font-black text-slate-900">
                         {(previewPlan.activeTrackIds || []).includes('track_spelling')
@@ -1088,6 +1104,12 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                       <span className="text-[10px] text-slate-500 block">أول يوم مقرر</span>
                       <span className="font-black text-emerald-900 font-['Amiri',serif]">
                         {previewPlan.generatedPlan?.dailyPlans?.[0]?.targetUnit?.displayLabel || '—'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-xl border border-blue-200 p-2.5">
+                      <span className="text-[10px] text-slate-500 block">مراجعة اليوم الأول</span>
+                      <span className="font-black text-blue-900 font-['Amiri',serif]">
+                        {previewPlan.generatedPlan?.dailyPlans?.[0]?.revisionDisplayLabel || '—'}
                       </span>
                     </div>
                   </div>

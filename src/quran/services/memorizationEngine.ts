@@ -130,7 +130,8 @@ export class QuranMemorizationPlanningEngine {
       priorMemorizedVerses,
       revisionDirection,
       revisionUnitKind,
-      params.revisionUnitsPerWindow
+      params.revisionUnitsPerWindow,
+      autoMinorRevision
     );
 
     if (units.length === 0) {

@@ -556,7 +556,9 @@ export class PlanRecalculationService {
       seed,
       revisionDirection,
       revisionUnitKind,
-      revisionUnitsPerWindow
+      revisionUnitsPerWindow,
+      plan.autoMinorRevisionMode === true,
+      completedSurahEnd?.surahNumber
     );
 
     if (!completedSurahEnd || consolidationDays <= 0) return units;

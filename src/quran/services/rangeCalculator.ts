@@ -416,7 +416,9 @@ export class RangeCalculator {
     initialMemorizedVerses: Ayah[] = [],
     revisionDirection: 'forward' | 'backward' = 'backward',
     revisionUnitKind: 'page' | 'surah' = 'page',
-    revisionUnitsPerWindow?: number
+    revisionUnitsPerWindow?: number,
+    autoMinorRevisionMode = true,
+    cycleAnchorSurah?: number
   ): Promise<PlanningUnit[]> {
     const surahs = getSurahsInRangeByDirection(start.surahNumber, end.surahNumber, direction);
     if (!surahs || surahs.length === 0) return [];
@@ -446,6 +448,13 @@ export class RangeCalculator {
     // Offset 0 always targets the first revision window in the resolved
     // revision direction — 'backward' walks the pool newest → oldest.
     let revisionWindowOffset = 0;
+    // Auto Minor Revision: when a surah finishes memorization + consolidation
+    // and becomes eligible, the minor cycle restarts anchored at that newest
+    // eligible unit (recent memorization is revised promptly, not whenever a
+    // stale offset happens to reach it). Manual revision never gets this
+    // anchor — the user's configured cycle stays stable when the pool grows.
+    let pendingCycleAnchor: number | undefined =
+      autoMinorRevisionMode ? cycleAnchorSurah : undefined;
 
     for (let sIdx = 0; sIdx < surahs.length; sIdx++) {
       const surahEntry = surahs[sIdx];
@@ -535,8 +544,10 @@ export class RangeCalculator {
           revisionWindowOffset,
           revisionDirection,
           revisionUnitKind,
-          revisionUnitsPerWindow
+          revisionUnitsPerWindow,
+          pendingCycleAnchor
         );
+        pendingCycleAnchor = undefined;
         revisionWindowOffset = revisionInfo.nextOffset;
 
         const totalAyahs = currEndAyah;
@@ -577,8 +588,10 @@ export class RangeCalculator {
             revisionWindowOffset,
             revisionDirection,
             revisionUnitKind,
-            revisionUnitsPerWindow
+            revisionUnitsPerWindow,
+            pendingCycleAnchor
           );
+          pendingCycleAnchor = undefined;
           revisionWindowOffset = revisionInfo.nextOffset;
 
           units.push({
@@ -604,6 +617,10 @@ export class RangeCalculator {
       // now revision-eligible and join the rolling pool in learning order.
       if (pendingEligibleVerses.length > 0) {
         memorizedVersesAccumulator.push(...pendingEligibleVerses.splice(0));
+        // Auto Minor: the just-eligible surah anchors the next revision window
+        // — the cycle rebuilds from the newest eligible content rather than
+        // continuing from a stale offset that reaches it days later.
+        if (autoMinorRevisionMode) pendingCycleAnchor = surahEntry.number;
       }
     }
 
@@ -660,7 +677,8 @@ export class RangeCalculator {
     currentOffset: number,
     revisionDirection: 'forward' | 'backward' = 'forward',
     unitKind: 'page' | 'surah' = 'page',
-    unitsPerWindow?: number
+    unitsPerWindow?: number,
+    restartAtSurah?: number
   ): {
     displayLabel: string;
     pageStart?: number;
@@ -698,22 +716,7 @@ export class RangeCalculator {
         unitKind,
         revisionDirection
       );
-      const firstSurah = labelOrdered[0];
-      const lastSurah = labelOrdered[labelOrdered.length - 1];
-
-      let displayLabel = '';
-      if (firstSurah.surahNumber === lastSurah.surahNumber) {
-        const surahName = getSurahArabicName(firstSurah.surahNumber);
-        if (firstSurah.ayahNumber === lastSurah.ayahNumber) {
-          displayLabel = `مراجعة: ${surahName} (${firstSurah.ayahNumber})`;
-        } else {
-          displayLabel = `مراجعة: ${surahName} (${firstSurah.ayahNumber} - ${lastSurah.ayahNumber})`;
-        }
-      } else {
-        const startName = getSurahArabicName(firstSurah.surahNumber);
-        const endName = getSurahArabicName(lastSurah.surahNumber);
-        displayLabel = `مراجعة: من ${startName} (${firstSurah.ayahNumber}) إلى ${endName} (${lastSurah.ayahNumber})`;
-      }
+      const displayLabel = this.buildRevisionDisplayLabel(labelOrdered, unitKind);
 
       const allPages = memorizedVerses.map((v) => v.pageNumber);
       return {
@@ -725,7 +728,19 @@ export class RangeCalculator {
     }
 
     // Case 2: Total memorized exceeds daily revision limit -> rolling window across units
-    const safeOffset = currentOffset % orderedKeys.length;
+    let safeOffset = currentOffset % orderedKeys.length;
+    // Auto Minor cycle rebuild: when the eligible pool just gained a surah, the
+    // window restarts anchored at that surah's first traversal position —
+    // newest eligible content is revised promptly per the revision direction.
+    if (restartAtSurah !== undefined) {
+      const anchored = this.resolveRevisionAnchorIndex(
+        orderedKeys,
+        memorizedVerses,
+        restartAtSurah,
+        unitKind
+      );
+      if (anchored >= 0) safeOffset = anchored;
+    }
     const windowKeys: number[] = [];
     for (let i = 0; i < targetUnitCount; i++) {
       const pIdx = (safeOffset + i) % orderedKeys.length;
@@ -746,23 +761,7 @@ export class RangeCalculator {
       unitKind,
       revisionDirection
     );
-    const firstVerse = traversalOrdered[0] || memorizedVerses[0];
-    const lastVerse =
-      traversalOrdered[traversalOrdered.length - 1] || memorizedVerses[memorizedVerses.length - 1];
-
-    let displayLabel = '';
-    if (firstVerse.surahNumber === lastVerse.surahNumber) {
-      const sName = getSurahArabicName(firstVerse.surahNumber);
-      if (firstVerse.ayahNumber === lastVerse.ayahNumber) {
-        displayLabel = `مراجعة: ${sName} (${firstVerse.ayahNumber})`;
-      } else {
-        displayLabel = `مراجعة: ${sName} (${firstVerse.ayahNumber} - ${lastVerse.ayahNumber})`;
-      }
-    } else {
-      const sStart = getSurahArabicName(firstVerse.surahNumber);
-      const sEnd = getSurahArabicName(lastVerse.surahNumber);
-      displayLabel = `مراجعة: من ${sStart} (${firstVerse.ayahNumber}) إلى ${sEnd} (${lastVerse.ayahNumber})`;
-    }
+    const displayLabel = this.buildRevisionDisplayLabel(traversalOrdered, unitKind);
 
     const windowPages = windowVerses.map((v) => v.pageNumber);
     const minPage = Math.min(...windowPages);
@@ -805,5 +804,70 @@ export class RangeCalculator {
       if (rankDiff !== 0) return revisionDirection === 'backward' ? -rankDiff : rankDiff;
       return a.ayahNumber - b.ayahNumber;
     });
+  }
+
+  /**
+   * Renders the revision window label.
+   * - 'surah' windows are discrete complete surahs → each surah gets its own
+   *   ayah-range segment joined by ' + ' ("الكافرون (1 - 6) + النصر (1 - 3)")
+   *   so a 2-surah window never looks like one contiguous ayah range.
+   * - 'page' windows are physically contiguous mushaf page content → the
+   *   "من X إلى Y" range label is truthful there.
+   */
+  private buildRevisionDisplayLabel(orderedVerses: Ayah[], unitKind: 'page' | 'surah'): string {
+    const firstVerse = orderedVerses[0];
+    const lastVerse = orderedVerses[orderedVerses.length - 1];
+    if (!firstVerse || !lastVerse) return 'مراجعة: ما تم حفظه';
+
+    if (unitKind === 'surah') {
+      const segments: string[] = [];
+      let runStart: Ayah = firstVerse;
+      let prev: Ayah = firstVerse;
+      const flush = () => {
+        const name = getSurahArabicName(runStart.surahNumber);
+        segments.push(
+          runStart.ayahNumber === prev.ayahNumber
+            ? `${name} (${runStart.ayahNumber})`
+            : `${name} (${runStart.ayahNumber} - ${prev.ayahNumber})`
+        );
+      };
+      for (const v of orderedVerses) {
+        if (v.surahNumber !== runStart.surahNumber) {
+          flush();
+          runStart = v;
+        }
+        prev = v;
+      }
+      flush();
+      return `مراجعة: ${segments.join(' + ')}`;
+    }
+
+    if (firstVerse.surahNumber === lastVerse.surahNumber) {
+      const sName = getSurahArabicName(firstVerse.surahNumber);
+      return firstVerse.ayahNumber === lastVerse.ayahNumber
+        ? `مراجعة: ${sName} (${firstVerse.ayahNumber})`
+        : `مراجعة: ${sName} (${firstVerse.ayahNumber} - ${lastVerse.ayahNumber})`;
+    }
+    return `مراجعة: من ${getSurahArabicName(firstVerse.surahNumber)} (${firstVerse.ayahNumber}) إلى ${getSurahArabicName(lastVerse.surahNumber)} (${lastVerse.ayahNumber})`;
+  }
+
+  /**
+   * Resolves the traversal index where the newly-eligible surah's content
+   * begins — surah key for 'surah' windows, its first page key for 'page'
+   * windows. Returns -1 when the surah is not present in the pool.
+   */
+  private resolveRevisionAnchorIndex(
+    orderedKeys: number[],
+    memorizedVerses: Ayah[],
+    surahNumber: number,
+    unitKind: 'page' | 'surah'
+  ): number {
+    if (unitKind === 'surah') return orderedKeys.indexOf(surahNumber);
+    const surahPages = new Set(
+      memorizedVerses
+        .filter((v) => v.surahNumber === surahNumber)
+        .map((v) => v.pageNumber)
+    );
+    return orderedKeys.findIndex((k) => surahPages.has(k));
   }
 }

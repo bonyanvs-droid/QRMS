@@ -284,10 +284,26 @@ async function main() {
       'TEST9b: المستقبل أُعيد بناؤه بمراجعات متدحرجة سليمة',
       futureRev.join(' | ')
     );
+    const kawtharPhase = uDays
+      .slice(1)
+      .filter(
+        (d) => d.targetUnit.start.surahNumber === 108 || d.consolidationSurahNumber === 108
+      );
     assert(
-      futureRev.every((l) => !hasSurah(l, 'الكوثر')),
-      'TEST9c: الكوثر غير المكتملة فعليًا مستبعدة بعد إعادة الحساب',
-      futureRev.join(' | ')
+      kawtharPhase.length > 0 &&
+        kawtharPhase.every((d) => !hasSurah(revLabel(d), 'الكوثر')),
+      'TEST9c: الكوثر مستبعدة طوال أيامها المعاد بناؤها (حفظ+تثبيت)',
+      kawtharPhase.map(revLabel).join(' | ')
+    );
+    // Auto Minor: once الكوثر finishes its rebuilt consolidation it anchors the
+    // next window — the first الماعون day must start revision AT الكوثر.
+    const firstMaun = uDays.find(
+      (d) => !d.isHistorical && !d.isConsolidationDay && d.targetUnit.start.surahNumber === 107
+    );
+    assert(
+      !!firstMaun && hasSurah(revLabel(firstMaun), 'الكوثر') && hasSurah(revLabel(firstMaun), 'الكافرون'),
+      'TEST9c2: أول يوم بعد تثبيت الكوثر يبدأ الدورة من الكوثر (anchor)',
+      firstMaun ? revLabel(firstMaun) : 'not found'
     );
   }
 
@@ -403,6 +419,273 @@ async function main() {
       reloaded.generatedPlan.dailyPlans.length === 32 &&
         reloaded.generatedPlan.dailyPlans[0].revisionDisplayLabel === revLabel(pDays[0]),
       'TEST13: إعادة تحميل الخطة من JSONB تحفظ الـ32 يومًا كاملة'
+    );
+  }
+
+  console.log('\n=== TEST 14. Auto Minor ON — new eligibility restarts the minor cycle ===');
+  {
+    // bashirPlan: الكوثر becomes eligible after day 5 (mem 2 + cons 3).
+    // Day 6 (الماعون 1-1) must anchor the rebuilt cycle AT الكوثر — newest first.
+    const d6 = revLabel(days[5]);
+    assert(
+      hasSurah(d6, 'الكوثر') && hasSurah(d6, 'الكافرون') &&
+        d6.indexOf('الكوثر') < d6.indexOf('الكافرون'),
+      'TEST14a: أول يوم بعد أهلية الكوثر يبدأ من الكوثر (دورة مُعاد بناؤها)',
+      d6
+    );
+    // البينة scenario: القدر's first day must anchor at البينة.
+    const bayinahPlan = await engine.createPlan({
+      studentId: 's_bayinah',
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 98, ayahNumber: 1 },
+      targetEnd: { surahNumber: 96, ayahNumber: 19 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: true,
+      revisionDirection: 'backward',
+      revisionUnitKind: 'surah',
+      revisionUnitsPerWindow: 2,
+    });
+    const bDays = bayinahPlan.generatedPlan.dailyPlans;
+    const qadrDay = bDays.find((d) => d.targetUnit.displayLabel.startsWith('القدر'));
+    assert(
+      !!qadrDay && revLabel(qadrDay).includes('البينة'),
+      'TEST14b: القدر 1-1 يراجع البينة فور أهليتها (لا استمرار من offset قديم)',
+      qadrDay ? revLabel(qadrDay) : 'القدر غير موجود'
+    );
+    // No day before eligibility revises البينة
+    const preEligible = bDays.slice(0, bDays.indexOf(qadrDay!));
+    assert(
+      preEligible.every((d) => !revLabel(d).includes('البينة')),
+      'TEST14c: البينة مستبعدة قبل الأهلية رغم إعادة بناء الدورة'
+    );
+  }
+
+  console.log('\n=== TEST 15. Auto Minor OFF (Manual) — user cycle stays stable ===');
+  {
+    const manualPlan = await engine.createPlan({
+      studentId: 's_manual',
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 108, ayahNumber: 1 },
+      targetEnd: { surahNumber: 106, ayahNumber: 4 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: false,
+      manualRevisionRange: {
+        start: { surahNumber: 114, ayahNumber: 1 },
+        end: { surahNumber: 109, ayahNumber: 6 },
+      },
+      revisionDirection: 'backward',
+      revisionUnitKind: 'surah',
+      revisionUnitsPerWindow: 2,
+    });
+    const mDays = manualPlan.generatedPlan.dailyPlans;
+    // الكوثر becomes eligible after day 5 — day 6 must NOT anchor at it:
+    // the manual rolling cycle continues from its own offset.
+    const m6 = revLabel(mDays[5]);
+    assert(
+      !hasSurah(m6, 'الكوثر'),
+      'TEST15a: الوضع اليدوي لا يعيد بناء الدورة عند أهلية الكوثر',
+      m6
+    );
+    // The manual cycle still rolls inside the configured range (+ grown pool).
+    const m1 = revLabel(mDays[0]);
+    assert(
+      m1.startsWith('مراجعة') && (hasSurah(m1, 'الكافرون') || hasSurah(m1, 'الناس')),
+      'TEST15b: دورة اليدوي تعمل على نطاق المستخدم',
+      m1
+    );
+    // Recalc on a manual plan must also NOT anchor the newly eligible surah.
+    const d2 = mDays[1];
+    const mUpdated = await recalc.recordDailyAchievement({
+      plan: manualPlan,
+      dayDate: d2.date,
+      status: 'completed',
+      actualEndPosition: { surahNumber: 108, ayahNumber: 3 },
+      recordedBy: 'اختبار',
+    });
+    const mFuture = mUpdated.generatedPlan.dailyPlans;
+    const mFirstMaun = mFuture.find(
+      (d) => !d.isHistorical && !d.isConsolidationDay && d.targetUnit.start.surahNumber === 107
+    );
+    assert(
+      !!mFirstMaun && !hasSurah(revLabel(mFirstMaun), 'الكوثر') ||
+        (mFirstMaun && revLabel(mFirstMaun).indexOf('الكوثر') > 0),
+      'TEST15c: إعادة حساب الوضع اليدوي لا تثبّت الدورة على السورة الجديدة',
+      mFirstMaun ? revLabel(mFirstMaun) : 'not found'
+    );
+  }
+
+  console.log('\n=== TEST 8b. Page mode — real mushaf page boundaries ===');
+  {
+    const pagePlan = await engine.createPlan({
+      studentId: 's_page',
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 98, ayahNumber: 1 },
+      targetEnd: { surahNumber: 96, ayahNumber: 19 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: true,
+      revisionDirection: 'backward',
+      revisionUnitKind: 'page',
+    });
+    const pgDays = pagePlan.generatedPlan.dailyPlans;
+    // 1 page/day → a window is exactly ONE real mushaf page — never crosses pages.
+    assert(
+      pgDays.every((d) => d.revisionPageStart === d.revisionPageEnd),
+      'TEST8b: نافذة صفحة واحدة لا تعبر حدود الصفحات أبدًا',
+      pgDays
+        .filter((d) => d.revisionPageStart !== d.revisionPageEnd)
+        .map((d) => `${d.date}:${d.revisionPageStart}-${d.revisionPageEnd}`)
+        .join('|')
+    );
+    // Page 601 physically contains العصر+الهمزة+الفيل — full-page window shows all.
+    const p601 = pgDays.find(
+      (d) => d.revisionPageStart === 601 && d.revisionPageEnd === 601
+    );
+    assert(
+      !!p601 && hasSurah(revLabel(p601), 'العصر') && hasSurah(revLabel(p601), 'الفيل'),
+      'TEST8c: صفحة 601 تعرض العصر والهمزة والفيل كصفحة مصحف حقيقية',
+      p601 ? revLabel(p601) : 'page 601 not found'
+    );
+  }
+
+  console.log('\n=== TEST 10b. Surah window label — discrete surahs, not a fake range ===');
+  {
+    const l1 = revLabel(days[0]);
+    assert(
+      l1.includes('+') && !l1.includes('إلى'),
+      'TEST10s: نافذة سورتين تعرض مقطعين منفصلين بـ"+" وليس "من..إلى"',
+      l1
+    );
+    const wrapDay = days.find(
+      (d) => hasSurah(revLabel(d), 'الفاتحة') && hasSurah(revLabel(d), 'الكافرون')
+    );
+    assert(
+      !!wrapDay && revLabel(wrapDay).includes('الفاتحة (1 - 7)') && revLabel(wrapDay).includes('الكافرون (1 - 6)'),
+      'TEST10s2: الفاتحة (1-7) + الكافرون (1-6) — سورتان كاملتان بنطاقاتهما',
+      wrapDay ? revLabel(wrapDay) : 'not found'
+    );
+  }
+
+  console.log('\n=== TEST 5. Generation vs Preview — identical revision output ===');
+  {
+    const enginePlan = await engine.createPlan({
+      studentId: STUDENT.id,
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 108, ayahNumber: 1 },
+      targetEnd: { surahNumber: 105, ayahNumber: 5 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: true,
+      revisionDirection: 'backward',
+      revisionUnitKind: 'surah',
+      revisionUnitsPerWindow: 2,
+    });
+    const previewPlan = await createRealStudentPlan({
+      student: STUDENT,
+      stageConfig: TEMPLATE,
+      allStageConfigs: [TEMPLATE],
+      academicConfig: ACADEMIC,
+      halaqah,
+      customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+      customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+      customStartDate: '2026-09-20',
+      customEndDate: '2026-11-14',
+      provider,
+      memorizationEngine: engine,
+    });
+    const a = enginePlan.generatedPlan.dailyPlans.map(revLabel);
+    const b = previewPlan.generatedPlan.dailyPlans.map(revLabel);
+    assert(
+      a.length === b.length && a.every((l, i) => l === b[i]),
+      'TEST5: المعاينة والتوليد ينتجان نفس تسلسل المراجعة تمامًا'
+    );
+  }
+
+  console.log('\n=== TEST 6c. Generation vs Recalculation — same cycle logic ===');
+  {
+    const gPlan = await engine.createPlan({
+      studentId: 's_gen',
+      startDate: '2026-09-20',
+      endDate: '2026-11-14',
+      targetStart: { surahNumber: 98, ayahNumber: 1 },
+      targetEnd: { surahNumber: 96, ayahNumber: 19 },
+      direction: 'backward',
+      unitType: 'line',
+      dailyAmount: 1,
+      revisionDailyPages: 1,
+      consolidationDaysPerSurah: 3,
+      schedule: { workingDays: [0, 1, 2, 3], holidays: [] },
+      autoMinorRevisionMode: true,
+      revisionDirection: 'backward',
+      revisionUnitKind: 'surah',
+      revisionUnitsPerWindow: 2,
+    });
+    const gDays = gPlan.generatedPlan.dailyPlans;
+    // Generation: first القدر day anchors at البينة.
+    const gQadr = gDays.find((d) => d.targetUnit.displayLabel.startsWith('القدر'));
+    // Recalc: record البينة completion on its last memorization day (day 7).
+    const day7 = gDays[6];
+    const rPlan = await recalc.recordDailyAchievement({
+      plan: gPlan,
+      dayDate: day7.date,
+      status: 'completed',
+      actualEndPosition: { surahNumber: 98, ayahNumber: 8 },
+      recordedBy: 'اختبار',
+    });
+    const rDays = rPlan.generatedPlan.dailyPlans;
+    const rQadr = rDays.find((d) => !d.isHistorical && d.targetUnit.displayLabel.startsWith('القدر'));
+    assert(
+      !!gQadr && !!rQadr && revLabel(gQadr) === revLabel(rQadr) && revLabel(rQadr).includes('البينة'),
+      'TEST6c: التوليد وإعادة الحساب يثبّتان نفس الدورة على البينة',
+      `gen=${gQadr ? revLabel(gQadr) : '?'} | recalc=${rQadr ? revLabel(rQadr) : '?'}`
+    );
+  }
+
+  console.log('\n=== TEST 12. Forward direction — anchor follows traversal order ===');
+  {
+    // Unit-level: forward revision traverses oldest→newest; a newly-eligible
+    // surah sits at the END of orderedKeys — the anchor must land on it.
+    const pool: any[] = [];
+    for (const s of [108, 109]) {
+      const cnt = s === 108 ? 3 : 6;
+      for (let a = 1; a <= cnt; a++) {
+        const v = await provider.getAyah(s, a);
+        if (v) pool.push(v);
+      }
+    }
+    const noAnchor = rangeCalc.computeRollingRevision(pool, 1, 0, 'forward', 'surah', 1);
+    const anchored = rangeCalc.computeRollingRevision(pool, 1, 0, 'forward', 'surah', 1, 109);
+    assert(
+      noAnchor.displayLabel.includes('الكوثر') && !noAnchor.displayLabel.includes('الكافرون'),
+      'TEST12a: forward بدون anchor يبدأ من أول traversal (الكوثر)',
+      noAnchor.displayLabel
+    );
+    assert(
+      anchored.displayLabel.includes('الكافرون') && !anchored.displayLabel.includes('الكوثر'),
+      'TEST12b: forward مع anchor=109 يبدأ من الكافرون (موضعها في traversal)',
+      anchored.displayLabel
     );
   }
 
