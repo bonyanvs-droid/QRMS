@@ -4,6 +4,7 @@ import { Halaqah, Student } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { subscribeToOnlineSession } from '../../lib/dbService';
 import { safeStorage } from '../../lib/safeStorage';
+import { isReadOnlyViewer } from '../../lib/permissions';
 
 interface Props {
   halaqah: Halaqah;
@@ -11,7 +12,8 @@ interface Props {
 }
 
 export function OnlineModeStudentWidget({ halaqah, student }: Props) {
-  const { bulkMarkAttendance, academicConfig } = useApp();
+  const { bulkMarkAttendance, academicConfig, currentUser } = useApp();
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
   const [teacherOnline, setTeacherOnline] = useState(false);
   const [liveMeetingUrl, setLiveMeetingUrl] = useState<string>(halaqah?.onlineConfig?.meetingUrl || '');
   const [liveOnlineConfig, setLiveOnlineConfig] = useState(halaqah?.onlineConfig);
@@ -105,11 +107,13 @@ export function OnlineModeStudentWidget({ halaqah, student }: Props) {
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Auto mark attendance for student on remote join
-    try {
-      const weekNumber = (academicConfig as any)?.currentWeekNumber || 1;
-      await bulkMarkAttendance(todayStr, weekNumber, halaqah.id, [student.id]);
-    } catch (e) {
-      console.warn('Auto attendance error:', e);
+    if (!readOnlyViewer) {
+      try {
+        const weekNumber = (academicConfig as any)?.currentWeekNumber || 1;
+        await bulkMarkAttendance(todayStr, weekNumber, halaqah.id, [student.id]);
+      } catch (e) {
+        console.warn('Auto attendance error:', e);
+      }
     }
 
     setTimeout(() => {

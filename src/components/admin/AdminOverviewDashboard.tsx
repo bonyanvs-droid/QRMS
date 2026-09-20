@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { Student, Halaqah, Teacher, AcademicYearConfig, DailySessionRecord, SpellingLesson, MosqueComplexTenant } from '../../types';
 import { isModuleEnabled } from '../../lib/moduleChecker';
+import { isReadOnlyViewer } from '../../lib/permissions';
+import { useApp } from '../../context/AppContext';
 
 interface AdminOverviewDashboardProps {
   students: Student[];
@@ -55,6 +57,8 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
   onOpenOfficialReport,
 }) => {
   const navigate = useNavigate();
+  const { currentUser } = useApp();
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
 
   const isBadgesActive = isModuleEnabled(activeTenant, 'badges');
   const isAdmissionsActive = isModuleEnabled(activeTenant, 'admissions');
@@ -90,7 +94,7 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
   return (
     <div className="space-y-6">
       {/* Quick Bulk Onboarding / Import Callout - Only shown when there are no halaqahs yet */}
-      {totalHalaqahs === 0 && (
+      {!readOnlyViewer && totalHalaqahs === 0 && (
         <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-5 sm:p-6 border border-emerald-600/40 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-right">
             <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center shrink-0 shadow-md">
@@ -324,6 +328,7 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
           </div>
 
           {/* Card 3: Finances */}
+          {!readOnlyViewer && (
           <div
             role="button"
             tabIndex={0}
@@ -353,6 +358,7 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
               <ChevronLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             </div>
           </div>
+          )}
 
           {/* Card 4: Meetings Management (الاجتماعات والمحاضر) */}
           <div
@@ -436,6 +442,7 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
           </div>
 
           {/* Card 2: Badges & Points System */}
+          {!readOnlyViewer && (
           <div
             role="button"
             tabIndex={0}
@@ -465,8 +472,10 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
               <ChevronLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             </div>
           </div>
+          )}
 
           {/* Card 3: Early Intervention Radar */}
+          {!readOnlyViewer && (
           <div
             role="button"
             tabIndex={0}
@@ -496,6 +505,7 @@ export const AdminOverviewDashboard: React.FC<AdminOverviewDashboardProps> = ({
               <ChevronLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             </div>
           </div>
+          )}
 
           {/* Card 4: Excel Export */}
           <div

@@ -23,6 +23,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { SpellingLesson, SubLesson, Student } from '../../types';
+import { isReadOnlyViewer } from '../../lib/permissions';
 import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
 import { SpellingStudentProfileModal } from './SpellingStudentProfileModal';
@@ -46,7 +47,10 @@ export const SpellingBankView: React.FC = () => {
     activeTenantId,
     sessionRecords,
     academicConfig,
+    currentUser,
   } = useApp();
+
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
 
   const [activeTab, setActiveTab] = useState<'students' | 'board' | 'bank' | 'guide'>('students');
 
@@ -341,7 +345,7 @@ export const SpellingBankView: React.FC = () => {
           </button>
         </div>
 
-        {activeTab === 'bank' && (
+        {activeTab === 'bank' && !readOnlyViewer && (
           <button
             type="button"
             onClick={handleOpenAddLesson}
@@ -543,7 +547,8 @@ export const SpellingBankView: React.FC = () => {
                     </div>
 
                     {/* Interactive Action Buttons */}
-                    <div className="grid grid-cols-3 gap-1.5 pt-1">
+                    <div className={`grid ${readOnlyViewer ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5 pt-1`}>
+                      {!readOnlyViewer && (
                       <button
                         type="button"
                         onClick={() => setAssessingStudent(student)}
@@ -552,6 +557,7 @@ export const SpellingBankView: React.FC = () => {
                         <PlayCircle className="w-3.5 h-3.5" />
                         <span>تقييم فوري</span>
                       </button>
+                      )}
 
                       <button
                         type="button"
@@ -657,6 +663,7 @@ export const SpellingBankView: React.FC = () => {
                           </td>
                           <td className="p-3.5 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {!readOnlyViewer && (
                               <button
                                 type="button"
                                 onClick={() => setAssessingStudent(student)}
@@ -666,6 +673,7 @@ export const SpellingBankView: React.FC = () => {
                                 <PlayCircle className="w-3.5 h-3.5" />
                                 <span>تقييم فوري</span>
                               </button>
+                              )}
 
                               <button
                                 type="button"
@@ -743,6 +751,7 @@ export const SpellingBankView: React.FC = () => {
                     </div>
 
                     {/* Order Controls */}
+                    {!readOnlyViewer && (
                     <div className="flex items-center gap-0.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
                       <button
                         type="button"
@@ -763,6 +772,7 @@ export const SpellingBankView: React.FC = () => {
                         <MoveDown className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                    )}
                   </div>
 
                   {/* Core Skills Chips */}
@@ -784,6 +794,7 @@ export const SpellingBankView: React.FC = () => {
                         <Layers className="w-3.5 h-3.5 text-emerald-600" />
                         <span>المهام الجزئية ({(lesson.subLessons || []).length})</span>
                       </span>
+                      {!readOnlyViewer && (
                       <button
                         type="button"
                         onClick={() => {
@@ -800,6 +811,7 @@ export const SpellingBankView: React.FC = () => {
                         <Plus className="w-3 h-3" />
                         <span>مهمة</span>
                       </button>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -816,6 +828,7 @@ export const SpellingBankView: React.FC = () => {
                               </p>
                             )}
                           </div>
+                          {!readOnlyViewer && (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               type="button"
@@ -836,6 +849,7 @@ export const SpellingBankView: React.FC = () => {
                               <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -848,6 +862,7 @@ export const SpellingBankView: React.FC = () => {
                     معيار الإتقان: <strong>{lesson.passingThreshold}%</strong>
                   </span>
 
+                  {!readOnlyViewer && (
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -875,6 +890,7 @@ export const SpellingBankView: React.FC = () => {
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
+                  )}
                 </div>
               </div>
             );

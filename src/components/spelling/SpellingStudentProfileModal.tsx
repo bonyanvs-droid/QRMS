@@ -5,6 +5,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
+import { isReadOnlyViewer } from '../../lib/permissions';
 
 interface SpellingStudentProfileModalProps {
   studentId: string;
@@ -15,7 +16,8 @@ export const SpellingStudentProfileModal: React.FC<SpellingStudentProfileModalPr
   studentId,
   onClose,
 }) => {
-  const { students, sessionRecords, spellingLessons, academicConfig, halaqahs, teachers } = useApp();
+  const { students, sessionRecords, spellingLessons, academicConfig, halaqahs, teachers, currentUser } = useApp();
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
   const [showReportModal, setShowReportModal] = useState(false);
 
   const student = students.find((s) => s.id === studentId);
@@ -183,6 +185,7 @@ export const SpellingStudentProfileModal: React.FC<SpellingStudentProfileModalPr
               إغلاق
             </button>
 
+            {!readOnlyViewer && (
             <button
               onClick={handleOpenReport}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs"
@@ -190,6 +193,7 @@ export const SpellingStudentProfileModal: React.FC<SpellingStudentProfileModalPr
               <Send className="w-3.5 h-3.5 text-amber-300" />
               <span>إرسال تقرير الواتساب لولي الأمر 📲</span>
             </button>
+            )}
           </div>
         </div>
       </div>

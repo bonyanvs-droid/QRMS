@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { isReadOnlyViewer } from '../../lib/permissions';
 import { RegistrationRequest, StudentGrade, RegistrationPackageType } from '../../types';
 import {
   X,
@@ -41,7 +42,8 @@ export const GRADE_OPTIONS: StudentGrade[] = [
 ];
 
 export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOpen, onClose }) => {
-  const { activeTenant, submitRegistrationRequest } = useApp();
+  const { activeTenant, submitRegistrationRequest, currentUser } = useApp();
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
 
   const cfg = activeTenant?.admissionsConfig;
   const isRegistrationOpen = cfg ? cfg.isOpen : true;
@@ -589,12 +591,14 @@ export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOp
                               </div>
                             </div>
 
+                            {!readOnlyViewer && (
                             <div className="text-left shrink-0">
                               <div className="text-base sm:text-lg font-black text-emerald-800">
                                 {pkg.price} <span className="text-xs font-semibold text-slate-600">ريال</span>
                               </div>
                               <span className="text-[10px] text-slate-500 block">/ فصل دراسي</span>
                             </div>
+                            )}
                           </div>
                         </label>
                       );

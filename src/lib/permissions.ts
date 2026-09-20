@@ -984,3 +984,8 @@ export function filterHalaqahsByScope(
 
   return [];
 }
+
+export const isReadOnlyViewer = (user?: Pick<User, 'role'> | null): boolean =>
+  !user || user.role === 'parent';
+
+export const canWriteUI = (user?: Pick<User, 'role'> | null): boolean => !isReadOnlyViewer(user);

@@ -147,7 +147,7 @@ import { BulkImportCenterView } from './BulkImportCenterView';
 
 import { AdminOverviewDashboard } from './AdminOverviewDashboard';
 import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
-import { ALL_PERMISSIONS, hasPermission } from '../../lib/permissions';
+import { ALL_PERMISSIONS, hasPermission, isReadOnlyViewer } from '../../lib/permissions';
 import { UNIFIED_NAV_ITEMS, getNavigationGroups } from '../../lib/navigationConfig';
 import { Navigate, useLocation } from 'react-router-dom';
 
@@ -213,6 +213,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
 
   const isSysAdmin = currentUser?.role === 'system_admin' || (currentUser?.role as any) === 'admin';
   const isCampAdmin = currentUser?.role === 'campus_admin';
+  const readOnlyViewer = isReadOnlyViewer(currentUser);
 
   // Resolve Charity Organization for charity_supervisor
   const currentOrg = React.useMemo(() => {
@@ -1370,6 +1371,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
             </div>
 
             {/* Actions Row in a new dedicated line */}
+            {!readOnlyViewer && (
             <div className="flex items-center gap-2 w-full">
               <button
                 onClick={() => setIsBulkTransferOpen(true)}
@@ -1410,6 +1412,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                 <span className="sm:hidden">إضافة طالب</span>
               </button>
             </div>
+            )}
 
             {/* In-App Feedback Notification Banner for Student Actions */}
             {studentActionNotice && (
@@ -1623,6 +1626,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                               >
                                 <History className="w-4 h-4" />
                               </button>
+                              {!readOnlyViewer && (
+                                <>
                               {!s.isArchived && (
                                 <button
                                   onClick={() => {
@@ -1671,6 +1676,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1739,6 +1746,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                               >
                                 <History className="w-4 h-4" />
                               </button>
+                              {!readOnlyViewer && (
+                                <>
                               {s.isArchived ? (
                                 <button
                                   type="button"
@@ -1775,6 +1784,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1893,7 +1904,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                       </div>
 
                       {/* Card Action Buttons */}
-                      <div className={`grid ${s.isArchived ? 'grid-cols-4' : 'grid-cols-5'} gap-1.5 pt-2 border-t border-slate-100`}>
+                      <div className={`grid ${readOnlyViewer ? 'grid-cols-1' : s.isArchived ? 'grid-cols-4' : 'grid-cols-5'} gap-1.5 pt-2 border-t border-slate-100`}>
                         <button
                           type="button"
                           onClick={() => setViewingHistoryStudent(s)}
@@ -1904,6 +1915,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                           <span>السجل</span>
                         </button>
 
+                        {!readOnlyViewer && (
+                          <>
                         {!s.isArchived && (
                           <button
                             type="button"
@@ -1963,6 +1976,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>حذف</span>
                         </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -2062,7 +2077,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                       </div>
 
                       {/* Card Action Buttons */}
-                      <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-amber-100/60">
+                      <div className={`grid ${readOnlyViewer ? 'grid-cols-1' : 'grid-cols-4'} gap-1.5 pt-2 border-t border-amber-100/60`}>
                         <button
                           type="button"
                           onClick={() => setViewingHistoryStudent(s)}
@@ -2073,6 +2088,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                           <span>السجل</span>
                         </button>
 
+                        {!readOnlyViewer && (
+                          <>
                         {s.isArchived ? (
                           <button
                             type="button"
@@ -2117,6 +2134,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>حذف</span>
                         </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
