@@ -193,6 +193,9 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   const [setupUnitType, setSetupUnitType] = useState<PlanningUnitType>('ayah');
   const [setupDailyAmount, setSetupDailyAmount] = useState<number>(2);
   const [setupRevisionDailyPages, setSetupRevisionDailyPages] = useState<number>(1);
+  // Daily revision amount in SURAH units — used only when the effective
+  // template's revision.mode is 'surahs' (the pages field stays pages-only)
+  const [setupRevisionUnitsPerWindow, setSetupRevisionUnitsPerWindow] = useState<number>(2);
   const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
   const [setupWorkingDays, setSetupWorkingDays] = useState<number[]>([0, 1, 2, 3]);
   const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
@@ -401,6 +404,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         quranStageConfigs.find((c) => c.id === selectedStageConfigId) || undefined;
 
       const built = await previewStudentQuranPlan({
+        customRevisionUnitsPerWindow: setupRevisionUnitsPerWindow,
         student,
         stageConfig: chosenStageConfig,
         customTargetStart: startPos,
@@ -813,21 +817,49 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                 {/* Additional Settings: Revision, Consolidation, Working Days */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">مقدار المراجعة اليومية</label>
-                    <select
-                      value={setupRevisionDailyPages}
-                      onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
-                      className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
-                    >
-                      <option value="0.5">نصف صفحة (0.5)</option>
-                      <option value="1">صفحة واحدة (1)</option>
-                      <option value="2">صفحتان (2)</option>
-                      <option value="3">3 صفحات</option>
-                      <option value="4">4 صفحات</option>
-                      <option value="5">5 صفحات</option>
-                      <option value="10">نصف جزء (10 صفحات)</option>
-                      <option value="20">جزء كامل (20 صفحة)</option>
-                    </select>
+                    {(() => {
+                      // The revision unit kind is owned by the selected/effective
+                      // template's revision.mode — the amount field must never
+                      // say "صفحات" while the backend computes surah units.
+                      const effectiveTemplate =
+                        quranStageConfigs.find((c) => c.id === selectedStageConfigId) ||
+                        matchedStageConfig;
+                      const isSurahMode = effectiveTemplate?.revision?.mode === 'surahs';
+                      return isSurahMode ? (
+                        <>
+                          <label className="text-[11px] font-bold text-slate-700 block mb-1">مقدار المراجعة اليومية (سور)</label>
+                          <select
+                            value={setupRevisionUnitsPerWindow}
+                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value, 10) || 1)}
+                            className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
+                          >
+                            <option value="1">سورة واحدة (1)</option>
+                            <option value="2">سورتان (2)</option>
+                            <option value="3">3 سور</option>
+                            <option value="4">4 سور</option>
+                            <option value="5">5 سور</option>
+                          </select>
+                        </>
+                      ) : (
+                        <>
+                          <label className="text-[11px] font-bold text-slate-700 block mb-1">مقدار المراجعة اليومية (صفحات)</label>
+                          <select
+                            value={setupRevisionDailyPages}
+                            onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
+                            className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
+                          >
+                            <option value="0.5">نصف صفحة (0.5)</option>
+                            <option value="1">صفحة واحدة (1)</option>
+                            <option value="2">صفحتان (2)</option>
+                            <option value="3">3 صفحات</option>
+                            <option value="4">4 صفحات</option>
+                            <option value="5">5 صفحات</option>
+                            <option value="10">نصف جزء (10 صفحات)</option>
+                            <option value="20">جزء كامل (20 صفحة)</option>
+                          </select>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div>

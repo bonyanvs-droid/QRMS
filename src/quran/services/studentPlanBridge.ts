@@ -82,6 +82,9 @@ export interface CreateRealStudentPlanParams {
   manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
   customTargetStart?: QuranPosition;
   customTargetEnd?: QuranPosition;
+  /** Teacher's daily revision amount in SURAH units — honored only when the
+   *  resolved revision mode is 'surahs'. Independent of customRevisionDailyPages. */
+  customRevisionUnitsPerWindow?: number;
   /** Daily session records — the canonical audit trail of actual achievement */
   sessionRecords?: DailySessionRecord[];
   /** Student's halaqah — the source of the ACTIVE TRACK subscription */
@@ -481,18 +484,33 @@ export function resolveQuranPlanConfiguration(
     );
   }
 
-  // 5. Revision — independent configuration from the template's revision block
+  // 5. Revision — independent configuration from the template's revision block.
+  //    revision.mode is the SINGLE authority for the revision unit kind:
+  //    'surahs' → surah units, everything else → real mushaf pages.
+  //    The legacy revision.unitType field must never override mode — stored
+  //    templates may carry a stale unitType='surah' contradicting mode='pages'.
   const revCfg = stageConfig.revision || ({} as StageQuranConfig['revision']);
   const revisionMode = revCfg.mode || 'pages';
   const revisionUnitKind: 'page' | 'surah' =
-    revisionMode === 'surahs' || revCfg.unitType === 'surah' ? 'surah' : 'page';
+    revisionMode === 'surahs' ? 'surah' : 'page';
+  if (
+    revCfg.unitType &&
+    (revCfg.unitType === 'surah') !== (revisionUnitKind === 'surah')
+  ) {
+    warnings.push(
+      `النموذج "${stageConfig.name}" يحمل revision.unitType="${revCfg.unitType}" قديمًا يتعارض مع revision.mode="${revisionMode}" — اعتُمد mode بوصفه المرجع الوحيد لنوع وحدة المراجعة.`
+    );
+  }
   const revisionDailyPages =
     params.customRevisionDailyPages !== undefined
       ? params.customRevisionDailyPages
       : revCfg.defaultDailyPages ?? revCfg.defaultDailyAmount ?? 1;
   const revisionUnitsPerWindow =
     revisionUnitKind === 'surah'
-      ? revCfg.surahsPerDay ?? revCfg.defaultDailyAmount ?? 1
+      ? params.customRevisionUnitsPerWindow ??
+        revCfg.surahsPerDay ??
+        revCfg.defaultDailyAmount ??
+        1
       : undefined;
   if (revisionMode !== 'pages' && revisionMode !== 'surahs') {
     warnings.push(

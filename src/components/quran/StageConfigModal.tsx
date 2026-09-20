@@ -483,6 +483,9 @@ export const StageConfigModal: React.FC<StageConfigModalProps> = ({
                       revision: {
                         ...editingConfig.revision,
                         mode: e.target.value as any,
+                        // Keep unitType consistent with mode so stored templates
+                        // never carry the pages/surah contradiction again
+                        unitType: e.target.value === 'surahs' ? 'surah' : 'page',
                       },
                     })
                   }
@@ -496,33 +499,60 @@ export const StageConfigModal: React.FC<StageConfigModalProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  مقدار المراجعة اليومية (صفحات):
-                </label>
-                <select
-                  value={editingConfig.revision.defaultDailyPages ?? 1}
-                  onChange={(e) =>
-                    setEditingConfig({
-                      ...editingConfig,
-                      revision: {
-                        ...editingConfig.revision,
-                        defaultDailyPages: parseFloat(e.target.value) || 1,
-                      },
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-300 text-slate-900 font-black"
-                >
-                  <option value="0.5">نصف صفحة (0.5)</option>
-                  <option value="1">صفحة واحدة (1)</option>
-                  <option value="2">صفحتان (2)</option>
-                  <option value="3">3 صفحات</option>
-                  <option value="4">4 صفحات</option>
-                  <option value="5">5 صفحات</option>
-                  <option value="10">نصف جزء (10 صفحات)</option>
-                  <option value="20">جزء كامل (20 صفحة)</option>
-                </select>
-              </div>
+              {editingConfig.revision.mode === 'surahs' ? (
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    مقدار المراجعة اليومية (سور):
+                  </label>
+                  <select
+                    value={editingConfig.revision.surahsPerDay ?? 2}
+                    onChange={(e) =>
+                      setEditingConfig({
+                        ...editingConfig,
+                        revision: {
+                          ...editingConfig.revision,
+                          surahsPerDay: parseInt(e.target.value, 10) || 1,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-300 text-slate-900 font-black"
+                  >
+                    <option value="1">سورة واحدة (1)</option>
+                    <option value="2">سورتان (2)</option>
+                    <option value="3">3 سور</option>
+                    <option value="4">4 سور</option>
+                    <option value="5">5 سور</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    مقدار المراجعة اليومية (صفحات):
+                  </label>
+                  <select
+                    value={editingConfig.revision.defaultDailyPages ?? 1}
+                    onChange={(e) =>
+                      setEditingConfig({
+                        ...editingConfig,
+                        revision: {
+                          ...editingConfig.revision,
+                          defaultDailyPages: parseFloat(e.target.value) || 1,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-300 text-slate-900 font-black"
+                  >
+                    <option value="0.5">نصف صفحة (0.5)</option>
+                    <option value="1">صفحة واحدة (1)</option>
+                    <option value="2">صفحتان (2)</option>
+                    <option value="3">3 صفحات</option>
+                    <option value="4">4 صفحات</option>
+                    <option value="5">5 صفحات</option>
+                    <option value="10">نصف جزء (10 صفحات)</option>
+                    <option value="20">جزء كامل (20 صفحة)</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="font-bold text-slate-700 block mb-1">

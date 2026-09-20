@@ -791,6 +791,208 @@ async function main() {
     );
   }
 
+  console.log('\n=== TEST 18. REAL SCENARIO — template contradiction + teacher picks 3 pages ===');
+  {
+    // Mirrors the production DB row: mode='pages' but stale unitType='surah'
+    // with surahsPerDay=2 — the bug that silently produced 2-surah windows.
+    const CONTRADICTORY_TEMPLATE: StageQuranConfig = {
+      ...TEMPLATE,
+      id: 'tamheedi_foundation',
+      revision: {
+        mode: 'pages',
+        unitType: 'surah' as any, // stale legacy field (as stored in prod DB)
+        defaultDailyAmount: 1,
+        defaultDailyPages: 1,
+        defaultDirection: 'backward',
+        defaultTargetStart: { surahNumber: 1, ayahNumber: 1 },
+        defaultTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+        surahsPerDay: 2,
+      },
+    };
+    const cfg = resolveQuranPlanConfiguration(
+      {
+        student: STUDENT,
+        stageConfig: CONTRADICTORY_TEMPLATE,
+        allStageConfigs: [CONTRADICTORY_TEMPLATE],
+        academicConfig: ACADEMIC,
+        halaqah,
+        customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+        customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+        customStartDate: '2026-09-20',
+        customEndDate: '2026-11-14',
+        customRevisionDailyPages: 3, // ← teacher selected "3 صفحات"
+        autoMinorRevisionMode: true,
+      },
+      surahs
+    );
+    assert(
+      cfg.revisionUnitKind === 'page',
+      'TEST18a: mode=pages يفرض unitKind=page رغم unitType=surah القديم'
+    );
+    assert(
+      cfg.revisionDailyPages === 3 && cfg.revisionUnitsPerWindow === undefined,
+      'TEST18b: اختيار المعلم 3 صفحات يصل كمقدار فعلي — surahsPerDay لا يتدخل',
+      `dailyPages=${cfg.revisionDailyPages} unitsPerWindow=${cfg.revisionUnitsPerWindow}`
+    );
+    assert(
+      cfg.warnings.some((w) => w.includes('unitType')),
+      'TEST18c: التناقض القديم في القالب يُسجَّل كتحذير'
+    );
+
+    // Engine output must be 3 REAL mushaf pages — not 2 surahs
+    const pPlan = await createRealStudentPlan({
+      student: STUDENT,
+      stageConfig: CONTRADICTORY_TEMPLATE,
+      allStageConfigs: [CONTRADICTORY_TEMPLATE],
+      academicConfig: ACADEMIC,
+      halaqah,
+      customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+      customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+      customStartDate: '2026-09-20',
+      customEndDate: '2026-11-14',
+      customRevisionDailyPages: 3,
+      autoMinorRevisionMode: true,
+      provider,
+      memorizationEngine: engine,
+    });
+    const pDays = pPlan.generatedPlan.dailyPlans;
+    pDays.slice(0, 8).forEach((d) =>
+      console.log(`   ${d.date} | ${d.targetUnit.displayLabel} | ${revLabel(d)} | p${d.revisionPageStart}-${d.revisionPageEnd}`)
+    );
+    const p1 = pDays[0];
+    // Eligible pool = 3 real pages [603,604,1] (قريش/الماعون's page 602 not yet
+    // memorized) → window = whole pool, recorded amount = 3 pages
+    assert(
+      p1.revisionPagesAmount === 3 &&
+        hasSurah(revLabel(p1), 'الكافرون') && hasSurah(revLabel(p1), 'الفاتحة'),
+      'TEST18d: اليوم 1 = الـpool كاملة كـ3 صفحات حقيقية (603,604,1)',
+      `${revLabel(p1)} p${p1.revisionPageStart}-${p1.revisionPageEnd}`
+    );
+    // Once الكوثر becomes eligible its page (602) joins the pool → anchored
+    // window = pages 602-604 (3 pages), ending exactly at the cycle boundary
+    const anchorDay = pDays.find((d) => hasSurah(revLabel(d), 'الكوثر'));
+    assert(
+      !!anchorDay && anchorDay.revisionPageStart === 602 && anchorDay.revisionPageEnd === 604,
+      'TEST18e: أول يوم بعد أهلية الكوثر = 3 صفحات مثبّتة على 602 (صفحة الكوثر)',
+      anchorDay ? `${revLabel(anchorDay)} p${anchorDay.revisionPageStart}-${anchorDay.revisionPageEnd}` : 'not found'
+    );
+    const afterAnchor = anchorDay ? pDays[pDays.indexOf(anchorDay) + 1] : undefined;
+    assert(
+      !!afterAnchor && revLabel(afterAnchor) === 'مراجعة: الفاتحة (1 - 7)',
+      'TEST18f: اليوم التالي = آخر صفحة في الدورة (الفاتحة وحدها) — لا التفاف',
+      afterAnchor ? revLabel(afterAnchor) : 'none'
+    );
+  }
+
+  console.log('\n=== TEST 19. Amount matrix — pages 1/2/3/5 + surahs 1/2/3 ===');
+  {
+    const PAGE_TEMPLATE: StageQuranConfig = {
+      ...TEMPLATE,
+      revision: { ...TEMPLATE.revision, mode: 'pages', unitType: 'page' as any },
+    };
+    for (const n of [1, 2, 3, 5]) {
+      const cfg = resolveQuranPlanConfiguration(
+        {
+          student: STUDENT, stageConfig: PAGE_TEMPLATE, allStageConfigs: [PAGE_TEMPLATE],
+          academicConfig: ACADEMIC, halaqah,
+          customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+          customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+          customStartDate: '2026-09-20', customEndDate: '2026-11-14',
+          customRevisionDailyPages: n, autoMinorRevisionMode: true,
+        },
+        surahs
+      );
+      assert(
+        cfg.revisionUnitKind === 'page' && cfg.revisionDailyPages === n &&
+          cfg.revisionUnitsPerWindow === undefined,
+        `TEST19p${n}: ${n} صفحات → page mode بمقدار ${n}`
+      );
+    }
+    const SURAH_TEMPLATE: StageQuranConfig = {
+      ...TEMPLATE,
+      revision: {
+        ...TEMPLATE.revision, mode: 'surahs', unitType: 'surah' as any, surahsPerDay: 2,
+      },
+    };
+    for (const n of [1, 2, 3]) {
+      const cfg = resolveQuranPlanConfiguration(
+        {
+          student: STUDENT, stageConfig: SURAH_TEMPLATE, allStageConfigs: [SURAH_TEMPLATE],
+          academicConfig: ACADEMIC, halaqah,
+          customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+          customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+          customStartDate: '2026-09-20', customEndDate: '2026-11-14',
+          customRevisionUnitsPerWindow: n, autoMinorRevisionMode: true,
+        },
+        surahs
+      );
+      assert(
+        cfg.revisionUnitKind === 'surah' && cfg.revisionUnitsPerWindow === n,
+        `TEST19s${n}: ${n} سور → surah mode بمقدار ${n}`
+      );
+    }
+    // Teacher's surah amount reaches the engine: 3 surahs → 3-segment window
+    const s3 = await createRealStudentPlan({
+      student: STUDENT, stageConfig: SURAH_TEMPLATE, allStageConfigs: [SURAH_TEMPLATE],
+      academicConfig: ACADEMIC, halaqah,
+      customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+      customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+      customStartDate: '2026-09-20', customEndDate: '2026-11-14',
+      customRevisionUnitsPerWindow: 3, autoMinorRevisionMode: true,
+      provider, memorizationEngine: engine,
+    });
+    const s3d1 = revLabel(s3.generatedPlan.dailyPlans[0]);
+    assert(
+      hasSurah(s3d1, 'الكافرون') && hasSurah(s3d1, 'النصر') && hasSurah(s3d1, 'المسد'),
+      'TEST19s3e: نافذة 3 سور فعلية — الكافرون+النصر+المسد',
+      s3d1
+    );
+    // Template default honored when teacher does not override
+    const sDef = resolveQuranPlanConfiguration(
+      {
+        student: STUDENT, stageConfig: SURAH_TEMPLATE, allStageConfigs: [SURAH_TEMPLATE],
+        academicConfig: ACADEMIC, halaqah,
+        customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+        customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+        customStartDate: '2026-09-20', customEndDate: '2026-11-14',
+        autoMinorRevisionMode: true,
+      },
+      surahs
+    );
+    assert(
+      sDef.revisionUnitsPerWindow === 2,
+      'TEST19sDef: بدون override يُستخدم surahsPerDay=2 من القالب'
+    );
+  }
+
+  console.log('\n=== TEST 20. Direction matrix — unitKind follows mode only ===');
+  {
+    const PAGE_TEMPLATE: StageQuranConfig = {
+      ...TEMPLATE,
+      revision: { ...TEMPLATE.revision, mode: 'pages', unitType: 'page' as any },
+    };
+    for (const memDir of ['forward', 'backward'] as const) {
+      for (const revDir of ['forward', 'backward'] as const) {
+        const cfg = resolveQuranPlanConfiguration(
+          {
+            student: STUDENT, stageConfig: PAGE_TEMPLATE, allStageConfigs: [PAGE_TEMPLATE],
+            academicConfig: ACADEMIC, halaqah,
+            customTargetStart: { surahNumber: 108, ayahNumber: 1 },
+            customTargetEnd: { surahNumber: 105, ayahNumber: 5 },
+            customStartDate: '2026-09-20', customEndDate: '2026-11-14',
+            customDirection: memDir, customRevisionDirection: revDir,
+            customRevisionDailyPages: 3, autoMinorRevisionMode: true,
+          },
+          surahs
+        );
+        assert(
+          cfg.revisionUnitKind === 'page' && cfg.revisionDailyPages === 3,
+          `TEST20: mem=${memDir} rev=${revDir} → page×3`
+        );
+      }
+    }
+  }
+
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) process.exit(1);
 }
