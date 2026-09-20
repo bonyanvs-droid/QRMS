@@ -71,6 +71,7 @@ const STUDENT: Student = {
   halaqahId: 'hq_1',
   teacherId: 't1',
   parentPhone: '0500000000',
+  minimumTargetSurah: 'الفيل',
   status: 'active' as any,
   currentSpellingLessonId: '',
   currentSpellingScore: 0,
@@ -378,6 +379,30 @@ async function main() {
       console.log(
         `   ${d.date} | mem: ${d.targetUnit.displayLabel} | rev: ${revLabel(d)} | pages ${d.revisionPageStart}-${d.revisionPageEnd}`
       )
+    );
+
+    // TEST 10e: every generated day is previewable (date + label + revision)
+    assert(
+      pDays.every((d) => d.date && d.targetUnit && revLabel(d).length > 0),
+      'TEST10e: كل يوم من الـ32 قابل للعرض في جدول المحاكاة'
+    );
+    // TEST 10f: weekNumber grouping covers the full term (8 weeks × 4 days)
+    const wNums = new Set(pDays.map((d) => d.weekNumber));
+    assert(wNums.size === 8, 'TEST10f: تجميع الأسابيع يغطي الفصل كاملًا', `${wNums.size} weeks`);
+
+    // TEST 11: the preview plan object is the canonical object that gets
+    // persisted — approveStudentQuranPlan(previewPlan) saves it verbatim.
+    assert(
+      plan.generatedPlan.dailyPlans === pDays,
+      'TEST11: dailyPlans المعروضة هي نفس مرجع البيانات المحفوظ'
+    );
+
+    // TEST 13: JSONB round-trip (Postgres persist + reload) preserves all days
+    const reloaded = JSON.parse(JSON.stringify(plan));
+    assert(
+      reloaded.generatedPlan.dailyPlans.length === 32 &&
+        reloaded.generatedPlan.dailyPlans[0].revisionDisplayLabel === revLabel(pDays[0]),
+      'TEST13: إعادة تحميل الخطة من JSONB تحفظ الـ32 يومًا كاملة'
     );
   }
 

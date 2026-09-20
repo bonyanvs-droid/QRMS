@@ -33,7 +33,7 @@ import {
 } from '../../quran/types/plan';
 import { QuranPosition, PlanningUnitType } from '../../quran/types';
 import { SURAHS_LIST } from '../../data/initialData';
-import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount } from '../../utils/quranMetadata';
+import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, getSurahArabicName } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
 import { BundledQuranProvider } from '../../quran/providers/BundledQuranProvider';
 import { getArabicDayName, formatDateString } from '../../quran/utils/dateUtils';
@@ -1102,23 +1102,99 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                     </div>
                   )}
 
-                  {/* Sample of generated days */}
+                  {/* Full-term simulation — every generated working day,
+                      grouped by week. Renders the exact dailyPlans that will be
+                      persisted on approval (no separate computation). */}
                   <div className="bg-white rounded-xl border border-blue-200 overflow-hidden">
                     <div className="px-3 py-2 bg-blue-100/60 text-[11px] font-black text-blue-950">
-                      أول 3 أيام مقررة في الخطة
+                      المحاكاة الكاملة للخطة — {previewPlan.generatedPlan?.dailyPlans?.length ?? 0} يوم عمل
                     </div>
-                    <div className="divide-y divide-slate-100">
-                      {(previewPlan.generatedPlan?.dailyPlans || []).slice(0, 3).map((d) => (
-                        <div key={d.id} className="px-3 py-2 text-[11px] flex items-center justify-between gap-2">
-                          <span className="font-bold text-slate-700">
-                            {d.dayName} {d.date}
-                          </span>
-                          <span className="font-bold text-slate-900 font-['Amiri',serif] truncate">
-                            {d.targetUnit?.displayLabel}
-                          </span>
-                          <span className="text-slate-500 truncate">{d.revisionDisplayLabel}</span>
-                        </div>
-                      ))}
+                    <div className="max-h-[420px] overflow-y-auto">
+                      <table className="w-full text-[11px]">
+                        <thead className="sticky top-0 bg-white z-10 shadow-[0_1px_0_0_#e2e8f0]">
+                          <tr className="text-[10px] text-slate-500">
+                            <th className="px-3 py-2 text-right font-black">التاريخ</th>
+                            <th className="px-3 py-2 text-right font-black">اليوم</th>
+                            <th className="px-3 py-2 text-right font-black">الحفظ</th>
+                            <th className="px-3 py-2 text-right font-black">التثبيت</th>
+                            <th className="px-3 py-2 text-right font-black">المراجعة</th>
+                            <th className="px-3 py-2 text-right font-black">الحالة</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(() => {
+                            const days = previewPlan.generatedPlan?.dailyPlans || [];
+                            const weeks = new Map<number, DailyPlanItem[]>();
+                            for (const d of days) {
+                              const list = weeks.get(d.weekNumber) || [];
+                              list.push(d);
+                              weeks.set(d.weekNumber, list);
+                            }
+                            const statusLabel = (d: DailyPlanItem): string =>
+                              d.isConsolidationDay
+                                ? 'تثبيت'
+                                : (
+                                    {
+                                      pending: 'مخطط',
+                                      completed: 'مكتمل',
+                                      partial: 'جزئي',
+                                      overachieved: 'متجاوز',
+                                      absent: 'غائب',
+                                      excused: 'مستأذن',
+                                      unrecited: 'لم يسمّع',
+                                    } as Record<string, string>
+                                  )[d.status] || 'مخطط';
+                            return Array.from(weeks.entries()).map(([wNum, wDays]) => (
+                              <React.Fragment key={wNum}>
+                                <tr>
+                                  <td
+                                    colSpan={6}
+                                    className="px-3 py-1.5 bg-blue-50/70 text-[10px] font-black text-blue-900"
+                                  >
+                                    الأسبوع {wNum} — {wDays[0].date} ← {wDays[wDays.length - 1].date}
+                                  </td>
+                                </tr>
+                                {wDays.map((d) => (
+                                  <tr key={d.id}>
+                                    <td className="px-3 py-1.5 whitespace-nowrap font-bold text-slate-700">
+                                      {d.date}
+                                    </td>
+                                    <td className="px-3 py-1.5 whitespace-nowrap text-slate-600">
+                                      {d.dayName}
+                                    </td>
+                                    <td className="px-3 py-1.5 font-bold text-slate-900 font-['Amiri',serif]">
+                                      {d.isConsolidationDay || d.dayType === 'general_revision'
+                                        ? '—'
+                                        : d.targetUnit?.displayLabel}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">
+                                      {d.isConsolidationDay
+                                        ? `${getSurahArabicName(d.consolidationSurahNumber)} — ${d.consolidationDayIndex}/${previewPlan.consolidationDaysPerSurah || 3}`
+                                        : d.dayType === 'general_revision'
+                                          ? 'تثبيت ومراجعة عامة'
+                                          : '—'}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-slate-600 font-['Amiri',serif]">
+                                      {d.revisionDisplayLabel || '—'}
+                                    </td>
+                                    <td className="px-3 py-1.5 whitespace-nowrap">
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                                          d.isConsolidationDay
+                                            ? 'bg-amber-100 text-amber-800'
+                                            : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                      >
+                                        {statusLabel(d)}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </React.Fragment>
+                            ));
+                          })()}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
 
