@@ -568,7 +568,10 @@ export class PlanRecalculationService {
     const lastVerse = await this.provider.getAyah(completedSurahEnd.surahNumber, surahAyahCount);
     if (!firstVerse || !lastVerse) return units;
 
-    const acc: Ayah[] = [...seed];
+    // During the just-completed surah's own consolidation days it stays out of
+    // the minor-revision pool — it becomes eligible right after consolidation,
+    // matching the creation engine's staging rule.
+    const acc: Ayah[] = seed.filter((v) => v.surahNumber !== completedSurahEnd.surahNumber);
     // Offset 0 targets the first window in the resolved revision direction
     // ('backward' walks the pool newest → oldest internally).
     let offset = 0;

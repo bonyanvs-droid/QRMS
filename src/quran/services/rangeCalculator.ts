@@ -427,6 +427,22 @@ export class RangeCalculator {
     // Auto Minor Revision: seeded with the student's prior memorization so the rolling
     // window rotates across prior + new memorization as one pool.
     const memorizedVersesAccumulator: Ayah[] = [...initialMemorizedVerses];
+    // Verses of the surah currently in its memorization/consolidation phase are
+    // staged here and only join the revision pool AFTER the surah's
+    // consolidation cycle completes — an incomplete (or still-consolidating)
+    // surah is never revision-eligible.
+    const pendingEligibleVerses: Ayah[] = [];
+    const stageVerseForEligibility = (v: Ayah | undefined | null): void => {
+      if (!v) return;
+      const exists =
+        memorizedVersesAccumulator.some(
+          (mv) => mv.surahNumber === v.surahNumber && mv.ayahNumber === v.ayahNumber
+        ) ||
+        pendingEligibleVerses.some(
+          (mv) => mv.surahNumber === v.surahNumber && mv.ayahNumber === v.ayahNumber
+        );
+      if (!exists) pendingEligibleVerses.push(v);
+    };
     // Offset 0 always targets the first revision window in the resolved
     // revision direction — 'backward' walks the pool newest → oldest.
     let revisionWindowOffset = 0;
@@ -504,16 +520,12 @@ export class RangeCalculator {
         const firstVerse = (await this.provider.getAyah(surahEntry.number, 1)) || surahVerses[0];
         const lastVerse = (await this.provider.getAyah(surahEntry.number, currEndAyah)) || surahVerses[surahVerses.length - 1];
 
-        // Accumulate newly memorized verses up to currEndAyah
+        // Stage newly memorized verses up to currEndAyah — they stay out of the
+        // revision pool until this surah's consolidation cycle completes.
         for (let a = 1; a <= currEndAyah; a++) {
-          const exists = memorizedVersesAccumulator.some(
-            (mv) => mv.surahNumber === surahEntry.number && mv.ayahNumber === a
-          );
-          if (!exists) {
-            const v = (await this.provider.getAyah(surahEntry.number, a)) ||
-              surahVerses.find((sv) => sv.ayahNumber === a);
-            if (v) memorizedVersesAccumulator.push(v);
-          }
+          const v = (await this.provider.getAyah(surahEntry.number, a)) ||
+            surahVerses.find((sv) => sv.ayahNumber === a);
+          stageVerseForEligibility(v);
         }
 
         // Compute dynamic rolling revision info
@@ -551,16 +563,11 @@ export class RangeCalculator {
         const firstVerse = (await this.provider.getAyah(surahEntry.number, 1)) || surahVerses[0];
         const lastVerse = (await this.provider.getAyah(surahEntry.number, surahEntry.ayahsCount)) || surahVerses[surahVerses.length - 1];
 
-        // Ensure all verses of this completed surah are in accumulator
+        // Ensure all verses of this completed surah are staged for eligibility
         for (let a = 1; a <= surahEntry.ayahsCount; a++) {
-          const exists = memorizedVersesAccumulator.some(
-            (mv) => mv.surahNumber === surahEntry.number && mv.ayahNumber === a
-          );
-          if (!exists) {
-            const v = (await this.provider.getAyah(surahEntry.number, a)) ||
-              surahVerses.find((sv) => sv.ayahNumber === a);
-            if (v) memorizedVersesAccumulator.push(v);
-          }
+          const v = (await this.provider.getAyah(surahEntry.number, a)) ||
+            surahVerses.find((sv) => sv.ayahNumber === a);
+          stageVerseForEligibility(v);
         }
 
         for (let c = 1; c <= consolidationDays; c++) {
@@ -591,6 +598,12 @@ export class RangeCalculator {
             revisionPageEnd: revisionInfo.pageEnd,
           });
         }
+      }
+
+      // Surah memorization + its consolidation cycle are done → its verses are
+      // now revision-eligible and join the rolling pool in learning order.
+      if (pendingEligibleVerses.length > 0) {
+        memorizedVersesAccumulator.push(...pendingEligibleVerses.splice(0));
       }
     }
 
@@ -679,8 +692,14 @@ export class RangeCalculator {
 
     // Case 1: Total memorized is within or equal to the daily limit (e.g. <= 1 page or few verses)
     if (orderedKeys.length <= targetUnitCount) {
-      const firstSurah = memorizedVerses[0];
-      const lastSurah = memorizedVerses[memorizedVerses.length - 1];
+      const labelOrdered = this.orderVersesByRevisionTraversal(
+        memorizedVerses,
+        orderedKeys,
+        unitKind,
+        revisionDirection
+      );
+      const firstSurah = labelOrdered[0];
+      const lastSurah = labelOrdered[labelOrdered.length - 1];
 
       let displayLabel = '';
       if (firstSurah.surahNumber === lastSurah.surahNumber) {
@@ -718,8 +737,18 @@ export class RangeCalculator {
     const windowVerses = memorizedVerses.filter((v) =>
       windowKeySet.has(unitKind === 'surah' ? v.surahNumber : v.pageNumber)
     );
-    const firstVerse = windowVerses[0] || memorizedVerses[0];
-    const lastVerse = windowVerses[windowVerses.length - 1] || memorizedVerses[memorizedVerses.length - 1];
+    // Order the window's verses along the actual revision traversal
+    // (windowKeys sequence, then surah learning rank, then ayah) so the
+    // displayed range always reads in the resolved revision direction.
+    const traversalOrdered = this.orderVersesByRevisionTraversal(
+      windowVerses,
+      windowKeys,
+      unitKind,
+      revisionDirection
+    );
+    const firstVerse = traversalOrdered[0] || memorizedVerses[0];
+    const lastVerse =
+      traversalOrdered[traversalOrdered.length - 1] || memorizedVerses[memorizedVerses.length - 1];
 
     let displayLabel = '';
     if (firstVerse.surahNumber === lastVerse.surahNumber) {
@@ -746,5 +775,35 @@ export class RangeCalculator {
       pageEnd: maxPage,
       nextOffset,
     };
+  }
+
+  /**
+   * Orders pool verses along the actual revision traversal for label
+   * rendering: window/pool unit sequence first, then surah learning rank
+   * (newest-first under 'backward', oldest-first under 'forward'), then ayah
+   * order inside each surah (memorization inside a surah is always 1 → N).
+   */
+  private orderVersesByRevisionTraversal(
+    verses: Ayah[],
+    keySequence: number[],
+    unitKind: 'page' | 'surah',
+    revisionDirection: 'forward' | 'backward'
+  ): Ayah[] {
+    const keyOrder = new Map<number, number>();
+    keySequence.forEach((k, i) => {
+      if (!keyOrder.has(k)) keyOrder.set(k, i);
+    });
+    const surahLearnRank = new Map<number, number>();
+    verses.forEach((v, i) => {
+      if (!surahLearnRank.has(v.surahNumber)) surahLearnRank.set(v.surahNumber, i);
+    });
+    const keyOf = (v: Ayah): number => (unitKind === 'surah' ? v.surahNumber : v.pageNumber);
+    return [...verses].sort((a, b) => {
+      const keyDiff = (keyOrder.get(keyOf(a)) ?? 0) - (keyOrder.get(keyOf(b)) ?? 0);
+      if (keyDiff !== 0) return keyDiff;
+      const rankDiff = (surahLearnRank.get(a.surahNumber) ?? 0) - (surahLearnRank.get(b.surahNumber) ?? 0);
+      if (rankDiff !== 0) return revisionDirection === 'backward' ? -rankDiff : rankDiff;
+      return a.ayahNumber - b.ayahNumber;
+    });
   }
 }
