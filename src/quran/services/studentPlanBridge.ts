@@ -170,8 +170,15 @@ export function resolveLastAchievedPosition(
   sessionRecords: DailySessionRecord[] | undefined,
   surahs: Surah[]
 ): QuranPosition | null {
+  // Records archived WITH a plan (PLAN_AND_ACHIEVEMENTS mode) stay in the DB
+  // as immutable history but must never seed a NEW plan's starting position.
   const latestMemRec = (sessionRecords || [])
-    .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
+    .filter(
+      (r) =>
+        r.studentId === student.id &&
+        r.memorization?.surahTo &&
+        !(r.customTracks as any)?._planArchive
+    )
     .sort((a, b) => `${b.date}${b.id || ''}`.localeCompare(`${a.date}${a.id || ''}`))[0];
 
   if (latestMemRec) {

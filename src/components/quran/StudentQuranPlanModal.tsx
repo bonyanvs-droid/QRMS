@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
+  Archive,
   BookOpen,
   Calendar,
   Sparkles,
@@ -60,6 +61,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     quranStageConfigs,
     previewStudentQuranPlan,
     approveStudentQuranPlan,
+    archiveStudentQuranPlan,
     recordQuranPlanAchievement,
     getActiveStudentQuranPlan,
     academicConfig,
@@ -197,6 +199,10 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
   const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
   // Preview state — the generated plan awaits explicit approval before persistence
   const [previewPlan, setPreviewPlan] = useState<StudentQuranPlan | null>(null);
+  // Archive dialog state — explicit two-step confirmation (never instant)
+  const [showArchiveDialog, setShowArchiveDialog] = useState<boolean>(false);
+  const [archiveMode, setArchiveMode] = useState<'plan_only' | 'plan_and_achievements'>('plan_only');
+  const [isArchiving, setIsArchiving] = useState<boolean>(false);
   // Manual minor-revision range (required when auto mode is off)
   const [setupRevStartSurah, setSetupRevStartSurah] = useState<string>('الفاتحة');
   const [setupRevStartAyah, setSetupRevStartAyah] = useState<number>(1);
@@ -499,6 +505,35 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
     }
   };
 
+  // Archive confirm — executes only after the explicit dialog choice
+  const handleConfirmArchive = async () => {
+    if (!activePlan) return;
+    setIsArchiving(true);
+    setFeedbackMessage(null);
+    try {
+      await archiveStudentQuranPlan({
+        planId: activePlan.id,
+        archiveMode,
+      });
+      setShowArchiveDialog(false);
+      setFeedbackMessage({
+        type: 'success',
+        text:
+          archiveMode === 'plan_and_achievements'
+            ? 'تمت أرشفة الخطة وفصل إنجازاتها عن الحالة النشطة — محفوظة بالكامل في السجل التاريخي.'
+            : 'تمت أرشفة الخطة — محفوظة بالكامل في السجل التاريخي مع إنجازاتها.',
+      });
+    } catch (err: any) {
+      setShowArchiveDialog(false);
+      setFeedbackMessage({
+        type: 'error',
+        text: err.message || 'تعذرت أرشفة الخطة، يرجى المحاولة مجددًا.',
+      });
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
       <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 flex flex-col max-h-[92vh]">
@@ -521,6 +556,20 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                   <span className="hidden sm:inline-block px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
                     v{activePlan.planVersion || activePlan.version || 1}
                   </span>
+                )}
+                {activePlan && canEditPlan && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setArchiveMode('plan_only');
+                      setShowArchiveDialog(true);
+                    }}
+                    title="أرشفة الخطة الحالية دون حذفها — تبقى في السجل التاريخي"
+                    className="px-2 sm:px-2.5 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-bold bg-rose-500/15 text-rose-200 border border-rose-400/40 hover:bg-rose-500/25 hover:text-white transition-colors flex items-center gap-1 shrink-0"
+                  >
+                    <Archive className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    <span className="hidden xs:inline sm:inline">أرشفة الخطة</span>
+                  </button>
                 )}
               </div>
               <p className="text-[10px] sm:text-xs text-emerald-100/80 mt-0.5 sm:mt-1 flex items-center gap-1.5 sm:gap-2 flex-wrap">
@@ -1846,6 +1895,131 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
             إغلاق النافذة
           </button>
         </div>
+        {/* =====================================================
+            ARCHIVE CONFIRMATION DIALOG — two explicit options,
+            no action until "أرشفة الخطة" is pressed.
+            ===================================================== */}
+        {showArchiveDialog && activePlan && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-200 overflow-hidden">
+              {/* Dialog header */}
+              <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Archive className="w-4.5 h-4.5 w-5 h-5 text-amber-300" />
+                  <h4 className="text-sm font-black">أرشفة الخطة الحالية</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowArchiveDialog(false)}
+                  className="text-white/60 hover:text-white transition-colors"
+                  aria-label="إغلاق"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  سيتم إيقاف الخطة الحالية ونقلها إلى الأرشيف الزمني.
+                  لن يتم حذفها نهائيًا — تبقى كاملة في السجل التاريخي.
+                </p>
+
+                {/* Option cards */}
+                <label
+                  className={`block rounded-xl border-2 p-3 cursor-pointer transition-colors ${
+                    archiveMode === 'plan_only'
+                      ? 'border-emerald-500 bg-emerald-50/60'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="archive_mode"
+                      checked={archiveMode === 'plan_only'}
+                      onChange={() => setArchiveMode('plan_only')}
+                      className="mt-0.5 accent-emerald-700"
+                    />
+                    <div>
+                      <div className="text-xs font-black text-slate-900">أرشفة الخطة فقط</div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                        يتم أرشفة الخطة الحالية مع الاحتفاظ بجميع الإنجازات والتقييمات
+                        والتسجيلات المرتبطة بها.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className={`block rounded-xl border-2 p-3 cursor-pointer transition-colors ${
+                    archiveMode === 'plan_and_achievements'
+                      ? 'border-amber-500 bg-amber-50/60'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="archive_mode"
+                      checked={archiveMode === 'plan_and_achievements'}
+                      onChange={() => setArchiveMode('plan_and_achievements')}
+                      className="mt-0.5 accent-amber-700"
+                    />
+                    <div>
+                      <div className="text-xs font-black text-slate-900">
+                        أرشفة الخطة والإنجازات المرتبطة بها
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                        يتم أرشفة الخطة الحالية وجميع الإنجازات والتسجيلات المرتبطة بها
+                        ضمن السجل التاريخي، لتبدأ الخطة الجديدة دون اعتبار هذه الإنجازات
+                        جزءًا من الخطة النشطة.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+
+                {/* Warning */}
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-black text-amber-900">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    تنبيه مهم
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    هذه العملية ستنهي الخطة الحالية وتحوّلها إلى سجل تاريخي غير نشط.
+                    لا يمكن استخدام إنجازاتها كأساس للخطة الجديدة إلا من خلال السجل التاريخي.
+                  </p>
+                  {archiveMode === 'plan_and_achievements' && (
+                    <p className="text-[11px] text-amber-900 font-bold leading-relaxed border-t border-amber-200 pt-1.5">
+                      سيتم فصل الإنجازات الحالية عن الخطة النشطة حتى تبدأ الخطة الجديدة
+                      من نقطة مستقلة.
+                    </p>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowArchiveDialog(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmArchive}
+                    disabled={isArchiving}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-rose-700 hover:bg-rose-800 text-white shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    <span>{isArchiving ? 'جارٍ الأرشفة...' : 'أرشفة الخطة'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Stage Configs Management Modal */}
         <StageConfigModal
           isOpen={showStageConfigsModal}

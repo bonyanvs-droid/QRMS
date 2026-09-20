@@ -25,6 +25,13 @@ import {
 import { StageQuranConfig } from '../models/stageConfig';
 import { Student, Halaqah, AcademicYearConfig, SpellingLesson } from '../../types';
 import { getSurahAyahsCount } from '../../utils/quranMetadata';
+import {
+  buildPlanArchive,
+  findPlanRelatedRecords,
+  isRecordPlanArchived,
+} from '../services/planArchiveService';
+import { selectActiveStudentPlan } from '../utils/planNormalizer';
+import { DailySessionRecord } from '../../types';
 
 let passed = 0;
 let failed = 0;
@@ -410,6 +417,104 @@ async function main() {
     assert(revived.revisionDirection === 'backward', 'revisionDirection ينجوا من تخزين JSONB');
     assert(revived.targetSource === 'academic_year', 'targetSource ينجوا من التخزين');
     assert(revived.generatedPlan.dailyPlans[0]?.spellingAssignment?.lessonNumber === 1, 'spellingAssignment ينجوا من التخزين');
+  }
+
+  console.log('\n=== ARCHIVE — plan_only / plan_and_achievements ===');
+  {
+    const mkPlan = async () =>
+      engine.createPlan({
+        studentId: 'std_arch',
+        startDate: '2026-02-01',
+        endDate: '2026-04-30',
+        targetStart: { surahNumber: 114, ayahNumber: 1 },
+        targetEnd: { surahNumber: 108, ayahNumber: 3 },
+        direction: 'backward',
+        unitType: 'ayah',
+        dailyAmount: 2,
+        revisionDailyPages: 1,
+        schedule: { workingDays: [0, 1, 2, 3, 4], holidays: [] },
+      });
+    const plan = await mkPlan();
+    const records: DailySessionRecord[] = [
+      // in-window record of THIS student (related)
+      {
+        id: 'rec_a', studentId: 'std_arch', teacherId: 't1', date: '2026-02-03',
+        weekNumber: 1, attendance: 'present',
+        memorization: { surahFrom: 'الناس', ayahFrom: 1, surahTo: 'الناس', ayahTo: 4, score: 90 },
+      } as DailySessionRecord,
+      // record of ANOTHER student in same window (not related)
+      {
+        id: 'rec_b', studentId: 'other', teacherId: 't1', date: '2026-02-03',
+        weekNumber: 1, attendance: 'present',
+        memorization: { surahFrom: 'الناس', ayahFrom: 1, surahTo: 'الناس', ayahTo: 4, score: 90 },
+      } as DailySessionRecord,
+      // same student but BEFORE plan window (not related — older history)
+      {
+        id: 'rec_c', studentId: 'std_arch', teacherId: 't1', date: '2026-01-01',
+        weekNumber: 1, attendance: 'present',
+        memorization: { surahFrom: 'الفاتحة', ayahFrom: 1, surahTo: 'الفاتحة', ayahTo: 7, score: 90 },
+      } as DailySessionRecord,
+      // explicitly linked via _quranPlanId even if outside window (related)
+      {
+        id: 'rec_d', studentId: 'std_arch', teacherId: 't1', date: '2026-05-01',
+        weekNumber: 1, attendance: 'present',
+        memorization: { surahFrom: 'الكوثر', ayahFrom: 1, surahTo: 'الكوثر', ayahTo: 3, score: 90 },
+        customTracks: { _quranPlanId: plan.id },
+      } as DailySessionRecord,
+    ];
+
+    // --- PLAN ONLY ---
+    const r1 = buildPlanArchive({
+      plan, mode: 'plan_only', actorName: 'مشرف الاختبار',
+      sessionRecords: records, archivedAtIso: '2026-03-01T10:00:00.000Z',
+    });
+    assert(r1.archivedPlan.status === 'archived' && r1.archivedPlan.isCurrentActive === false, 'PLAN_ONLY: status=archived + isCurrentActive=false');
+    assert(r1.archivedPlan.generatedPlan.dailyPlans.length === plan.generatedPlan.dailyPlans.length, 'PLAN_ONLY: plan_data كامل محفوظ');
+    assert(r1.markedRecords.length === 0, 'PLAN_ONLY: لا تُلمس سجلات الإنجاز');
+    assert(r1.archivedPlan.archivedBy === 'مشرف الاختبار' && !!r1.archivedPlan.archivedAt, 'PLAN_ONLY: بيانات الأرشفة موثقة');
+    assert(r1.archivedPlan.versionHistory[0].reason?.includes('أرشفة'), 'PLAN_ONLY: حدث إصدار موثق');
+    assert(records.every((r) => !isRecordPlanArchived(r)), 'PLAN_ONLY: لا علامات على السجلات');
+
+    // --- PLAN + ACHIEVEMENTS ---
+    const r2 = buildPlanArchive({
+      plan, mode: 'plan_and_achievements', actorName: 'مشرف الاختبار',
+      sessionRecords: records, archivedAtIso: '2026-03-01T10:00:00.000Z',
+    });
+    const markedIds = r2.markedRecords.map((r) => r.id).sort();
+    assert(r2.archivedPlan.status === 'archived', 'PLAN+ACH: الخطة مؤرشفة');
+    assert(
+      JSON.stringify(markedIds) === JSON.stringify(['rec_a', 'rec_d']),
+      'PLAN+ACH: العلاقة student+plan-window + _quranPlanId — لا student فقط',
+      markedIds.join(',')
+    );
+    assert(
+      r2.markedRecords.every((r) => isRecordPlanArchived(r) && (r.customTracks as any)._planArchive.planId === plan.id),
+      'PLAN+ACH: العلامة تحمل planId الصحيح'
+    );
+    assert(
+      r2.markedRecords.every((r) => r.memorization?.surahTo), 'PLAN+ACH: محتوى السجلات محفوظ — لا حذف'
+    );
+    // no re-attribution: re-running on already-marked records finds none
+    const rerun = findPlanRelatedRecords(plan, r2.markedRecords, '2026-03-01');
+    assert(rerun.length === 0, 'PLAN+ACH: سجل مؤرشف مسبقًا لا يُعاد إسناده');
+
+    // New-plan seeding ignores archived records
+    const lastPos = (await import('../services/studentPlanBridge')).resolveLastAchievedPosition(
+      { id: 'std_arch', currentSurah: '', currentAyah: 0 },
+      r2.markedRecords,
+      surahs
+    );
+    assert(lastPos === null, 'PLAN+ACH: resolveLastAchievedPosition يتجاهل السجلات المؤرشفة');
+
+    // selectActiveStudentPlan: archived never returned as active
+    const sel = selectActiveStudentPlan([r2.archivedPlan]);
+    assert(sel === null || sel.status !== 'archived', 'الخطة المؤرشفة لا تُختار كنشطة');
+    const selMixed = selectActiveStudentPlan([r2.archivedPlan, plan]);
+    assert(selMixed?.id === plan.id, 'الخطة النشطة تُختار بين أرشيف ونشطة');
+
+    // Persistence round-trip of archive metadata
+    const revived = JSON.parse(JSON.stringify(r2.archivedPlan));
+    assert(revived.archiveMode === 'plan_and_achievements' && revived.archivedBy === 'مشرف الاختبار', 'بيانات الأرشفة تنجوا من JSONB');
   }
 
   console.log('\n================================================================');

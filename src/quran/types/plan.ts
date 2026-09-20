@@ -308,6 +308,16 @@ export interface StudentQuranPlan {
    */
   activeTrackIds?: string[];
 
+  /**
+   * Archive metadata — set when the plan is moved to the historical archive.
+   * The plan row and full plan_data are NEVER deleted; these fields document
+   * when/why/by whom it left the active state (Historical Timeline).
+   */
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveMode?: 'plan_only' | 'plan_and_achievements';
+  archiveNote?: string;
+
   // Schedule
   schedule: WorkingDaysSchedule;
 

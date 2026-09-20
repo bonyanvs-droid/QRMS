@@ -544,7 +544,7 @@ export interface AuditLog {
   userName: string;
   userRole: UserRole;
   performedByRole?: UserRole; // Compatibility alias
-  action: 'create' | 'update' | 'delete' | 'attendance' | 'bulk_attendance' | 'score_update' | 'login' | 'logout' | 'password_change' | 'lookup' | 'view' | 'badge_award' | 'remedial_plan' | 'archive_term' | 'tenant_switch' | 'integration_config';
+  action: 'create' | 'update' | 'delete' | 'attendance' | 'bulk_attendance' | 'score_update' | 'login' | 'logout' | 'password_change' | 'lookup' | 'view' | 'badge_award' | 'remedial_plan' | 'archive_term' | 'archive_plan' | 'tenant_switch' | 'integration_config';
   entityType: 'student' | 'teacher' | 'halaqah' | 'session_record' | 'plan' | 'lesson' | 'auth' | 'system' | 'badge' | 'intervention' | 'tenant' | 'archive' | 'stage' | 'integration' | 'meeting' | 'program' | 'activity' | 'participation';
   entityId: string;
   targetId?: string; // Compatibility alias

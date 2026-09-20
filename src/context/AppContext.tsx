@@ -240,6 +240,7 @@ import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../quran/models/stageCo
 import { BundledQuranProvider } from '../quran/providers/BundledQuranProvider';
 import { QuranMemorizationPlanningEngine } from '../quran/services/memorizationEngine';
 import { PlanRecalculationService } from '../quran/services/recalculationService';
+import { buildPlanArchive } from '../quran/services/planArchiveService';
 import { QuranPosition, MushafProfile } from '../quran/types';
 import { ALL_MUSHAF_PROFILES } from '../quran/models/MushafProfile';
 import { IntegrationConfig, QuranProviderConfig, ConnectionTestResult } from '../quran/types/config';
@@ -435,6 +436,16 @@ export interface AppContextType {
   previewStudentQuranPlan: (params: Omit<CreateRealStudentPlanParams, 'provider' | 'memorizationEngine'>) => Promise<StudentQuranPlan>;
   /** Persists a previewed plan (save + single-active archive + student link) */
   approveStudentQuranPlan: (plan: StudentQuranPlan, student: Student) => Promise<StudentQuranPlan>;
+  /**
+   * Archives (never deletes) a student's Quran plan. 'plan_and_achievements'
+   * additionally marks the plan's related session records as historical so a
+   * new plan starts from an independent point. Every byte stays in the DB.
+   */
+  archiveStudentQuranPlan: (params: {
+    planId: string;
+    archiveMode: 'plan_only' | 'plan_and_achievements';
+    reason?: string;
+  }) => Promise<void>;
   updateStudentQuranPlan: (plan: StudentQuranPlan) => Promise<void>;
   saveStudentQuranPlan: (plan: StudentQuranPlan) => Promise<void>;
   deleteStudentQuranPlan: (planId: string) => Promise<void>;
@@ -4150,6 +4161,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [guardDemoWrite, persistStudentQuranPlan]
   );
 
+  /**
+   * Archive the CURRENT Quran plan — NEVER deletes data.
+   *
+   *  plan_only:              plan → archived; session records + student
+   *                          current-position pointer untouched (the next plan
+   *                          continues from actual achievement).
+   *  plan_and_achievements:  plan → archived AND every session record related
+   *                          to this plan (explicit _quranPlanId link or the
+   *                          plan's active window) is MARKED historical via
+   *                          customTracks._planArchive; the student's current
+   *                          pointer is cleared so a new plan starts from an
+   *                          independent point. Nothing is deleted.
+   */
+  const archiveStudentQuranPlan = useCallback(
+    async (params: {
+      planId: string;
+      archiveMode: 'plan_only' | 'plan_and_achievements';
+      reason?: string;
+    }): Promise<void> => {
+      if (guardDemoWrite('أرشفة خطة قرآنية')) throw new Error('وضع الديمو تجريبي للعرض فقط.');
+
+      const plan =
+        quranPlans.find((p) => p.id === params.planId) ||
+        (await getQuranPlanByIdFromDb(params.planId, activeTenantId).catch(() => null));
+      if (!plan) throw new Error('الخطة غير موجودة.');
+      if (plan.status === 'archived') return; // idempotent — already archived
+      // Tenant isolation — the entity layer also enforces this server-side.
+      if (activeTenantId && plan.tenantId && plan.tenantId !== activeTenantId) {
+        throw new Error('لا يمكن أرشفة خطة تابعة لمجمع آخر.');
+      }
+
+      const nowIso = new Date().toISOString();
+      const actorName = currentActor?.name || currentUser?.name || 'النظام';
+      const { archivedPlan, markedRecords, summary } = buildPlanArchive({
+        plan,
+        mode: params.archiveMode,
+        actorName,
+        reason: params.reason,
+        sessionRecords,
+        archivedAtIso: nowIso,
+      });
+
+      // Persist the archived plan (status column + full plan_data preserved)
+      await saveQuranPlanToDb(archivedPlan, currentActor);
+
+      // Mark + persist related session records (upsert — never DELETE)
+      for (const rec of markedRecords) {
+        await dbSaveDailyRecord(rec, currentActor);
+      }
+
+      // Student pointer: unlink the archived plan; for PLAN_AND_ACHIEVEMENTS
+      // also clear the fast current-position pointer so the next plan starts
+      // independently (the old value survives in the archived plan + records).
+      const student = students.find((st) => st.id === plan.studentId);
+      if (student) {
+        const updates: Partial<Student> = {};
+        if (student.activeQuranPlanId === plan.id) updates.activeQuranPlanId = undefined;
+        if (params.archiveMode === 'plan_and_achievements') {
+          updates.currentSurah = '';
+          updates.currentAyah = 0;
+        }
+        if (Object.keys(updates).length > 0) {
+          await updateStudent(student.id, updates);
+        }
+      }
+
+      // Audit — existing audit_logs system, no parallel mechanism
+      await recordAuditLog({
+        userId: currentUser?.id || 'system',
+        userName: actorName,
+        userRole: currentRole,
+        action: 'archive_plan',
+        entityType: 'plan',
+        entityId: plan.id,
+        entityName: plan.title || `خطة الطالب ${plan.studentId}`,
+        previousValue: { status: plan.status, isCurrentActive: plan.isCurrentActive },
+        newValue: {
+          status: 'archived',
+          archiveMode: params.archiveMode,
+          lastPosition: summary.lastPosition,
+          planDays: summary.planDays,
+          recordedAchievementDays: summary.recordedAchievementDays,
+          relatedRecordCount: summary.relatedRecordCount,
+        },
+        notes: params.reason,
+      });
+
+      setQuranPlans((prev) => prev.map((p) => (p.id === plan.id ? archivedPlan : p)));
+      if (markedRecords.length > 0) {
+        const markedMap = new Map(markedRecords.map((r) => [r.id, r]));
+        setSessionRecords((prev) => prev.map((r) => markedMap.get(r.id) || r));
+      }
+    },
+    [
+      guardDemoWrite,
+      quranPlans,
+      activeTenantId,
+      currentActor,
+      currentUser,
+      currentRole,
+      sessionRecords,
+      students,
+      updateStudent,
+    ]
+  );
+
   const saveStudentQuranPlan = useCallback(
     async (plan: StudentQuranPlan): Promise<void> => {
       if (guardDemoWrite('حفظ خطة قرآنية')) return;
@@ -4374,6 +4491,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             notes: params.notes,
           },
           revision: revisionRecord,
+          customTracks: { _quranPlanId: targetPlan.id },
         });
       }
 
@@ -5158,6 +5276,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createStudentQuranPlan,
         previewStudentQuranPlan,
         approveStudentQuranPlan,
+        archiveStudentQuranPlan,
         updateStudentQuranPlan,
         saveStudentQuranPlan,
         deleteStudentQuranPlan,
