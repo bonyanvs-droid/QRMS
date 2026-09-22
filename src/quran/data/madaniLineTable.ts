@@ -143,11 +143,16 @@ export function partitionVersesByLines(
     currentGroup.push(v);
     accumulatedLines += weight;
 
-    // Check if we reached the line threshold or at the last verse
+    // Surah boundary protection: if the next verse belongs to a DIFFERENT surah,
+    // snap and close the current chunk at the end of the surah!
+    const nextVerse = i < verses.length - 1 ? verses[i + 1] : null;
+    const isSurahBoundary = nextVerse && nextVerse.surahNumber !== v.surahNumber;
+
+    // Check if we reached the line threshold, surah boundary, or at the last verse
     const isLast = i === verses.length - 1;
     const reachedThreshold = accumulatedLines >= targetLines - 0.2; // 0.2 tolerance for smooth line packing
 
-    if (reachedThreshold || isLast) {
+    if (reachedThreshold || isSurahBoundary || isLast) {
       const first = currentGroup[0];
       const last = currentGroup[currentGroup.length - 1];
       

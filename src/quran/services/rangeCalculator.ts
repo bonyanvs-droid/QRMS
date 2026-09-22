@@ -112,22 +112,33 @@ export class RangeCalculator {
 
       case 'ayah': {
         const chunkSize = Math.max(1, amount);
-        for (let i = 0; i < verses.length; i += chunkSize) {
-          const chunk = verses.slice(i, i + chunkSize);
-          const first = chunk[0];
-          const last = chunk[chunk.length - 1];
-          units.push({
-            type: 'ayah',
-            start: { surahNumber: first.surahNumber, ayahNumber: first.ayahNumber, globalIndex: first.globalIndex },
-            end: { surahNumber: last.surahNumber, ayahNumber: last.ayahNumber, globalIndex: last.globalIndex },
-            totalAyahs: chunk.length,
-            displayLabel:
-              first.globalIndex === last.globalIndex
-                ? formatQuranPosition(first, { withPrefix: true })
-                : formatQuranRange(first, last, { includeSurahWord: true }),
-            pageStart: first.pageNumber,
-            pageEnd: last.pageNumber,
-          });
+        let currentChunk: Ayah[] = [];
+
+        for (let i = 0; i < verses.length; i++) {
+          const v = verses[i];
+          currentChunk.push(v);
+
+          const isLast = i === verses.length - 1;
+          const nextV = !isLast ? verses[i + 1] : null;
+          const isSurahBoundary = nextV && nextV.surahNumber !== v.surahNumber;
+
+          if (currentChunk.length >= chunkSize || isSurahBoundary || isLast) {
+            const first = currentChunk[0];
+            const last = currentChunk[currentChunk.length - 1];
+            units.push({
+              type: 'ayah',
+              start: { surahNumber: first.surahNumber, ayahNumber: first.ayahNumber, globalIndex: first.globalIndex },
+              end: { surahNumber: last.surahNumber, ayahNumber: last.ayahNumber, globalIndex: last.globalIndex },
+              totalAyahs: currentChunk.length,
+              displayLabel:
+                first.globalIndex === last.globalIndex
+                  ? formatQuranPosition(first, { withPrefix: true })
+                  : formatQuranRange(first, last, { includeSurahWord: true }),
+              pageStart: first.pageNumber,
+              pageEnd: last.pageNumber,
+            });
+            currentChunk = [];
+          }
         }
         break;
       }

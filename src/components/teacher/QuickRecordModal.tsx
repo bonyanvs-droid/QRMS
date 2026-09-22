@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -61,31 +61,79 @@ const TRACK_META: Record<string, { label: string; icon: React.ReactNode }> = {
   revision: { label: 'المراجعة', icon: <RotateCcw className="w-3.5 h-3.5" /> },
 };
 
-/** Shared 0-100 mastery slider — same UX reused by memorization & revision */
-const ScoreSlider: React.FC<{
-  value: number;
+/** Star configuration for 1-5 rating system: 1=20%, 2=40%, 3=60%, 4=80%, 5=100% */
+const STAR_LEVELS = [
+  { stars: 5, score: 100, label: 'أتقن / ممتاز مرتفع', desc: 'تلاوة متقنة دون أي تردد أو أخطاء', color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
+  { stars: 4, score: 80, label: 'متقن / جيد جداً', desc: 'تنبيه يسير أو تردد خفيف تم تصويبه', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
+  { stars: 3, score: 60, label: 'جيد / يحتاج تمكين', desc: 'تردد في موضعين أو ثلاثة مع التصويب', color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' },
+  { stars: 2, score: 40, label: 'يحتاج تدريب وتكرار', desc: 'تعثر متكرر ويحتاج إعادة تكرار الورد وتثبيته', color: 'text-orange-600', bg: 'bg-orange-50 border-orange-200' },
+  { stars: 1, score: 20, label: 'غير متقن / إعادة التسميع', desc: 'لم يستحضر الآيات والمطلوب حفظه', color: 'text-rose-600', bg: 'bg-rose-50 border-rose-200' },
+];
+
+/** 5-Star interactive rating component — 1-click fast recording for halaqah teachers */
+const FiveStarRating: React.FC<{
+  value: number; // 0-100 percentage (20, 40, 60, 80, 100)
   onChange: (v: number) => void;
-  accent: string;
-  textClass: string;
-  min?: number;
   label: string;
-}> = ({ value, onChange, accent, textClass, min = 60, label }) => (
-  <div className="mt-3 flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
-    <span className="text-slate-700">{label}</span>
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max="100"
-        step="5"
-        value={value}
-        onChange={(e) => onChange(parseInt(e.target.value))}
-        className={`w-28 ${accent}`}
-      />
-      <span className={`font-bold ${textClass}`}>{value}%</span>
+  theme?: 'blue' | 'amber';
+}> = ({ value, onChange, label, theme = 'blue' }) => {
+  // Map percentage to stars (1-5): exactly 20% per star
+  const currentStars = useMemo(() => {
+    if (value >= 90) return 5;
+    if (value >= 70) return 4;
+    if (value >= 50) return 3;
+    if (value >= 30) return 2;
+    return 1;
+  }, [value]);
+
+  const activeLevel = STAR_LEVELS.find((l) => l.stars === currentStars) || STAR_LEVELS[1];
+
+  return (
+    <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-bold text-slate-800">{label}</span>
+        <span className="text-xs font-black text-slate-700 font-mono bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+          {value}%
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-1 py-1">
+        {[1, 2, 3, 4, 5].map((s) => {
+          const isSelected = s <= currentStars;
+          const levelInfo = STAR_LEVELS.find((l) => l.stars === s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onChange(levelInfo?.score || 90)}
+              className="flex-1 flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-slate-50 transition-all cursor-pointer group"
+              title={`${levelInfo?.stars} نجوم: ${levelInfo?.label}`}
+            >
+              <Star
+                className={`w-6 h-6 transition-transform group-hover:scale-110 ${
+                  isSelected
+                    ? theme === 'blue'
+                      ? 'fill-amber-400 text-amber-500'
+                      : 'fill-amber-400 text-amber-500'
+                    : 'text-slate-300 fill-slate-100'
+                }`}
+              />
+              <span className="text-[10px] text-slate-400 mt-1 font-mono font-bold group-hover:text-slate-700">
+                {s}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Dynamic pedagogical description badge */}
+      <div className={`mt-2 px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between ${activeLevel.bg}`}>
+        <span className={`font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
+        <span className="text-[11px] text-slate-500">{activeLevel.desc}</span>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Spelling mastery zones (equal quarters): <25 لم ينتقل بعد | 25-49 يحتاج مراجعة | 50-74 يحتاج تثبيت | >=75 أتقن
 const tagForSpellingScore = (
@@ -113,7 +161,28 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   // Quran Planning Engine Integration — plan determines which tracks today's session needs
   const activeQuranPlan = getActiveStudentQuranPlan(student.id);
   const todayIso = new Date().toISOString().split('T')[0];
-  const todayDailyItem = activeQuranPlan?.generatedPlan?.dailyPlans?.find((d) => d.date === todayIso);
+  
+  // Intelligent Floating Milestone: Look for today's date first; if absent/past or student was away,
+  // find the first uncompleted (pending) milestone so the student resumes from their exact stopping point!
+  const todayDailyItem = useMemo(() => {
+    const dailyPlans = activeQuranPlan?.generatedPlan?.dailyPlans;
+    if (!dailyPlans || dailyPlans.length === 0) return undefined;
+    
+    // 1. Direct match with today's calendar date if still pending
+    const exactToday = dailyPlans.find((d) => d.date === todayIso);
+    if (exactToday && exactToday.status === 'pending') {
+      return exactToday;
+    }
+
+    // 2. Floating Milestone Queue: Find the first pending milestone in chronological sequence
+    const firstPending = dailyPlans.find((d) => !d.isHistorical && d.status === 'pending');
+    if (firstPending) {
+      return firstPending;
+    }
+
+    // 3. Fallback to today or the last item
+    return exactToday || dailyPlans[dailyPlans.length - 1];
+  }, [activeQuranPlan, todayIso]);
 
   // Auto Minor Revision: engine-determined range, teacher only records the actual result
   const autoRevision = activeQuranPlan?.autoMinorRevisionMode === true;
@@ -161,7 +230,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [ayahFrom, setAyahFrom] = useState<number>(planUnit?.start?.ayahNumber || 1);
   const [surahTo, setSurahTo] = useState<string>(planEndSurah || student.currentSurah);
   const [ayahTo, setAyahTo] = useState<number>(planUnit?.end?.ayahNumber || student.currentAyah || 10);
-  const [memScore, setMemScore] = useState<number>(90);
+  const [memScore, setMemScore] = useState<number>(100);
   const [memNotes, setMemNotes] = useState('');
 
   // Revision Track State
@@ -170,7 +239,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [revSurahTo, setRevSurahTo] = useState<string>(student.currentSurah);
   const [revAyahTo, setRevAyahTo] = useState<number>(student.currentAyah || 1);
   const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>('قريبة');
-  const [revScore, setRevScore] = useState<number>(95);
+  const [revScore, setRevScore] = useState<number>(100);
   const [revManualOverride, setRevManualOverride] = useState(false);
 
   // Custom (admin-defined) tracks — generic score + notes per track, saved to customTracks
@@ -349,12 +418,20 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               actualOrd > plannedOrd ? 'overachieved' : actualOrd < plannedOrd ? 'partial' : 'completed';
           }
         }
+        const milestoneDate = todayDailyItem.date || todayIso;
         await recordQuranPlanAchievement({
           planId: activeQuranPlan.id,
-          dayDate: todayIso,
+          dayDate: milestoneDate,
           status: planStatus,
           actualEndPosition,
-          evaluation: memScore >= 95 ? 'excellent' : memScore >= 85 ? 'very_good' : 'good',
+          evaluation:
+            memScore >= 90
+              ? 'excellent'
+              : memScore >= 70
+              ? 'very_good'
+              : memScore >= 50
+              ? 'good'
+              : 'needs_practice',
           notes: memNotes || 'تم التسميع عبر نافذة التسجيل السريع للمعلم',
         });
       } catch (err) {
@@ -669,12 +746,11 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
-              <ScoreSlider
-                label="تقييم إتقان التسميع والتجويد:"
+              <FiveStarRating
+                label="تقييم إتقان التسميع والتجويد (بالنجوم):"
                 value={memScore}
                 onChange={setMemScore}
-                accent="accent-blue-600"
-                textClass="text-blue-800"
+                theme="blue"
               />
             </div>
           )}
@@ -842,14 +918,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               </div>
               )}
 
-              {/* Revision mastery — same slider UX as memorization */}
-              <ScoreSlider
-                label="تقييم المراجعة والتثبيت:"
+              {/* Revision mastery — 5-star interactive rating */}
+              <FiveStarRating
+                label="تقييم إتقان المراجعة والتثبيت (بالنجوم):"
                 value={revScore}
                 onChange={setRevScore}
-                accent="accent-amber-600"
-                textClass="text-amber-800"
-                min={0}
+                theme="amber"
               />
             </div>
           )}

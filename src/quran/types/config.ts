@@ -4,7 +4,7 @@
  * and Strict Separation of Non-sensitive Settings from Secrets.
  */
 
-export type ProviderType = 'bundled' | 'quran_com' | 'alquran_cloud' | 'custom';
+export type ProviderType = 'bundled' | 'quran_com' | 'alquran_cloud' | 'quran_plan' | 'custom';
 
 export type Environment = 'development' | 'staging' | 'production';
 

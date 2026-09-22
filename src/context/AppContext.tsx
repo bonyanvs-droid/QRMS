@@ -699,7 +699,8 @@ export function purgeOperationalLocalStorage(): void {
           !lower.includes('theme') &&
           !lower.includes('logo') &&
           !lower.includes('academic') &&
-          !lower.includes('integration')
+          !lower.includes('integration') &&
+          !lower.includes('smart_att_done')
         ) {
           keysToRemove.push(key);
         }
@@ -3717,6 +3718,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
 
         const actualRecord = isDemoMode ? newRecord : await dbSaveStaffAttendanceRecord(newRecord);
+
+        try {
+          if (typeof window !== 'undefined' && activeTenant?.id && currentUser?.id) {
+            window.localStorage?.setItem(`smart_att_done_${activeTenant.id}_${currentUser.id}_${todayStr}`, 'true');
+          }
+        } catch {
+          // ignore storage error
+        }
 
         setStaffAttendanceRecords((prev) => {
           const filtered = prev.filter(

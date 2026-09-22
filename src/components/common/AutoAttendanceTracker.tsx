@@ -10,6 +10,7 @@ interface AutoAttSuccessInfo {
   tenantName?: string;
   welcomeMessage?: string;
   reason: string;
+  isWithinPerimeter?: boolean;
 }
 
 // Gentle pleasant audio chime on successful auto-attendance
@@ -55,6 +56,7 @@ export const AutoAttendanceTracker: React.FC = () => {
   const lastCheckTimestampRef = useRef<number>(0);
 
   const todayStr = getLocalDateString();
+  const localDoneKey = currentUser && activeTenant ? `smart_att_done_${activeTenant.id}_${currentUser.id}_${todayStr}` : null;
 
   // Eligible roles for staff attendance
   const isStaff = currentUser && [
@@ -66,24 +68,40 @@ export const AutoAttendanceTracker: React.FC = () => {
     'manager',
   ].includes(currentUser.role);
 
-  // Check if attendance is already recorded today strictly for the current date!
-  // Past records from different dates will NEVER block today's registration.
+  // Instant local guard: check localStorage first to prevent re-triggering on fresh page loads / reloads
+  const hasLocalGuardToday = Boolean(
+    localDoneKey && typeof window !== 'undefined' && window.localStorage?.getItem(localDoneKey) === 'true'
+  );
+
+  // Check if attendance is already recorded today in memory/state
   const isAlreadyCheckedToday = Boolean(
-    currentUser &&
+    hasLocalGuardToday ||
+    (currentUser &&
       activeTenant &&
       staffAttendanceRecords?.some(
         (r) =>
           (r.tenantId === activeTenant?.id || !r.tenantId) &&
           r.userId === currentUser.id &&
           isRecordForDate(r.date || r.timestamp, todayStr)
-      )
+      ))
   );
+
+  // Sync state to local guard if records arrived from Firestore
+  useEffect(() => {
+    if (localDoneKey && !hasLocalGuardToday && isAlreadyCheckedToday) {
+      try {
+        window.localStorage?.setItem(localDoneKey, 'true');
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, [localDoneKey, hasLocalGuardToday, isAlreadyCheckedToday]);
 
   const isManagerOrAdmin = currentUser && ['campus_admin', 'system_admin', 'admin', 'manager'].includes(currentUser.role);
 
   const performAutoAttendanceCheck = async () => {
-    // Avoid re-checking if user already recorded attendance today or not a staff member
-    if (!isStaff || !activeTenant || isAlreadyCheckedToday) {
+    // Immediate return if attendance is already recorded or user not eligible
+    if (!isStaff || !activeTenant || isAlreadyCheckedToday || hasLocalGuardToday) {
       return;
     }
 
@@ -104,6 +122,25 @@ export const AutoAttendanceTracker: React.FC = () => {
       regularDays: [0, 1, 2, 3, 4],
     };
 
+    const markAttendanceSuccess = (dist?: number, reasonText?: string, isPerimeter: boolean = false) => {
+      if (localDoneKey) {
+        try {
+          window.localStorage?.setItem(localDoneKey, 'true');
+        } catch {
+          // ignore
+        }
+      }
+      playSuccessChime();
+      setSuccessInfo({
+        distance: dist,
+        time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+        tenantName: activeTenant?.name,
+        welcomeMessage: attendanceCfg.welcomeMessage,
+        reason: reasonText || 'تسجيل حضور ذكي',
+        isWithinPerimeter: isPerimeter,
+      });
+    };
+
     // If browser does not support geolocation
     if (!navigator.geolocation) {
       if (isManagerOrAdmin) {
@@ -111,13 +148,7 @@ export const AutoAttendanceTracker: React.FC = () => {
           const reason = 'حضور إداري - مدير المجمع (تسجيل دخول المنصة)';
           const result = await recordGeoAttendance(reason);
           if (result.success) {
-            playSuccessChime();
-            setSuccessInfo({
-              time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-              tenantName: activeTenant?.name,
-              welcomeMessage: attendanceCfg.welcomeMessage,
-              reason,
-            });
+            markAttendanceSuccess(undefined, reason, false);
           }
         } finally {
           isCheckingRef.current = false;
@@ -159,28 +190,14 @@ export const AutoAttendanceTracker: React.FC = () => {
 
             const result = await recordGeoAttendance(reason);
             if (result.success) {
-              playSuccessChime();
-              setSuccessInfo({
-                distance,
-                time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-                tenantName: activeTenant?.name,
-                welcomeMessage: attendanceCfg.welcomeMessage,
-                reason,
-              });
+              markAttendanceSuccess(distance, reason, true);
             }
           } else if (isManagerOrAdmin) {
             // For Campus Admin / Manager: auto-record administrative check-in even when logging in from remote office/home
             const reason = `حضور إداري - مدير المجمع (${distance}م عن المقر)`;
             const result = await recordGeoAttendance(reason);
             if (result.success) {
-              playSuccessChime();
-              setSuccessInfo({
-                distance,
-                time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-                tenantName: activeTenant?.name,
-                welcomeMessage: attendanceCfg.welcomeMessage,
-                reason,
-              });
+              markAttendanceSuccess(distance, reason, false);
             }
           }
         } catch (err) {
@@ -196,13 +213,7 @@ export const AutoAttendanceTracker: React.FC = () => {
             const reason = 'حضور إداري - مدير المجمع (تسجيل دخول المنصة)';
             const result = await recordGeoAttendance(reason);
             if (result.success) {
-              playSuccessChime();
-              setSuccessInfo({
-                time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-                tenantName: activeTenant?.name,
-                welcomeMessage: attendanceCfg.welcomeMessage,
-                reason,
-              });
+              markAttendanceSuccess(undefined, reason, false);
             }
           }
         } catch (err) {
@@ -220,19 +231,19 @@ export const AutoAttendanceTracker: React.FC = () => {
   };
 
   // 1. Check automatically upon component mount / when user & tenant are ready
+  // Delay by 1500ms to allow Firestore initial subscriptions to settle
   useEffect(() => {
-    if (isStaff && activeTenant && !isAlreadyCheckedToday) {
-      // Small delay of 800ms to allow all state and context to settle smoothly
+    if (isStaff && activeTenant && !isAlreadyCheckedToday && !hasLocalGuardToday) {
       const timer = setTimeout(() => {
         performAutoAttendanceCheck();
-      }, 800);
+      }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [currentUser?.id, activeTenant?.id, isAlreadyCheckedToday, isStaff]);
+  }, [currentUser?.id, activeTenant?.id, isAlreadyCheckedToday, hasLocalGuardToday, isStaff]);
 
   // 2. Also check when user returns to the tab or unlocks phone screen (e.g. walked into the mosque)
   useEffect(() => {
-    if (!isStaff || isAlreadyCheckedToday) return;
+    if (!isStaff || isAlreadyCheckedToday || hasLocalGuardToday) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -251,7 +262,7 @@ export const AutoAttendanceTracker: React.FC = () => {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isStaff, isAlreadyCheckedToday, activeTenant?.id]);
+  }, [isStaff, isAlreadyCheckedToday, hasLocalGuardToday, activeTenant?.id]);
 
   // Auto-dismiss the success banner after 9 seconds
   useEffect(() => {
@@ -264,6 +275,8 @@ export const AutoAttendanceTracker: React.FC = () => {
   }, [successInfo]);
 
   if (!successInfo) return null;
+
+  const isWithin = successInfo.isWithinPerimeter ?? (successInfo.distance !== undefined && successInfo.distance <= 200);
 
   return (
     <div
@@ -289,7 +302,7 @@ export const AutoAttendanceTracker: React.FC = () => {
           </div>
           <button
             onClick={() => setSuccessInfo(null)}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"
+            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
             title="إغلاق التنبيه"
           >
             <X className="w-4 h-4" />
@@ -303,9 +316,15 @@ export const AutoAttendanceTracker: React.FC = () => {
         )}
 
         <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-          <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+          <span className={`flex items-center gap-1 font-semibold ${isWithin ? 'text-emerald-700' : 'text-blue-700'}`}>
             <MapPin className="w-3.5 h-3.5" />
-            <span>داخل النطاق (المسافة: {successInfo.distance} متراً)</span>
+            <span>
+              {isWithin
+                ? `داخل النطاق (المسافة: ${successInfo.distance ?? 0} متراً)`
+                : successInfo.distance !== undefined
+                ? `حضور إداري عن بُعد (${(successInfo.distance / 1000).toFixed(1)} كم عن المقر)`
+                : 'حضور إداري معتمد (تسجيل دخول)'}
+            </span>
           </span>
           <span>وقت الرصد: {successInfo.time}</span>
         </div>
