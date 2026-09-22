@@ -323,8 +323,11 @@ export async function printElementViaIframe(
       doc.write(printHtml);
       doc.close();
 
-      // Wait for images and resources to load in the iframe
+      // Ensure print is only invoked once (prevents double print dialog)
+      let printTriggered = false;
       const performPrint = () => {
+        if (printTriggered) return;
+        printTriggered = true;
         setTimeout(() => {
           try {
             iframe.contentWindow?.focus();
@@ -347,8 +350,12 @@ export async function printElementViaIframe(
 
       if (iframe.contentWindow) {
         iframe.contentWindow.onload = performPrint;
-        // Fallback in case onload already fired
-        setTimeout(performPrint, 800);
+        // Fallback only if onload did not fire within safe timeout
+        setTimeout(() => {
+          if (!printTriggered) {
+            performPrint();
+          }
+        }, 800);
       } else {
         performPrint();
       }

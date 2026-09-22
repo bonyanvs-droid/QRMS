@@ -184,6 +184,7 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
 
   // Setup Form State (for students needing initial starting point setup)
   const [showStageConfigsModal, setShowStageConfigsModal] = useState<boolean>(false);
+  const [useStageTemplate, setUseStageTemplate] = useState<boolean>(false);
   const [selectedStageConfigId, setSelectedStageConfigId] = useState<string>('');
   const [setupStartSurah, setSetupStartSurah] = useState<string>('الناس');
   const [setupStartAyah, setSetupStartAyah] = useState<number>(1);
@@ -399,9 +400,10 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
         };
       }
 
-      // Explicit template selection is honored — never silently re-matched
-      const chosenStageConfig =
-        quranStageConfigs.find((c) => c.id === selectedStageConfigId) || undefined;
+      // Explicit template selection is honored only if useStageTemplate is active
+      const chosenStageConfig = useStageTemplate
+        ? (quranStageConfigs.find((c) => c.id === selectedStageConfigId) || undefined)
+        : undefined;
 
       const built = await previewStudentQuranPlan({
         customRevisionUnitsPerWindow: setupRevisionUnitsPerWindow,
@@ -663,34 +665,62 @@ export const StudentQuranPlanModal: React.FC<StudentQuranPlanModalProps> = ({
                   <span>تحديد معايير الخطة القرآنية الفردية</span>
                 </h5>
 
-                {/* Stage Template Selector */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      اختر نموذج المرحلة المعتمد (أو خصص يدوياً)
+                {/* Stage Template Selector — Only revealed when toggled */}
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={useStageTemplate}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setUseStageTemplate(checked);
+                          if (checked && quranStageConfigs.length > 0) {
+                            const configToUse = selectedStageConfigId || matchedStageConfig?.id || quranStageConfigs[0].id;
+                            handleStageConfigChange(configToUse);
+                          }
+                        }}
+                        className="w-4 h-4 rounded text-emerald-700 focus:ring-emerald-600 border-slate-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-black text-slate-800">
+                        تطبيق خطة من قالب معتمد (اختر قالباً)
+                      </span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowStageConfigsModal(true)}
-                      className="text-[11px] font-black text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer bg-emerald-100/80 hover:bg-emerald-200/90 px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs transition-all"
-                      title="فتح إدارة وتعديل وإضافة نماذج وقوالب المراحل المعتمدة"
-                    >
-                      <Sliders className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>⚙️ إدارة وتعديل النماذج</span>
-                    </button>
+                    {useStageTemplate && (
+                      <button
+                        type="button"
+                        onClick={() => setShowStageConfigsModal(true)}
+                        className="text-[11px] font-black text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer bg-emerald-100/80 hover:bg-emerald-200/90 px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs transition-all shrink-0"
+                        title="فتح إدارة وتعديل وإضافة نماذج وقوالب المراحل المعتمدة"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>⚙️ إدارة وتعديل النماذج</span>
+                      </button>
+                    )}
                   </div>
-                  <select
-                    value={selectedStageConfigId}
-                    onChange={(e) => handleStageConfigChange(e.target.value)}
-                    className="w-full text-xs font-bold px-3 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-emerald-700 shadow-2xs text-slate-900"
-                  >
-                    {quranStageConfigs.map((cfg) => (
-                      <option key={cfg.id} value={cfg.id}>
-                        {cfg.name} – {cfg.memorization?.defaultDirection === 'backward' ? 'تنازلي (جزء عم)' : 'تصاعدي'} ({cfg.memorization?.defaultDailyAmount || 1}{' '}
-                        {cfg.memorization?.unitType === 'ayah' ? 'آيات' : 'صفحة'} يومياً)
-                      </option>
-                    ))}
-                  </select>
+
+                  {useStageTemplate && (
+                    <div className="pt-2 border-t border-slate-100 animate-in fade-in duration-200">
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        اختر نموذج المرحلة المعتمد:
+                      </label>
+                      <select
+                        value={selectedStageConfigId}
+                        onChange={(e) => handleStageConfigChange(e.target.value)}
+                        className="w-full text-xs font-bold px-3 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-emerald-700 shadow-2xs text-slate-900"
+                      >
+                        {quranStageConfigs.map((cfg) => (
+                          <option key={cfg.id} value={cfg.id}>
+                            {cfg.name} – {cfg.memorization?.defaultDirection === 'backward' ? 'تنازلي (جزء عم)' : 'تصاعدي'} ({cfg.memorization?.defaultDailyAmount || 1}{' '}
+                            {cfg.memorization?.unitType === 'ayah' ? 'آيات' : 'صفحة'} يومياً)
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-emerald-700 mt-1.5 font-medium">
+                        ✓ اختيار القالب يقوم بملء وتعيين وتيرة الحفظ والبداية والنهاية وأيام التثبيت وأيام العمل المعتمدة للمرحلة تلقائياً.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Target Start & End Inputs */}

@@ -197,13 +197,21 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     return STATUS_META[d.status] || STATUS_META.pending;
   };
 
+  const [isPrinting, setIsPrinting] = useState(false);
+
   const handlePrint = async () => {
-    if (!printRef.current) return;
-    await executePrintOrPdfFallback(printRef.current, {
-      fileName: `الخطة_القرآنية_الشاملة_${student.fullName}.pdf`,
-      title: `الخطة القرآنية الشاملة — ${student.fullName}`,
-      orientation: 'portrait',
-    });
+    if (!printRef.current || isPrinting) return;
+    setIsPrinting(true);
+    try {
+      await executePrintOrPdfFallback(printRef.current, {
+        fileName: `الخطة_القرآنية_الشاملة_${student.fullName}.pdf`,
+        title: `الخطة القرآنية الشاملة — ${student.fullName}`,
+        orientation: 'portrait',
+      });
+    } finally {
+      // Delay releasing lock to prevent accidental double clicks
+      setTimeout(() => setIsPrinting(false), 1200);
+    }
   };
 
   return (
@@ -237,10 +245,15 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
             </div>
             <button
               onClick={handlePrint}
-              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
-              title="طباعة / PDF"
+              disabled={isPrinting}
+              className={`p-1.5 rounded-lg transition-colors ${
+                isPrinting
+                  ? 'bg-white/10 text-white/50 cursor-not-allowed opacity-60'
+                  : 'bg-white/15 hover:bg-white/25 text-white cursor-pointer'
+              }`}
+              title={isPrinting ? 'جاري تجهيز الطباعة...' : 'طباعة / PDF'}
             >
-              <Printer className="w-4 h-4" />
+              <Printer className={`w-4 h-4 ${isPrinting ? 'animate-pulse' : ''}`} />
             </button>
             <button onClick={onClose} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25">
               <X className="w-4 h-4" />
