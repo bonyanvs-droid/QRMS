@@ -1,0 +1,10 @@
+{
+  "name": "نظام إدارة المجمعات القرآنية",
+  "description": "Quranic Centers Management System — نظام إدارة المجمعات القرآنية",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
