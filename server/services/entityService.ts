@@ -1,6 +1,7 @@
 import { executeQuery, executeQuerySingle } from '../db/query';
 import { getDbPool } from '../config/db';
 import { snakeToCamelCase, camelToSnakeCase } from '../../src/db/schema';
+import { resolveCanonicalTenantId, getTenantAliases } from './tenantService';
 
 export interface TableConfig {
   tableName: string;
@@ -117,12 +118,13 @@ export const ENTITY_TABLE_CONFIGS: Record<string, TableConfig> = {
     isTenantScoped: false,
     allowedColumns: [
       'id', 'name', 'semester', 'current_term', 'academic_year',
+      'system_type', 'active_term_id', 'terms',
       'start_date', 'end_date', 'holidays', 'operational_start_week',
       'operational_end_week', 'total_weeks', 'current_week',
       'manual_week_override', 'days_per_week', 'spelling_passing_threshold',
       'grade_targets', 'created_at', 'updated_at'
     ],
-    jsonbColumns: ['holidays', 'grade_targets'],
+    jsonbColumns: ['holidays', 'grade_targets', 'terms'],
     defaultSort: 'start_date DESC',
     searchColumns: ['name', 'semester', 'academic_year'],
   },
@@ -664,6 +666,8 @@ export const COLLECTION_ALIASES: Record<string, string> = {
   spelling_lessons: 'spelling_lessons',
   users: 'users',
   platform_users: 'users',
+  teachers: 'users',
+  staff: 'users',
   halaqahs: 'halaqahs',
   students: 'students',
   quran_plans: 'quran_plans',
@@ -807,8 +811,10 @@ export async function findMany<T = any>(
   if (config.isTenantScoped) {
     const effectiveTenantId = tenantId || queryParams.tenantId;
     if (effectiveTenantId) {
-      conditions.push(`${config.tableName}.tenant_id = $${paramIndex}`);
-      params.push(effectiveTenantId);
+      const canonicalId = (await resolveCanonicalTenantId(effectiveTenantId)) || effectiveTenantId;
+      const aliases = await getTenantAliases(canonicalId);
+      conditions.push(`${config.tableName}.tenant_id = ANY($${paramIndex})`);
+      params.push(aliases);
       paramIndex++;
     } else if (!options.isSuperAdmin) {
       // If no tenant is provided for a tenant-scoped table, restrict to empty set
@@ -913,8 +919,10 @@ export async function findById<T = any>(
   const params: any[] = [id];
 
   if (config.isTenantScoped && tenantId) {
-    conditions.push(`${config.tableName}.tenant_id = $${params.length + 1}`);
-    params.push(tenantId);
+    const canonicalId = (await resolveCanonicalTenantId(tenantId)) || tenantId;
+    const aliases = await getTenantAliases(canonicalId);
+    conditions.push(`${config.tableName}.tenant_id = ANY($${params.length + 1})`);
+    params.push(aliases);
   }
 
   applySessionScope(config, conditions, params, params.length + 1, sessionUser);
@@ -1037,6 +1045,14 @@ export async function upsert<T = any>(
   }
 
   const sanitized = prepareRecord(config, rawData, tenantId);
+
+  if (config.isTenantScoped) {
+    const rawTid = sanitized.tenant_id || tenantId;
+    if (rawTid) {
+      const canonicalId = (await resolveCanonicalTenantId(rawTid)) || rawTid;
+      sanitized.tenant_id = canonicalId;
+    }
+  }
 
   // Users table: derive missing role from staff_role so Teacher-shaped payloads
   // (which carry staffRole but no role) never violate the NOT NULL constraint

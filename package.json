@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "clean": "rm -rf dist build",
-    "build": "npm run clean && vite build && cp -r dist build",
-    "start": "tsx server.ts",
+    "clean": "rm -rf dist build out",
+    "build": "vite build && mkdir -p build && cp -a dist/. build/ && mkdir -p out && cp -a dist/. out/",
+    "start": "node server.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },

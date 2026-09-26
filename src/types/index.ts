@@ -396,12 +396,15 @@ export interface EducationalPlanWeek {
   quranicProgram?: string; // البرنامج القرآني المصاحب (مسابقة نحو المعالي، استيكرات...)
   overallProjectBudget?: number; // الميزانية الإجمالية للمشروع (مثل: 1000 ريال)
 
-  // 4. الميزانية والملاحظات والحالة
+  // 4. الميزانية والملاحظات والحالة والتحكم في الظهور
   budget: number; // الميزانية المقترحة للأسبوع (50 ر.س)
   notes?: string; // ملاحظات
   valuesList?: string[];
   executionStatus?: EducationalExecutionStatus;
   status?: 'scheduled' | 'in_progress' | 'completed';
+  stageName?: string; // اسم المرحلة التابع لها الأسبوع (مثال: مرحلة البراعم)
+  showSupervisorName?: boolean; // إظهار أو إخفاء اسم المشرف المسؤول في البوابة العامة وتقارير أولياء الأمور
+  isVisible?: boolean; // إظهار أو إخفاء خطة هذا الأسبوع ككل في البوابة العامة وبوابة أولياء الأمور
   createdAt?: string;
   updatedAt?: string;
 }
@@ -486,10 +489,39 @@ export interface OfficialHoliday {
   endDate: string; // "YYYY-MM-DD"
 }
 
+export interface AcademicTerm {
+  id: string; // e.g. "term_1", "term_2", "term_3"
+  termNumber: 1 | 2 | 3;
+  name: string; // e.g. "الفصل الدراسي الأول", "الفصل الدراسي الثاني", "الفصل الدراسي الثالث"
+  isCurrent: boolean;
+  isArchived?: boolean;
+  startDate: string;
+  endDate: string;
+  operationalStartWeek: number; // e.g. 3
+  operationalEndWeek: number; // e.g. 14
+  totalWeeks: number; // 12
+  currentWeek: number;
+  manualWeekOverride?: boolean;
+  holidays?: string[];
+  officialHolidays?: OfficialHoliday[];
+  spellingPassingThreshold?: number; // 85%
+  gradeTargets: {
+    tamheedi?: { minSurah: string; label?: string };
+    grade1?: { minSurah: string; label?: string };
+    grade2?: { minSurah: string; label?: string };
+    [stageOrGradeKey: string]: { minSurah: string; label?: string } | undefined;
+  };
+  outcomeText?: string;
+  notes?: string;
+}
+
 export interface AcademicYearConfig {
   id: string;
   name: string; // e.g. "العام الدراسي 1447-1448 هـ"
-  semester: string; // e.g. "الفصل الدراسي الثاني"
+  systemType?: 'three_terms' | 'two_terms';
+  activeTermId?: string; // id of current active term, e.g. "term_1"
+  terms?: AcademicTerm[]; // Array of terms (Term 1, Term 2, Term 3)
+  semester: string; // e.g. "الفصل الدراسي الثاني" (compatibility alias of active term)
   currentTerm?: string; // Compatibility alias
   academicYear?: string; // Compatibility alias
   startDate: string;
@@ -765,6 +797,15 @@ export interface MosqueComplexTenant {
   admissionsConfig?: TenantAdmissionsConfig;
   reportsConfig?: TenantReportsConfig;
   whatsappConfig?: WhatsAppApiConfig;
+  stats?: {
+    studentsCount: number;
+    halaqahsCount: number;
+    teachersCount: number;
+    supervisorsCount: number;
+    staffCount: number;
+    stagesCount: number;
+    studentsPerStage?: Record<string, number>;
+  };
 }
 
 export interface DailyPrayerTimes {

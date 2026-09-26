@@ -1,0 +1,40 @@
+{
+  "id": "qrms-ghazzawi",
+  "name": "مجمع الغزاوي القرآني",
+  "short_name": "مجمع الغزاوي",
+  "description": "نظام إدارة مجمع الغزاوي القرآني وحلقات التحفيظ والمخرجات التعليمية والتربوية (Quranic Centers Management System)",
+  "theme_color": "#065f46",
+  "background_color": "#f8fafc",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/#/t/ghazawi",
+  "scope": "/",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

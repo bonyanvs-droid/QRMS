@@ -35,6 +35,52 @@ export function createApp() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+  // Web App Manifest Endpoint (Dynamic & Static fallback)
+  app.get(['/manifest.webmanifest', '/manifest.json'], (req, res) => {
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({
+      id: 'qrms-ghazzawi',
+      name: 'مجمع الغزاوي القرآني',
+      short_name: 'مجمع الغزاوي',
+      description: 'نظام إدارة مجمع الغزاوي القرآني وحلقات التحفيظ والمخرجات التعليمية والتربوية (Quranic Centers Management System)',
+      theme_color: '#065f46',
+      background_color: '#f8fafc',
+      display: 'standalone',
+      orientation: 'portrait',
+      start_url: '/#/t/ghazawi',
+      scope: '/',
+      lang: 'ar',
+      dir: 'rtl',
+      icons: [
+        {
+          src: '/pwa-192x192.png',
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'any',
+        },
+        {
+          src: '/pwa-192x192.png',
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'maskable',
+        },
+        {
+          src: '/pwa-512x512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'any',
+        },
+        {
+          src: '/pwa-512x512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'maskable',
+        },
+      ],
+    });
+  });
+
   // 0. Absolute Top Priority: Auth Routes (after body parsers)
   app.use('/api/auth', authRouter);
 

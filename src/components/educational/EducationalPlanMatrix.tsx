@@ -15,6 +15,11 @@ import {
   Coffee,
   Bookmark,
   Flag,
+  Eye,
+  EyeOff,
+  UserCheck,
+  UserX,
+  User,
 } from 'lucide-react';
 import { EducationalPlanWeek, EducationalStage } from '../../types';
 import { formatWeekDayDate } from '../../utils/educationalPlanUtils';
@@ -32,6 +37,8 @@ interface EducationalPlanMatrixProps {
   onDeleteWeek: (id: string, weekNumber: number, title?: string) => void;
   onToggleStatus: (week: EducationalPlanWeek) => void;
   onSendAnnouncement: (week: EducationalPlanWeek) => void;
+  onToggleVisibility?: (week: EducationalPlanWeek) => void;
+  onToggleSupervisorVisibility?: (week: EducationalPlanWeek) => void;
 }
 
 export const EducationalPlanMatrix: React.FC<EducationalPlanMatrixProps> = ({
@@ -47,6 +54,8 @@ export const EducationalPlanMatrix: React.FC<EducationalPlanMatrixProps> = ({
   onDeleteWeek,
   onToggleStatus,
   onSendAnnouncement,
+  onToggleVisibility,
+  onToggleSupervisorVisibility,
 }) => {
   const [selectedDay, setSelectedDay] = useState<'saturday' | 'thursday' | 'friday'>('saturday');
   const totalBudget = weeks.reduce((sum, w) => sum + (w.budget || 0), 0);
@@ -444,7 +453,21 @@ export const EducationalPlanMatrix: React.FC<EducationalPlanMatrixProps> = ({
 
                     {/* Value Title */}
                     <td className="p-2.5 align-top font-bold text-slate-900 border-l border-slate-200">
-                      {week.valueTitle || '-'}
+                      <div>
+                        <span>{week.valueTitle || '-'}</span>
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {(week.stageName || week.stageId) && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-800 font-bold border border-teal-200">
+                              {week.stageName || (week.stageId === 'baraem' ? 'مرحلة البراعم' : week.stageId)}
+                            </span>
+                          )}
+                          {week.isVisible === false && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold">
+                              مخفي من البوابة
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </td>
 
                     {/* Motto */}
@@ -508,7 +531,38 @@ export const EducationalPlanMatrix: React.FC<EducationalPlanMatrixProps> = ({
 
                     {/* Week Responsible Supervisor */}
                     <td className="p-2.5 align-top border-l border-slate-200 font-bold text-slate-900">
-                      {week.responsiblePerson || '-'}
+                      <div className="flex items-start justify-between gap-1.5">
+                        <div>
+                          <span>{week.responsiblePerson || '-'}</span>
+                          {week.showSupervisorName === false && (
+                            <span className="block text-[9px] font-bold text-rose-600 bg-rose-50 px-1 rounded mt-0.5 border border-rose-200">
+                              (مخفي من البوابة)
+                            </span>
+                          )}
+                        </div>
+                        {canManage && week.responsiblePerson && (
+                          <button
+                            type="button"
+                            onClick={() => onToggleSupervisorVisibility?.(week)}
+                            className={`p-1 rounded-md transition-all shrink-0 cursor-pointer ${
+                              week.showSupervisorName !== false
+                                ? 'text-teal-700 hover:bg-teal-100'
+                                : 'text-slate-400 hover:bg-slate-200'
+                            }`}
+                            title={
+                              week.showSupervisorName !== false
+                                ? 'اسم المشرف ظاهر في البوابة العامة والتقارير (اضغط للإخفاء)'
+                                : 'اسم المشرف مخفي في البوابة العامة والتقارير (اضغط للإظهار)'
+                            }
+                          >
+                            {week.showSupervisorName !== false ? (
+                              <UserCheck className="w-3.5 h-3.5 text-teal-700" />
+                            ) : (
+                              <UserX className="w-3.5 h-3.5 text-slate-400" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* Quranic Program */}
@@ -557,6 +611,27 @@ export const EducationalPlanMatrix: React.FC<EducationalPlanMatrixProps> = ({
 
                         {canManage && (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => onToggleVisibility?.(week)}
+                              className={`p-1.5 rounded-lg text-xs cursor-pointer ${
+                                week.isVisible !== false
+                                  ? 'text-emerald-700 hover:bg-emerald-50'
+                                  : 'text-slate-400 hover:bg-slate-200 bg-slate-100'
+                              }`}
+                              title={
+                                week.isVisible !== false
+                                  ? 'الأسبوع ظاهر في البوابة العامة (اضغط للإخفاء)'
+                                  : 'الأسبوع مخفي من البوابة العامة (اضغط للإظهار)'
+                              }
+                            >
+                              {week.isVisible !== false ? (
+                                <Eye className="w-3.5 h-3.5" />
+                              ) : (
+                                <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                              )}
+                            </button>
+
                             <button
                               onClick={() => onEditWeek(week)}
                               className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer"

@@ -33,6 +33,11 @@ import {
   CheckSquare,
   Square,
   Activity,
+  Eye,
+  EyeOff,
+  UserCheck,
+  UserX,
+  Sliders,
 } from 'lucide-react';
 import { EducationalPlanWeek, EducationalStage } from '../../types';
 import { hasPermission } from '../../lib/permissions';
@@ -223,6 +228,61 @@ export const EducationalPlanView: React.FC = () => {
   const completedCount = stageFilteredPlan.filter((w) => w.status === 'completed').length;
   const inProgressCount = stageFilteredPlan.filter((w) => w.status === 'in_progress').length;
 
+  // Visibility & Supervisor Display States
+  const isCurrentStageAllVisible = useMemo(() => {
+    if (stageFilteredPlan.length === 0) return true;
+    return stageFilteredPlan.some((w) => w.isVisible !== false);
+  }, [stageFilteredPlan]);
+
+  const isCurrentStageSupervisorVisible = useMemo(() => {
+    if (stageFilteredPlan.length === 0) return true;
+    return stageFilteredPlan.some((w) => w.showSupervisorName !== false);
+  }, [stageFilteredPlan]);
+
+  const handleToggleStageVisibility = async () => {
+    const targetState = !isCurrentStageAllVisible;
+    for (const week of stageFilteredPlan) {
+      updateEducationalWeek(week.id, { isVisible: targetState });
+    }
+    showToast(
+      targetState
+        ? 'تم تفعيل ظهور خطة المرحلة في البوابة العامة وبوابة أولياء الأمور'
+        : 'تم إخفاء خطة المرحلة من البوابة العامة'
+    );
+  };
+
+  const handleToggleStageSupervisorVisibility = async () => {
+    const targetState = !isCurrentStageSupervisorVisible;
+    for (const week of stageFilteredPlan) {
+      updateEducationalWeek(week.id, { showSupervisorName: targetState });
+    }
+    showToast(
+      targetState
+        ? 'تم تفعيل ظهور اسم المشرف المسؤول في البوابة العامة والتقارير'
+        : 'تم إخفاء اسم المشرف المسؤول من البوابة العامة والتقارير'
+    );
+  };
+
+  const handleToggleSingleWeekVisibility = (week: EducationalPlanWeek) => {
+    const nextVal = week.isVisible === false ? true : false;
+    updateEducationalWeek(week.id, { isVisible: nextVal });
+    showToast(
+      nextVal
+        ? `تم إظهار الأسبوع ${week.weekNumber} في البوابة العامة`
+        : `تم إخفاء الأسبوع ${week.weekNumber} من البوابة العامة`
+    );
+  };
+
+  const handleToggleSingleWeekSupervisor = (week: EducationalPlanWeek) => {
+    const nextVal = week.showSupervisorName === false ? true : false;
+    updateEducationalWeek(week.id, { showSupervisorName: nextVal });
+    showToast(
+      nextVal
+        ? `تم إظهار اسم المشرف للأسبوع ${week.weekNumber}`
+        : `تم إخفاء اسم المشرف للأسبوع ${week.weekNumber}`
+    );
+  };
+
   // Handlers for Selection
   const handleToggleSelectWeek = (id: string) => {
     setSelectedWeekIds((prev) =>
@@ -340,13 +400,23 @@ export const EducationalPlanView: React.FC = () => {
   };
 
   const handleSaveSingleWeek = (weekData: Partial<EducationalPlanWeek>, isNew: boolean) => {
+    const targetStageId = weekData.stageId !== undefined ? weekData.stageId : (selectedStageId === 'all' ? undefined : selectedStageId);
+    const targetStageObj = stages?.find((s) => s.id === targetStageId);
+    const payload: Partial<EducationalPlanWeek> = {
+      ...weekData,
+      stageId: targetStageId,
+      stageName: targetStageObj ? targetStageObj.name : weekData.stageName,
+      targetStageIds: targetStageId ? [targetStageId] : weekData.targetStageIds,
+      showSupervisorName: weekData.showSupervisorName !== false,
+      isVisible: weekData.isVisible !== false,
+    };
+
     if (isNew) {
-      addEducationalWeek({
-        ...weekData,
-        stageId: selectedStageId === 'all' ? undefined : (weekData.stageId || selectedStageId),
-      } as Omit<EducationalPlanWeek, 'id'>);
+      addEducationalWeek(payload as Omit<EducationalPlanWeek, 'id'>);
+      showToast(`تمت إضافة الأسبوع ${weekData.weekNumber} للخطة بنجاح.`);
     } else if (weekData.id) {
-      updateEducationalWeek(weekData.id, weekData);
+      updateEducationalWeek(weekData.id, payload);
+      showToast(`تم تحديث بيانات الأسبوع ${weekData.weekNumber} بنجاح.`);
     }
   };
 
@@ -727,6 +797,81 @@ export const EducationalPlanView: React.FC = () => {
         </div>
       )}
 
+      {/* 4.5. DEDICATED VISIBILITY & DISPLAY CONTROLS BAR (FOR ADMIN & SUPERVISOR) */}
+      {canManage && (
+        <div className="bg-gradient-to-r from-teal-50 via-emerald-50/70 to-white rounded-2xl p-4 border border-teal-200 shadow-2xs space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-teal-800 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                <Sliders className="w-5 h-5 text-amber-300" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-black text-slate-900">
+                    التحكم في ظهور الخطة في البوابة العامة وتقارير أولياء الأمور
+                  </h4>
+                  <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-900 border border-teal-200">
+                    {selectedStage ? `خطة ${selectedStage.name}` : 'الخطة العامة لكافة المراحل'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  بيان واضح لمرحلة الخطة، مع التحكم الديناميكي في ظهور الخطة وظهور اسم المشرف المسؤول في البوابة العامة.
+                </p>
+              </div>
+            </div>
+
+            {/* Stage-level Quick Action Toggles */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Toggle Stage Plan Visibility */}
+              <button
+                type="button"
+                onClick={handleToggleStageVisibility}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                  isCurrentStageAllVisible
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
+                    : 'bg-rose-50 text-rose-900 border-rose-300 hover:bg-rose-100'
+                }`}
+                title="تفعيل أو إخفاء ظهور خطة المرحلة الحالية في البوابة العامة"
+              >
+                {isCurrentStageAllVisible ? (
+                  <Eye className="w-4 h-4 text-emerald-700" />
+                ) : (
+                  <EyeOff className="w-4 h-4 text-rose-700" />
+                )}
+                <span>
+                  {isCurrentStageAllVisible
+                    ? 'خطة المرحلة: ظاهرة في البوابة'
+                    : 'خطة المرحلة: مخفية من البوابة'}
+                </span>
+              </button>
+
+              {/* Toggle Stage Supervisor Name Visibility */}
+              <button
+                type="button"
+                onClick={handleToggleStageSupervisorVisibility}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                  isCurrentStageSupervisorVisible
+                    ? 'bg-teal-50 text-teal-900 border-teal-300 hover:bg-teal-100'
+                    : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                }`}
+                title="إظهار أو إخفاء اسم المشرف المسؤول في البوابة والتقارير الأسبوعية"
+              >
+                {isCurrentStageSupervisorVisible ? (
+                  <UserCheck className="w-4 h-4 text-teal-700" />
+                ) : (
+                  <UserX className="w-4 h-4 text-amber-700" />
+                )}
+                <span>
+                  {isCurrentStageSupervisorVisible
+                    ? 'اسم المشرف: معروض في البوابة'
+                    : 'اسم المشرف: مخفي من البوابة'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 5. MAIN VIEW CONTENT */}
 
       {/* VIEW 1: MATRIX VIEW (The High Craft Matrix Table) */}
@@ -754,6 +899,8 @@ export const EducationalPlanView: React.FC = () => {
           onDeleteWeek={handleDeleteWeek}
           onToggleStatus={handleToggleStatus}
           onSendAnnouncement={handleSendAnnouncement}
+          onToggleVisibility={handleToggleSingleWeekVisibility}
+          onToggleSupervisorVisibility={handleToggleSingleWeekSupervisor}
         />
       )}
 
@@ -908,6 +1055,48 @@ export const EducationalPlanView: React.FC = () => {
 
                         {canManage && (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSingleWeekVisibility(week)}
+                              className={`p-1.5 rounded-lg cursor-pointer ${
+                                week.isVisible !== false
+                                  ? 'text-emerald-700 hover:bg-emerald-50'
+                                  : 'text-slate-400 hover:bg-slate-200 bg-slate-100'
+                              }`}
+                              title={
+                                week.isVisible !== false
+                                  ? 'الأسبوع ظاهر في البوابة العامة (اضغط للإخفاء)'
+                                  : 'الأسبوع مخفي من البوابة العامة (اضغط للإظهار)'
+                              }
+                            >
+                              {week.isVisible !== false ? (
+                                <Eye className="w-4 h-4" />
+                              ) : (
+                                <EyeOff className="w-4 h-4 text-slate-500" />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSingleWeekSupervisor(week)}
+                              className={`p-1.5 rounded-lg cursor-pointer ${
+                                week.showSupervisorName !== false
+                                  ? 'text-teal-700 hover:bg-teal-50'
+                                  : 'text-slate-400 hover:bg-slate-200 bg-slate-100'
+                              }`}
+                              title={
+                                week.showSupervisorName !== false
+                                  ? 'اسم المشرف معروض في البوابة والتقارير (اضغط للإخفاء)'
+                                  : 'اسم المشرف مخفي من البوابة والتقارير (اضغط للإظهار)'
+                              }
+                            >
+                              {week.showSupervisorName !== false ? (
+                                <UserCheck className="w-4 h-4" />
+                              ) : (
+                                <UserX className="w-4 h-4 text-slate-500" />
+                              )}
+                            </button>
+
                             <button
                               onClick={() => handleEditWeek(week)}
                               className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer"
@@ -1069,6 +1258,7 @@ export const EducationalPlanView: React.FC = () => {
           isOpen={planModalOpen}
           onClose={() => setPlanModalOpen(false)}
           selectedStage={selectedStage}
+          stages={stages}
           teachers={teachers}
           totalSemesterWeeks={academicConfig.totalWeeks || 14}
           editingWeek={editingWeek}

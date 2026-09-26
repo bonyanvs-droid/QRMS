@@ -18,17 +18,30 @@ export function normalizeTenantSlug(rawSlug: string): string {
  * Checks if candidate identifier matches tenant slug or id (with support for optional 'al-' prefix)
  */
 export function matchesTenantIdentifier(t: MosqueComplexTenant, candidate: string): boolean {
+  if (!t || !candidate) return false;
   const norm = normalizeTenantSlug(candidate);
   const slug = normalizeTenantSlug(t.slug || '');
   const id = normalizeTenantSlug(t.id || '');
-  return (
-    slug === norm ||
-    id === norm ||
-    `al-${slug}` === norm ||
-    `al-${id}` === norm ||
-    slug === `al-${norm}` ||
-    id === `al-${norm}`
-  );
+
+  if (slug === norm || id === norm) return true;
+  if (`al-${slug}` === norm || `al-${id}` === norm) return true;
+  if (slug === `al-${norm}` || id === `al-${norm}`) return true;
+
+  // Normalizing single/double 'z' in ghazawi / ghazzawi
+  const normClean = norm.replace(/^al[-_]/, '').replace(/zz/g, 'z');
+  const slugClean = slug.replace(/^al[-_]/, '').replace(/zz/g, 'z');
+  const idClean = id.replace(/^al[-_]/, '').replace(/zz/g, 'z');
+  if (normClean && (normClean === slugClean || normClean === idClean)) return true;
+
+  // Known canonical mapping for Ghazzawi
+  if (
+    (normClean === 'ghazawi' || normClean === 'ghazzawi') &&
+    (id === 'tenant_1789346881267' || slugClean === 'ghazawi')
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

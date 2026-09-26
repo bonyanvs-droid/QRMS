@@ -1,5 +1,6 @@
 import { apiClient } from '../api/apiClient';
 import { MosqueComplexTenant, EducationalStage, AcademicYearConfig } from '../../types';
+import { syncAcademicConfigWithActiveTerm } from '../academicYearUtils';
 
 export function normalizeAcademicYearConfig(raw: any): AcademicYearConfig {
   if (!raw || typeof raw !== 'object') {
@@ -19,19 +20,28 @@ export function normalizeAcademicYearConfig(raw: any): AcademicYearConfig {
     return isNaN(num) ? defaultVal : num;
   };
 
-  return {
+  const parsedTerms = typeof raw.terms === 'string' ? (() => {
+    try { return JSON.parse(raw.terms); } catch { return []; }
+  })() : raw.terms;
+
+  const base: AcademicYearConfig = {
     ...raw,
-    name: raw.name || 'العام الدراسي 1448 هـ',
+    name: raw.name || 'العام الدراسي 1447-1448 هـ',
+    systemType: raw.systemType || raw.system_type || 'three_terms',
+    activeTermId: raw.activeTermId || raw.active_term_id || 'term_1',
+    terms: Array.isArray(parsedTerms) && parsedTerms.length > 0 ? parsedTerms : undefined,
     semester: raw.semester || 'الفصل الدراسي الأول',
-    startDate: cleanDate(raw.startDate, '2026-08-15'),
-    endDate: cleanDate(raw.endDate, '2026-11-15'),
-    operationalStartWeek: cleanNum(raw.operationalStartWeek, 3),
-    operationalEndWeek: cleanNum(raw.operationalEndWeek, 14),
-    totalWeeks: cleanNum(raw.totalWeeks, 12),
-    currentWeek: cleanNum(raw.currentWeek, 5),
-    spellingPassingThreshold: cleanNum(raw.spellingPassingThreshold, 85),
-    manualWeekOverride: !!raw.manualWeekOverride,
+    startDate: cleanDate(raw.startDate || raw.start_date, '2026-08-16'),
+    endDate: cleanDate(raw.endDate || raw.end_date, '2026-11-12'),
+    operationalStartWeek: cleanNum(raw.operationalStartWeek || raw.operational_start_week, 3),
+    operationalEndWeek: cleanNum(raw.operationalEndWeek || raw.operational_end_week, 14),
+    totalWeeks: cleanNum(raw.totalWeeks || raw.total_weeks, 12),
+    currentWeek: cleanNum(raw.currentWeek || raw.current_week, 6),
+    spellingPassingThreshold: cleanNum(raw.spellingPassingThreshold || raw.spelling_passing_threshold, 85),
+    manualWeekOverride: !!(raw.manualWeekOverride ?? raw.manual_week_override),
   };
+
+  return syncAcademicConfigWithActiveTerm(base);
 }
 
 export class TenantRepository {
@@ -42,6 +52,14 @@ export class TenantRepository {
   static async getTenantById(id: string): Promise<MosqueComplexTenant | null> {
     try {
       return await apiClient.get<MosqueComplexTenant>(`/tenants/${id}`);
+    } catch {
+      return null;
+    }
+  }
+
+  static async getTenantStats(idOrSlug: string): Promise<any | null> {
+    try {
+      return await apiClient.get<any>(`/tenants/${idOrSlug}/stats`);
     } catch {
       return null;
     }

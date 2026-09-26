@@ -29,7 +29,7 @@ import { PasswordChangeModal } from './components/common/PasswordChangeModal';
 import { AutoAttendanceTracker } from './components/common/AutoAttendanceTracker';
 import { MosqueLogo } from './components/common/logos/MosqueLogo';
 import { isModuleEnabled } from './lib/moduleChecker';
-import { resolveTenant } from './lib/tenantResolver';
+import { resolveTenant, matchesTenantIdentifier } from './lib/tenantResolver';
 import { getNavigationGroups } from './lib/navigationConfig';
 import { GlobalSidebar } from './components/common/GlobalSidebar';
 import { ReportDispatchModal } from './components/common/ReportDispatchModal';
@@ -60,7 +60,7 @@ const TenantRouteWrapper: React.FC = () => {
 
   useEffect(() => {
     if (tenantSlug) {
-      const matched = tenants.find((t) => t.id === tenantSlug || t.slug === tenantSlug);
+      const matched = tenants.find((t) => t.id === tenantSlug || t.slug === tenantSlug || matchesTenantIdentifier(t, tenantSlug));
       if (matched) {
         setActiveTenantId(matched.id);
       }
@@ -382,7 +382,7 @@ const MainLayout: React.FC = () => {
       )}
 
       {/* App Shell Body: Persistent Global Sidebar + Routed Page Content */}
-      <div className="flex-1 w-full flex items-stretch">
+      <div className="flex-1 w-full flex items-stretch min-h-[calc(100vh-var(--app-header-height,105px))]">
         {/* Global Persistent Sidebar on Desktop */}
         {!isStandalonePublicPage && (
           <GlobalSidebar
@@ -407,7 +407,10 @@ const MainLayout: React.FC = () => {
         )}
 
         {/* Main Content Area */}
-        <main className={`flex-1 min-w-0 w-full ${isStandalonePublicPage ? '' : 'p-3 sm:p-5 lg:p-6 pb-24 lg:pb-12 max-w-7xl'}`}>
+        <main
+          id="main-content-body"
+          className={`flex-1 min-w-0 w-full ${isStandalonePublicPage ? '' : 'p-3 sm:p-5 lg:p-6 pb-24 lg:pb-12 max-w-7xl'}`}
+        >
           <Routes>
           {/* TIER 1: PLATFORM COMMERCIAL WEBSITE */}
           <Route

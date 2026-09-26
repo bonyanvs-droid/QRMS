@@ -55,9 +55,11 @@ import {
   SeasonalProgram,
   SeasonalActivity,
   SeasonalParticipation,
+  AcademicTerm,
 } from '../types';
 import { BUILT_IN_TRACKS } from '../utils/trackAdapter';
 import { getPrayerTimesForDateSync } from '../utils/prayerTimesService';
+import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../lib/academicYearUtils';
 import {
   INITIAL_ACADEMIC_YEAR,
   INITIAL_EDUCATIONAL_PLAN,
@@ -263,6 +265,7 @@ import {
   updatePublicSummary,
   PublicSummaryData,
 } from '../lib/publicSummaryService';
+import { matchesTenantIdentifier } from '../lib/tenantResolver';
 import { DEFAULT_TENANT_ADMISSIONS_CONFIG } from '../components/admissions/admissionsFormConfig';
 import {
   DEMO_TENANT,
@@ -353,6 +356,8 @@ export interface AppContextType {
   bulkMarkAttendance: (date: string, weekNumber: number, halaqahId: string, attendanceMapOrPresent: Record<string, 'present' | 'late' | 'absent'> | string[], absentStudentIds?: string[]) => void;
   // Academic & Plan config methods
   updateAcademicConfig: (updates: Partial<AcademicYearConfig>) => void;
+  setActiveAcademicTerm: (termId: string, archivePrevious?: boolean) => Promise<void>;
+  updateAcademicTerm: (termId: string, termUpdates: Partial<AcademicTerm>) => Promise<void>;
   addEducationalWeek: (week: Omit<EducationalPlanWeek, 'id'>) => void;
   bulkAddEducationalWeeks: (weeks: Omit<EducationalPlanWeek, 'id'>[]) => Promise<void>;
   replaceStageEducationalPlan: (stageId: string, weeks: Omit<EducationalPlanWeek, 'id'>[]) => Promise<void>;
@@ -867,9 +872,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTenantId, setActiveTenantIdState] = useState<string>(() => {
     try {
       const savedUser = safeStorageGet<User | null>(STORAGE_KEYS.CURRENT_USER, null);
-      if (savedUser?.tenantId) return savedUser.tenantId;
+      if (savedUser?.tenantId) {
+        if (savedUser.tenantId === 'ghazzawi' || savedUser.tenantId === 'ghazawi') {
+          return 'tenant_1789346881267';
+        }
+        return savedUser.tenantId;
+      }
     } catch {}
-    return safeStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT) || (INITIAL_TENANTS[0]?.id);
+    const stored = safeStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT);
+    if (stored) {
+      if (stored === 'ghazzawi' || stored === 'ghazawi' || stored === 'al-ghazzawi') {
+        return 'tenant_1789346881267';
+      }
+      return stored;
+    }
+    return (INITIAL_TENANTS[0]?.id) || 'tenant_1789346881267';
   });
 
   // Operational states strictly live in memory and sync directly with Cloud Firestore
@@ -989,7 +1006,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [sessionRecords, setSessionRecords] = useState<DailySessionRecord[]>([]);
 
   const [educationalPlan, setEducationalPlan] = useState<EducationalPlanWeek[]>(() => {
-    return safeStorageGet<EducationalPlanWeek[]>(STORAGE_KEYS.PLAN, INITIAL_EDUCATIONAL_PLAN);
+    const stored = safeStorageGet<EducationalPlanWeek[]>(STORAGE_KEYS.PLAN, INITIAL_EDUCATIONAL_PLAN);
+    if (!stored || stored.length === 0) return INITIAL_EDUCATIONAL_PLAN;
+    
+    // Ensure Week 6 Baraem and multi-stage plans are seamlessly synchronized with latest data
+    const map = new Map<string, EducationalPlanWeek>();
+    INITIAL_EDUCATIONAL_PLAN.forEach((w) => map.set(w.id, w));
+    stored.forEach((w) => {
+      // If stored week 6 baraem exists, merge to guarantee latest requested content and defaults
+      if (w.id === 'edu_w6_baraem' || (w.weekNumber === 6 && (!w.stageId || w.stageId === 'baraem'))) {
+        const canonical = INITIAL_EDUCATIONAL_PLAN.find((cw) => cw.id === 'edu_w6_baraem') || w;
+        map.set('edu_w6_baraem', {
+          ...canonical,
+          ...w,
+          motto: '«في حلقة القرآن أتأدب»',
+          educationalGoal: 'يجلس في موضعه بالحلقة ثابتاً ومقبلاً على مصحفه ومعلمه، ولا يتكلم أو يتحرك إلا بعد الاستئذان',
+          activity: 'بولينج التحدي الثقافي وأسئلة الملاحظة',
+          responsiblePerson: 'نور إبراهيم',
+          stageId: 'baraem',
+          stageName: 'مرحلة البراعم',
+          showSupervisorName: w.showSupervisorName !== undefined ? w.showSupervisorName : true,
+          isVisible: w.isVisible !== undefined ? w.isVisible : true,
+        });
+      } else {
+        map.set(w.id, {
+          ...w,
+          showSupervisorName: w.showSupervisorName !== undefined ? w.showSupervisorName : true,
+          isVisible: w.isVisible !== undefined ? w.isVisible : true,
+        });
+      }
+    });
+
+    // Make sure edu_w6_ashbal is present for dynamic multi-stage demonstration
+    if (!map.has('edu_w6_ashbal')) {
+      const ashbal = INITIAL_EDUCATIONAL_PLAN.find((cw) => cw.id === 'edu_w6_ashbal');
+      if (ashbal) map.set('edu_w6_ashbal', ashbal);
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.weekNumber - b.weekNumber);
   });
 
   const [seasonalPrograms, setSeasonalPrograms] = useState<SeasonalProgram[]>(() => INITIAL_SEASONAL_PROGRAMS);
@@ -997,7 +1051,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [seasonalParticipations, setSeasonalParticipations] = useState<SeasonalParticipation[]>(() => INITIAL_SEASONAL_PARTICIPATIONS);
 
   const [academicConfig, setAcademicConfig] = useState<AcademicYearConfig>(() => {
-    return safeStorageGet<AcademicYearConfig>(STORAGE_KEYS.ACADEMIC, INITIAL_ACADEMIC_YEAR);
+    return syncAcademicConfigWithActiveTerm(
+      safeStorageGet<AcademicYearConfig>(STORAGE_KEYS.ACADEMIC, INITIAL_ACADEMIC_YEAR)
+    );
   });
 
   const [reportLogs, setReportLogs] = useState<ReportLog[]>(() => {
@@ -1161,7 +1217,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [integrationConfig]);
 
   const activeTenant = useMemo(() => {
-    return tenants.find((t) => t.id === activeTenantId) || tenants[0] || null;
+    return (
+      tenants.find((t) => t.id === activeTenantId || matchesTenantIdentifier(t, activeTenantId)) ||
+      tenants[0] ||
+      null
+    );
   }, [tenants, activeTenantId]);
 
   // Keep the API client's tenant context synchronized with the active tenant so
@@ -1188,7 +1248,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return resolvedIdentity.resolvedOutcome;
   }, [resolvedIdentity]);
 
-  const setActiveTenantId = useCallback((tenantId: string) => {
+  const setActiveTenantId = useCallback((rawTenantId: string) => {
+    let tenantId = rawTenantId;
+    if (tenantId === 'ghazzawi' || tenantId === 'ghazawi' || tenantId === 'al-ghazzawi') {
+      const matched = tenants.find((t) => matchesTenantIdentifier(t, 'ghazawi'));
+      tenantId = matched ? matched.id : 'tenant_1789346881267';
+    }
     // If logged in as campus_admin or teacher, lock to their assigned tenantId to prevent cross-tenant data leak
     if (currentUser?.tenantId && currentUser.role !== 'system_admin' && (currentUser.role as any) !== 'admin') {
       setActiveTenantIdState(currentUser.tenantId);
@@ -1199,7 +1264,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTenantIdState(tenantId);
     safeStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, tenantId);
     resetOperationalMemory();
-  }, [currentUser, resetOperationalMemory]);
+  }, [currentUser, tenants, resetOperationalMemory]);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [publicSummary, setPublicSummary] = useState<PublicSummaryData | null>(null);
@@ -1281,7 +1346,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // 1. General Operational Subscriptions (Publicly Safe / No Individual PII)
         unsubs.push(
           subscribeToAcademicConfig((remoteConfig) => {
-            setAcademicConfig((prev) => ({ ...prev, ...remoteConfig }));
+            setAcademicConfig((prev) => syncAcademicConfigWithActiveTerm({ ...prev, ...remoteConfig }));
           })
         );
 
@@ -1502,6 +1567,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unsubs.push(
           subscribeToTenants((remoteTenants) => {
             setTenants(remoteTenants);
+            if (remoteTenants && remoteTenants.length > 0) {
+              setActiveTenantIdState((prev) => {
+                if (!prev || prev === 'ghazzawi' || prev === 'ghazawi' || !remoteTenants.some((t) => t.id === prev)) {
+                  const ghazzawiTenant = remoteTenants.find(
+                    (t) => matchesTenantIdentifier(t, 'ghazawi') || matchesTenantIdentifier(t, 'ghazzawi')
+                  );
+                  return ghazzawiTenant ? ghazzawiTenant.id : remoteTenants[0].id;
+                }
+                return prev;
+              });
+            }
           })
         );
 
@@ -3010,7 +3086,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (guardDemoWrite('تعديل إعدادات العام الدراسي')) return;
     let updated: AcademicYearConfig | null = null;
     setAcademicConfig((prev) => {
-      updated = { ...prev, ...updates };
+      const merged = { ...prev, ...updates };
+      updated = syncAcademicConfigWithActiveTerm(merged);
       return updated;
     });
     if (updated) {
@@ -4019,6 +4096,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setStudents(updatedStudents);
     },
     [activeTenant, students, halaqahs, spellingLessons, badges, academicConfig, currentActor, guardDemoWrite]
+  );
+
+  const updateAcademicTerm = useCallback(
+    async (termId: string, termUpdates: Partial<AcademicTerm>) => {
+      if (guardDemoWrite('تعديل بيانات الفصل الدراسي')) return;
+      let updated: AcademicYearConfig | null = null;
+      setAcademicConfig((prev) => {
+        const currentTerms = Array.isArray(prev.terms) && prev.terms.length > 0
+          ? prev.terms
+          : generateDefaultAcademicTerms();
+        const newTerms = currentTerms.map((t) => (t.id === termId ? { ...t, ...termUpdates } : t));
+        updated = syncAcademicConfigWithActiveTerm({
+          ...prev,
+          terms: newTerms,
+        });
+        return updated;
+      });
+      if (updated) {
+        await dbSaveAcademicConfig(updated, currentActor);
+      }
+    },
+    [currentActor, guardDemoWrite]
+  );
+
+  const setActiveAcademicTerm = useCallback(
+    async (termId: string, archivePrevious: boolean = false) => {
+      if (guardDemoWrite('تغيير الفصل الدراسي النشط')) return;
+      let updated: AcademicYearConfig | null = null;
+      let previousTermName = '';
+
+      setAcademicConfig((prev) => {
+        const currentTerms = Array.isArray(prev.terms) && prev.terms.length > 0
+          ? prev.terms
+          : generateDefaultAcademicTerms();
+        const prevActive = currentTerms.find((t) => t.isCurrent);
+        if (prevActive) {
+          previousTermName = prevActive.name;
+        }
+
+        const newTerms = currentTerms.map((t) => {
+          if (t.id === termId) {
+            return { ...t, isCurrent: true, isArchived: false };
+          } else if (archivePrevious && prevActive && t.id === prevActive.id) {
+            return { ...t, isCurrent: false, isArchived: true };
+          } else {
+            return { ...t, isCurrent: false };
+          }
+        });
+
+        updated = syncAcademicConfigWithActiveTerm(
+          {
+            ...prev,
+            activeTermId: termId,
+            terms: newTerms,
+          },
+          termId
+        );
+        return updated;
+      });
+
+      if (archivePrevious && previousTermName) {
+        try {
+          await archiveCurrentTerm(previousTermName, `أرشفة آلية عند الانتقال إلى فصل دراسي جديد`);
+        } catch (e) {
+          console.error('Error auto-archiving previous term:', e);
+        }
+      }
+
+      if (updated) {
+        await dbSaveAcademicConfig(updated, currentActor);
+      }
+    },
+    [currentActor, guardDemoWrite, archiveCurrentTerm]
   );
 
   const getStudentTermHistories = useCallback(
@@ -5201,6 +5351,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordDailySession,
         bulkMarkAttendance,
         updateAcademicConfig,
+        setActiveAcademicTerm,
+        updateAcademicTerm,
         addEducationalWeek,
         bulkAddEducationalWeeks,
         replaceStageEducationalPlan,

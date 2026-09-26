@@ -67,39 +67,46 @@ export function usePwaBranding(
 
     const origin = window.location.origin;
     const rawLogo = activeTenant.logoUrl || logoUrl;
-    // data:/blob: URIs are not valid manifest icon sources — exclude them
-    const tenantLogo = rawLogo && !/^(data|blob):/i.test(rawLogo) ? rawLogo : null;
+    // Exclude data/blob URIs and ensure baraem logo is never used as tenant/app icon
+    const isBaraemLogo = Boolean(rawLogo && (rawLogo.includes('baraem') || rawLogo.includes('76101')));
+    const tenantLogo = rawLogo && !/^(data|blob):/i.test(rawLogo) && !isBaraemLogo ? rawLogo : null;
     const isSvgLogo = Boolean(tenantLogo && iconMime(tenantLogo) === 'image/svg+xml');
 
-    // Icons: tenant logo first (installed-app icon), platform PNGs as fallback
-    const icons: { src: string; sizes: string; type: string; purpose?: string }[] = [];
-    if (tenantLogo) {
+    // Build icons array:
+    // Chromium specifically checks for 192x192 and 512x512 PNGs with purpose: "any" and "maskable"
+    // Using official Mosque Emblem PNGs guarantees the PWA installs with the Mosque logo
+    const icons: { src: string; sizes: string; type: string; purpose?: string }[] = [
+      { src: origin + DEFAULT_ICON_192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: origin + DEFAULT_ICON_192, sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ];
+
+    if (tenantLogo && tenantLogo !== DEFAULT_ICON_192 && tenantLogo !== DEFAULT_ICON_512) {
       const absLogo = /^https?:\/\//.test(tenantLogo)
         ? tenantLogo
         : origin + (tenantLogo.startsWith('/') ? tenantLogo : '/' + tenantLogo);
-      icons.push(
-        { src: absLogo, sizes: isSvgLogo ? 'any' : '512x512', type: iconMime(tenantLogo) },
-        { src: absLogo, sizes: isSvgLogo ? 'any' : '192x192', type: iconMime(tenantLogo), purpose: 'any maskable' }
+      icons.unshift(
+        { src: absLogo, sizes: isSvgLogo ? 'any' : '512x512', type: iconMime(tenantLogo), purpose: 'any' },
+        { src: absLogo, sizes: isSvgLogo ? 'any' : '192x192', type: iconMime(tenantLogo), purpose: 'any' }
       );
     }
-    icons.push(
-      { src: origin + DEFAULT_ICON_192, sizes: '192x192', type: 'image/png' },
-      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png' },
-      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
-    );
+
+    const tenantSlug = activeTenant.slug || activeTenant.id || 'ghazawi';
+    const startUrl = `${origin}/#/t/${tenantSlug}`;
 
     const manifest = {
       // Per-tenant app id → separate installable PWA per tenant (Chrome 96+)
-      id: `qrms-${activeTenant.id}`,
-      name: activeTenant.name,
-      short_name: shortNameOf(activeTenant.name),
-      description: `${activeTenant.name} — منصة إدارة الحلقات القرآنية والمخرجات التعليمية`,
+      id: `qrms-${activeTenant.id || 'ghazzawi'}`,
+      name: activeTenant.name || 'مجمع الغزاوي القرآني',
+      short_name: shortNameOf(activeTenant.name || 'مجمع الغزاوي'),
+      description: `${activeTenant.name || 'مجمع الغزاوي القرآني'} — منصة إدارة الحلقات القرآنية والمخرجات التعليمية`,
       theme_color: DEFAULT_THEME,
       background_color: '#f8fafc',
       display: 'standalone',
       orientation: 'portrait',
-      start_url: origin + '/',
-      scope: origin + '/',
+      start_url: startUrl,
+      scope: `${origin}/`,
       lang: 'ar',
       dir: 'rtl',
       icons,
@@ -114,10 +121,8 @@ export function usePwaBranding(
 
     // Theme color + favicon + apple-touch-icon (raster only for apple)
     if (themeMeta) themeMeta.content = DEFAULT_THEME;
-    if (tenantLogo) {
-      setLink('icon', tenantLogo, iconMime(tenantLogo));
-      if (!isSvgLogo) setLink('apple-touch-icon', tenantLogo);
-    }
+    setLink('icon', origin + DEFAULT_ICON_192, 'image/png');
+    setLink('apple-touch-icon', origin + DEFAULT_APPLE_TOUCH);
 
     return () => {
       // Don't revoke here — manifest link still references it; revoke on next swap

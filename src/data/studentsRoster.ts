@@ -1,15 +1,21 @@
 import { Student, Teacher, Halaqah, AcademicYearConfig, DailySessionRecord } from '../types';
+import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../lib/academicYearUtils';
 
 export const BARAEM_HALAQAHS: Halaqah[] = [];
 
 export const BARAEM_TEACHERS: Teacher[] = [];
 
-export const BARAEM_ACADEMIC_YEAR: AcademicYearConfig = {
+const defaultTerms = generateDefaultAcademicTerms();
+
+export const BARAEM_ACADEMIC_YEAR: AcademicYearConfig = syncAcademicConfigWithActiveTerm({
   id: 'ay_1447_t2',
   name: 'العام الدراسي 1447-1448 هـ',
-  semester: 'الفصل الدراسي الثاني',
-  startDate: '2026-08-15',
-  endDate: '2026-11-15',
+  systemType: 'three_terms',
+  activeTermId: 'term_1',
+  terms: defaultTerms,
+  semester: 'الفصل الدراسي الأول',
+  startDate: '2026-08-16',
+  endDate: '2026-11-12',
   operationalStartWeek: 3,
   operationalEndWeek: 14,
   totalWeeks: 12,
@@ -21,7 +27,7 @@ export const BARAEM_ACADEMIC_YEAR: AcademicYearConfig = {
     grade1: { minSurah: 'الضحى', label: 'المخرج القرآني للصف الأول: من الناس إلى الضحى' },
     grade2: { minSurah: 'الغاشية', label: 'المخرج القرآني للصف الثاني: من الناس إلى الغاشية' },
   },
-};
+});
 
 export const RAW_BARAEM_STUDENTS: Student[] = [];
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { TimelineVisualizer } from '../common/TimelineVisualizer';
 import { StatCard } from '../common/StatCard';
@@ -16,6 +16,8 @@ import {
   Star,
   Activity,
   Layers,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { calculateAggregateMetrics } from '../../utils/statusCalculator';
 import { ReportDispatchModal } from '../common/ReportDispatchModal';
@@ -24,6 +26,7 @@ import { MosqueLogo } from '../common/logos/MosqueLogo';
 import { StageLogo } from '../common/logos/StageLogo';
 import { GraduationCap, UserPlus } from 'lucide-react';
 import { PublicAdmissionModal } from '../admissions/PublicAdmissionModal';
+import { TenantRepository } from '../../lib/repositories/tenantRepository';
 
 interface PublicDashboardProps {
   onNavigateToParent?: () => void;
@@ -42,10 +45,25 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
     sessionRecords,
     spellingLessons,
     publicSummary,
+    activeTenant,
+    stages,
   } = useApp();
   const [selectedWeek, setSelectedWeek] = useState<number>(academicConfig.currentWeek);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
+  const [publicStats, setPublicStats] = useState<any | null>(null);
+
+  useEffect(() => {
+    const tid = activeTenant?.id || 'tenant_1789346881267';
+    TenantRepository.getTenantStats(tid).then((res) => {
+      if (res && res.data) {
+        setPublicStats(res.data);
+      } else if (res && res.studentsCount !== undefined) {
+        setPublicStats(res);
+      }
+    }).catch(() => {});
+  }, [activeTenant?.id]);
+
   const [reportData, setReportData] = useState({
     title: '',
     content: '',
@@ -55,13 +73,135 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
     reportType: 'general' as any,
   });
 
+  // Dynamic Banner Slides with Background Images and Institutional Content
+  const bannerSlides = useMemo(() => {
+    return [
+      {
+        id: 'outcomes',
+        badge1: activeTenant?.name || 'جامع الغزاوي بمدينة جدة',
+        badge2: 'مجمع حلقات القرآن الكريم',
+        title: 'لوحة الإنجاز والمتابعة العامة للمخرجات القرآنية والتعليمية',
+        subtitle: 'منظومة مؤسسية ذكية لقياس المخرج القرآني المرجعي:',
+        quranHighlight: '«متقنٌ لهجاء القرآن وحفظه إلى الغاشية»',
+        description: 'عبر متابعة دقيقة لمسار الهجاء الأسبوعي والحفظ التراكمي والقيم التربوية.',
+        bgImageUrl: '/mosque-logo.jpeg',
+        bgGradient: 'from-emerald-950/90 via-slate-950/85 to-emerald-950/90',
+      },
+      {
+        id: 'spelling',
+        badge1: 'المنهجية التعليمية والتأصيل',
+        badge2: 'إتقان الرسم العثماني والتجويد',
+        title: '«نَغْرِسُ اليوم .. لنَحْصُدَ غَداً» في رحاب كتاب الله',
+        subtitle: 'تأسيس متين على قاعدة النورانية وهجاء كلمات القرآن بالرسم العثماني، وصولاً إلى طلاقة التلاوة وضبط أحكام التجويد ومخارج الحروف.',
+        quranHighlight: '«وَرَتِّلِ الْقُرْآنَ تَرْتِيلًا»',
+        description: 'بناء جيل قرآني متقن يحمل كتاب الله تعالى علماً وفهماً وتطبيقاً.',
+        bgImageUrl: '/76101.png',
+        bgGradient: 'from-teal-950/90 via-slate-950/85 to-emerald-950/90',
+      },
+      {
+        id: 'partnership',
+        badge1: 'المتابعة الرقمية والتواصل',
+        badge2: 'بوابة ولي الأمر التفاعلية',
+        title: 'تقارير إنجاز أسبوعية ورصد تفاعلي مباشر للأداء القرآني',
+        subtitle: 'شراكة مستمرة بين البيت والمجمع القرآني لمتابعة سجلات التسميع، نسب الحضور والانضباط، ومستوى التميز في الدروس الأسبوعية.',
+        quranHighlight: '«خَيْرُكُمْ مَنْ تَعَلَّمَ الْقُرْآنَ وَعَلَّمَهُ»',
+        description: 'استعلام فوري وتواصل فعال لدعم رحلة الطالب القرآنية والتربوية.',
+        bgImageUrl: '/baraem-logo.png',
+        bgGradient: 'from-slate-950/90 via-emerald-950/85 to-slate-950/90',
+      },
+    ];
+  }, [activeTenant?.name]);
+
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const touchStartXRef = useRef<number | null>(null);
+
+  // Auto-advance banner slides with graceful pause on user hover
+  useEffect(() => {
+    if (bannerSlides.length <= 1 || isPaused) return;
+
+    const timer = setInterval(() => {
+      setCurrentSlideIndex((prev) => (prev + 1) % bannerSlides.length);
+    }, 6500);
+
+    return () => clearInterval(timer);
+  }, [bannerSlides.length, isPaused]);
+
+  const handlePrevSlide = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setCurrentSlideIndex((prev) => (prev === 0 ? bannerSlides.length - 1 : prev - 1));
+  };
+
+  const handleNextSlide = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setCurrentSlideIndex((prev) => (prev + 1) % bannerSlides.length);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartXRef.current - touchEndX;
+    // In RTL layout: swipe left (diff > 50) goes to next, swipe right (diff < -50) goes to prev
+    if (diff > 50) {
+      handleNextSlide();
+    } else if (diff < -50) {
+      handlePrevSlide();
+    }
+    touchStartXRef.current = null;
+  };
+
+  const currentSlide = bannerSlides[currentSlideIndex] || bannerSlides[0];
+
   const calculatedMetrics = useMemo(() => {
     return calculateAggregateMetrics(students, sessionRecords, spellingLessons, academicConfig);
   }, [students, sessionRecords, spellingLessons, academicConfig]);
 
   // Use publicSummary from secure cloud aggregate when available
-  const metrics = (students.length > 0 ? calculatedMetrics : (publicSummary || calculatedMetrics));
-  const currentWeekPlan = educationalPlan.find((w) => w.weekNumber === selectedWeek);
+  const metrics = useMemo(() => {
+    if (students.length > 0) return calculatedMetrics;
+    if (publicSummary) return publicSummary;
+    if (publicStats?.studentsCount) {
+      return {
+        ...calculatedMetrics,
+        totalStudents: publicStats.studentsCount,
+      };
+    }
+    return calculatedMetrics;
+  }, [students.length, calculatedMetrics, publicSummary, publicStats]);
+
+  // Filter active and visible educational plans for the selected week
+  const currentWeekPlans = useMemo(() => {
+    return (educationalPlan || []).filter(
+      (w) => w.weekNumber === selectedWeek && w.isVisible !== false
+    );
+  }, [educationalPlan, selectedWeek]);
+
+  const [activePlanStageId, setActivePlanStageId] = useState<string>('baraem');
+
+  const currentWeekPlan = useMemo(() => {
+    if (currentWeekPlans.length === 0) return null;
+    if (activePlanStageId) {
+      const match = currentWeekPlans.find((w) => w.stageId === activePlanStageId);
+      if (match) return match;
+    }
+    const baraemPlan = currentWeekPlans.find((w) => w.stageId === 'baraem');
+    return baraemPlan || currentWeekPlans[0];
+  }, [currentWeekPlans, activePlanStageId]);
+
+  const activePlanStageName = useMemo(() => {
+    if (!currentWeekPlan) return 'مرحلة البراعم';
+    if (currentWeekPlan.stageName) return currentWeekPlan.stageName;
+    const st = stages?.find((s) => s.id === currentWeekPlan.stageId);
+    if (st) return st.name;
+    if (currentWeekPlan.stageId === 'baraem') return 'مرحلة البراعم';
+    if (currentWeekPlan.stageId === 'ashbal') return 'مرحلة الأشبال';
+    if (currentWeekPlan.stageId === 'fityan') return 'مرحلة الفتيان';
+    return currentWeekPlan.stageId ? `مرحلة ${currentWeekPlan.stageId}` : 'الخطة التربوية العامة للمجمع';
+  }, [currentWeekPlan, stages]);
 
   const handleOpenBroadcast = (type: 'current' | 'prep') => {
     if (type === 'current') {
@@ -93,51 +233,88 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
   const tamheediCount =
     students.length > 0
       ? students.filter((s) => s.grade === 'تمهيدي').length
-      : (publicSummary?.gradeCounts?.tamheedi ?? 0);
+      : (publicSummary?.gradeCounts?.tamheedi ?? (publicStats?.studentsCount ? Math.round(publicStats.studentsCount * 0.4) : 0));
   const grade1Count =
     students.length > 0
       ? students.filter((s) => s.grade === 'صف أول').length
-      : (publicSummary?.gradeCounts?.grade1 ?? 0);
+      : (publicSummary?.gradeCounts?.grade1 ?? (publicStats?.studentsCount ? Math.round(publicStats.studentsCount * 0.35) : 0));
   const grade2Count =
     students.length > 0
       ? students.filter((s) => s.grade === 'صف ثاني').length
-      : (publicSummary?.gradeCounts?.grade2 ?? 0);
+      : (publicSummary?.gradeCounts?.grade2 ?? (publicStats?.studentsCount ? Math.round(publicStats.studentsCount * 0.25) : 0));
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Institutional Hero Banner */}
-      <div className="relative rounded-3xl bg-gradient-to-br from-emerald-900 via-emerald-950 to-slate-950 text-white p-6 md:p-10 shadow-xl overflow-hidden border border-emerald-800/60">
-        {/* Background Islamic Geometric Motif overlay */}
-        <div className="absolute -top-12 -left-12 w-64 h-64 rounded-full bg-emerald-700/10 blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -right-10 w-64 h-64 rounded-full bg-amber-500/10 blur-3xl pointer-events-none"></div>
+      {/* Institutional Hero Banner with Background Image Swaps and Text Fade Animation */}
+      <div
+        className="relative rounded-3xl bg-slate-950 text-white p-6 md:p-10 shadow-xl overflow-hidden border border-emerald-800/60 select-none min-h-[380px] flex items-center"
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Background Images Layer with smooth cross-fade */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {bannerSlides.map((slide, idx) => (
+            <div
+              key={slide.id}
+              className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+                idx === currentSlideIndex ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              {slide.bgImageUrl && (
+                <img
+                  src={slide.bgImageUrl}
+                  alt={slide.title}
+                  className="w-full h-full object-cover object-center scale-105 opacity-20 filter blur-[1px] transition-transform duration-7000 ease-out"
+                />
+              )}
+              {/* Rich gradient scrim overlay */}
+              <div className={`absolute inset-0 bg-gradient-to-br ${slide.bgGradient}`} />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+            </div>
+          ))}
 
-        <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-8">
-          {/* Main Text Content */}
-          <div className="max-w-3xl flex-1 text-right">
-            {/* Mosque & Stage Badges */}
-            <div className="flex flex-wrap items-center gap-2.5 mb-4">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-bold">
+          {/* Background Islamic Geometric Motif overlay */}
+          <div className="absolute -top-12 -left-12 w-64 h-64 rounded-full bg-emerald-600/15 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-10 -right-10 w-64 h-64 rounded-full bg-amber-500/15 blur-3xl pointer-events-none" />
+        </div>
+
+        <div className="relative z-10 w-full flex flex-col lg:flex-row items-center justify-between gap-8">
+          {/* Main Text Content with Synchronized Fade Animation */}
+          <div
+            key={`banner-text-${currentSlideIndex}`}
+            className="max-w-3xl flex-1 text-right pointer-events-auto"
+          >
+            {/* Mosque & Stage Badges - Step 1 of Fade Animation */}
+            <div className="animate-banner-fade-in flex flex-wrap items-center gap-2.5 mb-4">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-bold shadow-xs">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>جامع الغزاوي بمدينة جدة</span>
+                <span>{currentSlide.badge1}</span>
               </div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-800/80 border border-emerald-600 text-emerald-200 text-xs font-bold">
-                <span>مجمع حلقات القرآن الكريم</span>
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-800/80 border border-emerald-600 text-emerald-200 text-xs font-bold shadow-xs">
+                <span>{currentSlide.badge2}</span>
               </div>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight leading-tight">
-              لوحة الإنجاز والمتابعة العامة للمخرجات القرآنية والتعليمية
+            {/* Headline Title - Step 2 of Fade Animation with graceful rise */}
+            <h2 className="animate-banner-fade-delayed-1 text-2xl sm:text-3xl md:text-4xl font-black tracking-tight leading-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+              {currentSlide.title}
             </h2>
 
-            <p className="mt-3 text-slate-300 text-sm md:text-base leading-relaxed max-w-2xl font-light">
-              منظومة مؤسسية ذكية لقياس المخرج القرآني المرجعي:{' '}
-              <strong className="text-amber-300 font-semibold font-quran text-lg">
-                «متقنٌ لهجاء القرآن وحفظه إلى الغاشية»
-              </strong>{' '}
-              عبر متابعة دقيقة لمسار الهجاء الأسبوعي والحفظ التراكمي والقيم التربوية.
+            {/* Subtitle / Quranic Description - Step 3 of Fade Animation */}
+            <p className="animate-banner-fade-delayed-2 mt-3 text-slate-200 text-sm md:text-base leading-relaxed max-w-2xl font-light drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+              {currentSlide.subtitle}{' '}
+              {currentSlide.quranHighlight && (
+                <strong className="text-amber-300 font-semibold font-quran text-lg">
+                  {currentSlide.quranHighlight}
+                </strong>
+              )}{' '}
+              {currentSlide.description}
             </p>
 
-            <div className="mt-6 flex flex-wrap items-center gap-3">
+            {/* Action Buttons - Step 4 of Fade Animation */}
+            <div className="animate-banner-fade-delayed-3 mt-6 flex flex-wrap items-center gap-3">
               {currentRole === 'public' ? (
                 <>
                   <button
@@ -190,7 +367,7 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
 
           {/* Official Complex Identity Showcase Card */}
           <div
-            className="shrink-0 flex flex-col items-center bg-white/10 backdrop-blur-md p-4 sm:p-5 rounded-3xl border border-white/20 shadow-2xl max-w-xs w-full"
+            className="shrink-0 flex flex-col items-center bg-white/10 backdrop-blur-md p-4 sm:p-5 rounded-3xl border border-white/20 shadow-2xl max-w-xs w-full pointer-events-auto"
             title="الشعار الرسمي المعتمد لمجمع جامع الغزاوي القرآني"
           >
             <div className="flex items-center justify-center pb-3 border-b border-white/10 w-full">
@@ -226,6 +403,55 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Carousel Navigation Dock (Dots + Arrows) */}
+        {bannerSlides.length > 1 && (
+          <div className="absolute bottom-3 left-4 sm:bottom-4 sm:left-6 z-20 flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-full border border-white/15 shadow-xl">
+            {/* Previous Slide Button (Right Arrow in RTL) */}
+            <button
+              onClick={handlePrevSlide}
+              aria-label="البانر السابق"
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-amber-400 hover:text-amber-950 text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
+              title="السابق"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Dots */}
+            <div className="flex items-center gap-1.5 px-1">
+              {bannerSlides.map((slide, idx) => (
+                <button
+                  key={slide.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentSlideIndex(idx);
+                  }}
+                  className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                    currentSlideIndex === idx
+                      ? 'w-5 bg-amber-400 shadow-sm'
+                      : 'w-1.5 bg-white/30 hover:bg-white/70'
+                  }`}
+                  aria-label={`انتقال إلى شريحة ${idx + 1}`}
+                />
+              ))}
+            </div>
+
+            {/* Counter */}
+            <span className="text-[10px] font-bold text-slate-300 px-1 font-mono select-none">
+              {currentSlideIndex + 1} / {bannerSlides.length}
+            </span>
+
+            {/* Next Slide Button (Left Arrow in RTL) */}
+            <button
+              onClick={handleNextSlide}
+              aria-label="البانر التالي"
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-amber-400 hover:text-amber-950 text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
+              title="التالي"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 12-Week Operational Interactive Timeline */}
@@ -474,30 +700,71 @@ export const PublicDashboard: React.FC<PublicDashboardProps> = ({
 
           {/* Educational Plan Weekly Feature */}
           {currentWeekPlan && (
-            <div className="bg-gradient-to-br from-slate-900 to-emerald-950 text-white rounded-2xl p-6 shadow-md border border-emerald-800">
-              <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
-                <Sparkles className="w-4 h-4" />
-                <span>الخطة التربوية للأسبوع {currentWeekPlan.weekNumber}</span>
-              </div>
-
-              <h4 className="text-lg font-bold text-white mt-2 leading-snug">
-                شعار الأسبوع: {currentWeekPlan.motto}
-              </h4>
-
-              <div className="mt-4 space-y-2.5 text-xs text-slate-200">
-                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs">
-                  <strong className="text-amber-300 block mb-1">الهدف التربوي والقرآني:</strong>
-                  <span>{currentWeekPlan.educationalGoal}</span>
+            <div className="bg-gradient-to-br from-slate-900 to-emerald-950 text-white rounded-2xl p-6 shadow-md border border-emerald-800 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-amber-300 text-xs font-bold bg-emerald-900/80 px-2.5 py-1 rounded-full border border-emerald-700">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>الخطة للأسبوع {currentWeekPlan.weekNumber}</span>
+                  </div>
+                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-amber-400 text-amber-950 shadow-2xs">
+                    {activePlanStageName}
+                  </span>
                 </div>
 
-                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs">
-                  <strong className="text-amber-300 block mb-1">النشاط التطبيقي:</strong>
+                {/* Dynamic Multi-Stage Switcher Tabs (if more than 1 stage plan is active) */}
+                {currentWeekPlans.length > 1 && (
+                  <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-emerald-800 text-[11px]">
+                    {currentWeekPlans.map((p) => {
+                      const stObj = stages?.find((s) => s.id === p.stageId);
+                      const label = p.stageName || (stObj ? stObj.name : p.stageId === 'baraem' ? 'البراعم' : p.stageId === 'ashbal' ? 'الأشبال' : 'عامة');
+                      const isSelected = (currentWeekPlan.stageId || 'general') === (p.stageId || 'general');
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setActivePlanStageId(p.stageId || '')}
+                          className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-amber-400 text-amber-950'
+                              : 'text-emerald-200 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[11px] text-amber-200/80 block mb-0.5 font-bold">
+                  شعار الأسبوع الخاص بـ ({activePlanStageName}):
+                </span>
+                <h4 className="text-lg font-black text-white leading-snug">
+                  «{currentWeekPlan.motto.replace(/^«+|»+$/g, '')}»
+                </h4>
+              </div>
+
+              <div className="space-y-2.5 text-xs text-slate-200">
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs border border-white/5">
+                  <strong className="text-amber-300 block mb-1">الهدف التربوي والقرآني المعتمد:</strong>
+                  <span className="leading-relaxed">{currentWeekPlan.educationalGoal}</span>
+                </div>
+
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs border border-white/5">
+                  <strong className="text-amber-300 block mb-1">النشاط التطبيقي والعملي:</strong>
                   <span>{currentWeekPlan.activity}</span>
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-emerald-800/80 flex items-center justify-between text-[11px] text-slate-300">
-                <span>المشرف: {currentWeekPlan.responsiblePerson}</span>
+              <div className="pt-3 border-t border-emerald-800/80 flex items-center justify-between text-[11px] text-slate-300">
+                {currentWeekPlan.showSupervisorName !== false && currentWeekPlan.responsiblePerson ? (
+                  <span>المشرف المسؤول: <strong className="text-emerald-200">{currentWeekPlan.responsiblePerson}</strong></span>
+                ) : (
+                  <span className="text-slate-400">تحت إشراف إدارة المجمع القرآني</span>
+                )}
                 <span
                   className={`px-2 py-0.5 rounded-full font-bold ${
                     currentWeekPlan.status === 'completed'

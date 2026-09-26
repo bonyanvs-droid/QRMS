@@ -47,7 +47,8 @@ import {
   ChevronUp,
   Sparkles,
 } from 'lucide-react';
-import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig, OfficialHoliday } from '../../types';
+import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig, AcademicTerm, OfficialHoliday } from '../../types';
+import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../../lib/academicYearUtils';
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
@@ -161,6 +162,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   const {
     academicConfig,
     updateAcademicConfig,
+    setActiveAcademicTerm,
+    updateAcademicTerm,
     users,
     teachers,
     archivedTeachers,
@@ -502,21 +505,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   const [auditActionFilter, setAuditActionFilter] = useState('all');
   const [backupSubMode, setBackupSubMode] = useState<'restore' | 'export' | 'local'>('restore');
 
-  // Academic Config Form State
-  const [academicForm, setAcademicForm] = useState(academicConfig);
+  // Academic Config & Multi-Term Form State
+  const [academicForm, setAcademicForm] = useState<AcademicYearConfig>(() => {
+    return syncAcademicConfigWithActiveTerm(academicConfig);
+  });
   const [configSaved, setConfigSaved] = useState(false);
   const isAcademicFormDirtyRef = React.useRef(false);
+
+  // Selected Term for Viewing/Editing
+  const [selectedTermId, setSelectedTermId] = useState<string>(() => {
+    return academicConfig?.activeTermId || 'term_1';
+  });
+
+  // Modal for confirming term activation switch
+  const [termToActivate, setTermToActivate] = useState<AcademicTerm | null>(null);
+  const [archivePreviousOnSwitch, setArchivePreviousOnSwitch] = useState(true);
+  const [isSwitchingTerm, setIsSwitchingTerm] = useState(false);
 
   // Synchronize form when academicConfig loads or updates from backend API, unless user is actively editing
   React.useEffect(() => {
     if (academicConfig && !isAcademicFormDirtyRef.current) {
-      setAcademicForm(academicConfig);
+      setAcademicForm(syncAcademicConfigWithActiveTerm(academicConfig));
+      if (!selectedTermId || selectedTermId === 'term_1') {
+        setSelectedTermId(academicConfig.activeTermId || 'term_1');
+      }
     }
   }, [academicConfig]);
 
   const handleAcademicFormChange = (updates: Partial<AcademicYearConfig>) => {
     isAcademicFormDirtyRef.current = true;
-    setAcademicForm((prev) => ({ ...prev, ...updates }));
+    setAcademicForm((prev) => {
+      const merged = { ...prev, ...updates };
+      return syncAcademicConfigWithActiveTerm(merged);
+    });
+  };
+
+  const resolvedTerms: AcademicTerm[] = React.useMemo(() => {
+    const list = Array.isArray(academicForm.terms) && academicForm.terms.length > 0
+      ? academicForm.terms
+      : generateDefaultAcademicTerms();
+    if (academicForm.systemType === 'two_terms') {
+      return list.filter((t) => t.termNumber <= 2);
+    }
+    return list;
+  }, [academicForm.terms, academicForm.systemType]);
+
+  const currentSelectedTerm: AcademicTerm = React.useMemo(() => {
+    const found = resolvedTerms.find((t) => t.id === selectedTermId);
+    return found || resolvedTerms.find((t) => t.isCurrent) || resolvedTerms[0];
+  }, [resolvedTerms, selectedTermId]);
+
+  const handleSelectedTermChange = (termUpdates: Partial<AcademicTerm>) => {
+    isAcademicFormDirtyRef.current = true;
+    setAcademicForm((prev) => {
+      const allTerms = Array.isArray(prev.terms) && prev.terms.length > 0
+        ? prev.terms
+        : generateDefaultAcademicTerms();
+      const updatedTerms = allTerms.map((t) =>
+        t.id === currentSelectedTerm.id ? { ...t, ...termUpdates } : t
+      );
+      const isSelectedActive = (prev.activeTermId || 'term_1') === currentSelectedTerm.id;
+      if (isSelectedActive) {
+        return syncAcademicConfigWithActiveTerm({
+          ...prev,
+          terms: updatedTerms,
+          ...termUpdates,
+        }, currentSelectedTerm.id);
+      }
+      return {
+        ...prev,
+        terms: updatedTerms,
+      };
+    });
   };
 
   const [newHolidayName, setNewHolidayName] = useState('');
@@ -536,22 +596,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
       endDate: start <= end ? end : start,
     };
 
-    const dates: string[] = [];
-    let cur = newH.startDate;
-    while (cur <= newH.endDate) {
-      dates.push(cur);
-      const d = new Date(cur);
-      d.setDate(d.getDate() + 1);
-      cur = d.toISOString().slice(0, 10);
-    }
-
-    const existingHolidays = academicForm.holidays || [];
-    const updatedDates = Array.from(new Set([...existingHolidays, ...dates]));
-    const existingOfficial = academicForm.officialHolidays || [];
-
-    handleAcademicFormChange({
+    const existingOfficial = currentSelectedTerm.officialHolidays || [];
+    handleSelectedTermChange({
       officialHolidays: [...existingOfficial, newH],
-      holidays: updatedDates,
     });
 
     setNewHolidayName('');
@@ -560,28 +607,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   };
 
   const handleRemoveHoliday = (holId: string) => {
-    const existingOfficial = academicForm.officialHolidays || [];
-    const target = existingOfficial.find((h) => h.id === holId);
+    const existingOfficial = currentSelectedTerm.officialHolidays || [];
     const updatedOfficial = existingOfficial.filter((h) => h.id !== holId);
+    handleSelectedTermChange({
+      officialHolidays: updatedOfficial,
+    });
+  };
 
-    if (target) {
-      const datesToRemove = new Set<string>();
-      let cur = target.startDate;
-      while (cur <= target.endDate) {
-        datesToRemove.add(cur);
-        const d = new Date(cur);
-        d.setDate(d.getDate() + 1);
-        cur = d.toISOString().slice(0, 10);
-      }
-      const updatedDates = (academicForm.holidays || []).filter((d) => !datesToRemove.has(d));
-      handleAcademicFormChange({
-        officialHolidays: updatedOfficial,
-        holidays: updatedDates,
-      });
-    } else {
-      handleAcademicFormChange({
-        officialHolidays: updatedOfficial,
-      });
+  const handleExecuteTermSwitch = async () => {
+    if (!termToActivate) return;
+    setIsSwitchingTerm(true);
+    try {
+      await setActiveAcademicTerm(termToActivate.id, archivePreviousOnSwitch);
+      setSelectedTermId(termToActivate.id);
+      setTermToActivate(null);
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 3000);
+    } catch (err: any) {
+      alert(err?.message || 'حدث خطأ أثناء تفعيل الفصل الدراسي');
+    } finally {
+      setIsSwitchingTerm(false);
     }
   };
 
@@ -1027,339 +1072,612 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
           {/* MEETINGS TAB */}
           {activeTab === 'meetings' && <MeetingsManagementView />}
 
-          {/* TAB 1: ACADEMIC CONFIG */}
+          {/* TAB 1: ACADEMIC CONFIG & MULTI-TERM SUITE */}
           {activeTab === 'academic' && (
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-          <h3 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100 flex items-center gap-2">
-            <Settings className="w-4 h-4 text-emerald-600" />
-            <span>ضبط العام الدراسي والأسابيع التشغيلية (12 أسبوعاً)</span>
-          </h3>
-
-          <form onSubmit={handleSaveAcademic} className="mt-5 space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">اسم العام الدراسي</label>
-                <input
-                  type="text"
-                  value={academicForm.name}
-                  onChange={(e) => handleAcademicFormChange({ name: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">الفصل الدراسي</label>
-                <input
-                  type="text"
-                  value={academicForm.semester}
-                  onChange={(e) => handleAcademicFormChange({ semester: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-emerald-800">الأسبوع التشغيلي الحالي</label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-600 font-medium">
-                    <input
-                      type="checkbox"
-                      checked={!!academicForm.manualWeekOverride}
-                      onChange={(e) =>
-                        handleAcademicFormChange({ manualWeekOverride: e.target.checked })
-                      }
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>تحديد يدوي ثابت</span>
-                  </label>
-                </div>
-                {academicForm.manualWeekOverride ? (
-                  <select
-                    value={academicForm.currentWeek}
-                    onChange={(e) =>
-                      handleAcademicFormChange({ currentWeek: parseInt(e.target.value) })
-                    }
-                    className="w-full px-3 py-2.5 rounded-xl border border-amber-500 bg-amber-50/50 font-black text-amber-900"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 3).map((w) => (
-                      <option key={w} value={w}>
-                        الأسبوع {w} (تثبيت يدوي)
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50/70 text-emerald-900 flex items-center justify-between">
-                    <span className="font-black text-sm">الأسبوع {academicForm.currentWeek}</span>
-                    <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                      محسوب آلياً بالتقويم
+            <div className="space-y-6">
+              {/* Year Overview & System Architecture */}
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-emerald-600" />
+                      <span>إدارة العام الأكاديمي والفصول الدراسية (Academic Year & Terms Architecture)</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      تخصيص الفصول الدراسية (الأول، الثاني، الثالث)، ومواعيدها، وإجازاتها، ومستهدفاتها القرآنية المستقلة.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[11px] text-slate-500 font-medium">الفصل النشط حالياً:</span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-black rounded-full shadow-2xs">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      {resolvedTerms.find((t) => t.id === (academicForm.activeTermId || 'term_1'))?.name || 'الفصل الدراسي الأول'}
                     </span>
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">تاريخ بداية الفصل الدراسي (التقويم الفعلي)</label>
-                <input
-                  type="date"
-                  value={academicForm.startDate}
-                  onChange={(e) => handleAcademicFormChange({ startDate: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">تاريخ نهاية الفصل الدراسي</label>
-                <input
-                  type="date"
-                  value={academicForm.endDate}
-                  onChange={(e) => handleAcademicFormChange({ endDate: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-slate-100">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">بداية المرحلة (رقم الأسبوع)</label>
-                <input
-                  type="number"
-                  value={academicForm.operationalStartWeek}
-                  onChange={(e) =>
-                    handleAcademicFormChange({
-                      operationalStartWeek: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">نهاية المرحلة (رقم الأسبوع)</label>
-                <input
-                  type="number"
-                  value={academicForm.operationalEndWeek}
-                  onChange={(e) =>
-                    handleAcademicFormChange({
-                      operationalEndWeek: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">درجة اجتياز الهجاء (%)</label>
-                <input
-                  type="number"
-                  value={academicForm.spellingPassingThreshold}
-                  onChange={(e) =>
-                    handleAcademicFormChange({
-                      spellingPassingThreshold: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300"
-                />
-              </div>
-            </div>
-
-            {/* Official Holidays & Extended Vacations */}
-            <div className="pt-3 border-t border-slate-100">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-bold text-slate-900 flex items-center gap-1.5 text-sm">
-                  <Calendar className="w-4 h-4 text-purple-600" />
-                  <span>الإجازات الرسمية والعطلات المعتمدة (تُستثنى من الخطة تلقائياً):</span>
-                </h4>
-                <span className="text-[11px] text-slate-500 font-sans">
-                  إجمالي أيام الإجازات المسجلة: {(academicForm.holidays || []).length} يوم
-                </span>
-              </div>
-
-              {/* Add New Holiday Form */}
-              <div className="bg-purple-50/50 border border-purple-200 rounded-xl p-3 mb-3">
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-bold text-purple-950 mb-1">مسمى الإجازة</label>
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">مسمى العام الأكاديمي</label>
                     <input
                       type="text"
-                      value={newHolidayName}
-                      onChange={(e) => setNewHolidayName(e.target.value)}
-                      placeholder="مثال: إجازة مطولة، اليوم الوطني، إجازة التأسيس..."
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-purple-300 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      value={academicForm.name}
+                      onChange={(e) => handleAcademicFormChange({ name: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900 bg-slate-50/50"
+                      placeholder="مثال: العام الدراسي 1447-1448 هـ"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-purple-950 mb-1">تاريخ البداية</label>
-                    <input
-                      type="date"
-                      value={newHolidayStart}
-                      onChange={(e) => setNewHolidayStart(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs rounded-lg border border-purple-300 bg-white font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-purple-950 mb-1">تاريخ النهاية</label>
-                    <input
-                      type="date"
-                      value={newHolidayEnd}
-                      onChange={(e) => setNewHolidayEnd(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs rounded-lg border border-purple-300 bg-white font-mono"
-                    />
-                  </div>
-                </div>
-                <div className="mt-2.5 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleAddHoliday}
-                    disabled={!newHolidayStart}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>إضافة الإجازة للتقويم</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* List of Registered Holidays */}
-              {academicForm.officialHolidays && academicForm.officialHolidays.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {academicForm.officialHolidays.map((hol) => (
-                    <div
-                      key={hol.id}
-                      className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg shadow-2xs hover:border-purple-300 transition-colors"
+                    <label className="block font-bold text-slate-700 mb-1">نظام الفصول المعتمد</label>
+                    <select
+                      value={academicForm.systemType || 'three_terms'}
+                      onChange={(e) =>
+                        handleAcademicFormChange({ systemType: e.target.value as 'three_terms' | 'two_terms' })
+                      }
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 cursor-pointer"
                     >
-                      <div>
-                        <div className="font-bold text-xs text-slate-900 flex items-center gap-1">
-                          <span>🏖️</span>
-                          <span>{hol.name}</span>
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                          {hol.startDate === hol.endDate ? hol.startDate : `${hol.startDate} ← ${hol.endDate}`}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveHoliday(hol.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                        title="حذف الإجازة"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <option value="three_terms">نظام 3 فصول دراسية (المعتمد في التقويم السعودي)</option>
+                      <option value="two_terms">نظام فصلين دراسيين (نصفين)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">أيام التشغيل الأسبوعية للمجمع</label>
+                    <div className="px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-bold flex items-center justify-between">
+                      <span>4 أيام (الأحد إلى الأربعاء)</span>
+                      <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">معتمد</span>
                     </div>
-                  ))}
+                  </div>
                 </div>
-              ) : (
-                <p className="text-xs text-slate-400 italic">لا توجد إجازات رسمية مسجلة حالياً في تقويم العام الدراسي.</p>
-              )}
-            </div>
-
-            {/* Minimum Grade Targets Across All Educational Stages */}
-            <div className="pt-3 border-t border-slate-100">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-emerald-600" />
-                  <span>الحد الأدنى والمخرج القرآني المعتمد للمراحل التعليمية:</span>
-                </h4>
-                <span className="text-[11px] text-slate-500">
-                  يشمل كامل مراحل المجمع (من البراعم إلى الجامعيين)
-                </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {stages.map((stage) => {
-                  const stageKey = stage.id;
-                  const currentSurah =
-                    academicForm.gradeTargets?.[stageKey]?.minSurah ||
-                    (stageKey === 'baraem' && academicForm.gradeTargets?.tamheedi?.minSurah) ||
-                    stage.defaultTargetSurah ||
-                    'الغاشية';
+              {/* Term Selector Tabs Header */}
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-700" />
+                    <h4 className="font-bold text-slate-900 text-sm">
+                      تخصيص الفصول الدراسية للعام الأكاديمي ({resolvedTerms.length} فصول)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    انقر على أي فصل لاستعراض وضبط بياناته ومستهدفاته بشكل مستقل
+                  </span>
+                </div>
 
-                  return (
-                    <div
-                      key={stage.id}
-                      className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 hover:border-emerald-300 transition-colors"
+                {/* Term Tab Switchers */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {resolvedTerms.map((term) => {
+                    const isSelected = term.id === currentSelectedTerm.id;
+                    const isActive = term.id === (academicForm.activeTermId || 'term_1');
+
+                    return (
+                      <button
+                        key={term.id}
+                        type="button"
+                        onClick={() => setSelectedTermId(term.id)}
+                        className={`p-3.5 rounded-xl border-2 text-right transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                          isSelected
+                            ? 'border-emerald-600 bg-emerald-50/60 shadow-xs ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`font-bold text-xs ${isSelected ? 'text-emerald-950 font-black' : 'text-slate-800'}`}>
+                            {term.name}
+                          </span>
+                          {isActive ? (
+                            <span className="text-[10px] bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                              النشط حالياً
+                            </span>
+                          ) : term.isArchived ? (
+                            <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-full">
+                              مؤرشف 📦
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                              مجدول ⏳
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                          <span>{term.startDate || 'غير محدد'}</span>
+                          <span>←</span>
+                          <span>{term.endDate || 'غير محدد'}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Active Term Status or Quick Activate Bar */}
+                {currentSelectedTerm.id === (academicForm.activeTermId || 'term_1') ? (
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span className="font-bold">
+                        أنت تعرض وتعدل بيانات ({currentSelectedTerm.name}) وهو الفصل النشط الفعّال حالياً في كافة أرجاء النظام.
+                      </span>
+                    </div>
+                    <span className="text-[11px] bg-emerald-200 text-emerald-900 font-bold px-2.5 py-1 rounded-lg shrink-0">
+                      معتمد في المجمع
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>
+                        أنت تستعرض إعدادات ومستهدفات ({currentSelectedTerm.name}) للمستقبل. يمكنك حفظ التعديلات مسبقاً، أو تفعيله كفصل حالي للمجمع.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTermToActivate(currentSelectedTerm)}
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-2xs transition-colors shrink-0 cursor-pointer"
                     >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              stage.accentColor === 'emerald'
-                                ? 'bg-emerald-500'
-                                : stage.accentColor === 'blue'
-                                ? 'bg-blue-500'
-                                : stage.accentColor === 'amber'
-                                ? 'bg-amber-500'
-                                : stage.accentColor === 'teal'
-                                ? 'bg-teal-500'
-                                : stage.accentColor === 'purple'
-                                ? 'bg-purple-500'
-                                : 'bg-indigo-500'
-                            }`}
-                          />
-                          {stage.name}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          {stage.ageRange}
-                        </span>
-                      </div>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>تفعيل هذا الفصل كفصل حالي للمجمع</span>
+                    </button>
+                  </div>
+                )}
 
-                      <div className="text-[11px] text-slate-600 mb-2">
-                        الصفوف: <strong className="text-slate-800">{(stage.targetGrades || []).join('، ')}</strong>
-                      </div>
+                {/* Selected Term Detail Form */}
+                <form onSubmit={handleSaveAcademic} className="space-y-5 text-xs pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">مسمى هذا الفصل الدراسي</label>
+                      <input
+                        type="text"
+                        value={currentSelectedTerm.name}
+                        onChange={(e) => handleSelectedTermChange({ name: e.target.value })}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">تاريخ بداية الفصل (التقويم الفعلي)</label>
+                      <input
+                        type="date"
+                        value={currentSelectedTerm.startDate}
+                        onChange={(e) => handleSelectedTermChange({ startDate: e.target.value })}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">تاريخ نهاية الفصل الدراسي</label>
+                      <input
+                        type="date"
+                        value={currentSelectedTerm.endDate}
+                        onChange={(e) => handleSelectedTermChange({ endDate: e.target.value })}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
+                      />
+                    </div>
+                  </div>
 
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] text-slate-500 font-medium">السورة المرجعية للحد الأدنى:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-3 border-t border-slate-100">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">بداية المرحلة (الأسبوع)</label>
+                      <input
+                        type="number"
+                        value={currentSelectedTerm.operationalStartWeek}
+                        onChange={(e) =>
+                          handleSelectedTermChange({
+                            operationalStartWeek: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">نهاية المرحلة (الأسبوع)</label>
+                      <input
+                        type="number"
+                        value={currentSelectedTerm.operationalEndWeek}
+                        onChange={(e) =>
+                          handleSelectedTermChange({
+                            operationalEndWeek: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">إجمالي الأسابيع التشغيلية</label>
+                      <input
+                        type="number"
+                        value={currentSelectedTerm.totalWeeks}
+                        onChange={(e) =>
+                          handleSelectedTermChange({
+                            totalWeeks: parseInt(e.target.value) || 12,
+                          })
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">درجة اجتياز الهجاء (%)</label>
+                      <input
+                        type="number"
+                        value={currentSelectedTerm.spellingPassingThreshold || 85}
+                        onChange={(e) =>
+                          handleSelectedTermChange({
+                            spellingPassingThreshold: parseInt(e.target.value) || 85,
+                          })
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Operational Week Selection */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="font-bold text-slate-900 block">
+                        الأسبوع التشغيلي الحالي لهذا الفصل:
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        يحدد الدروس الهجائية المتوقعة وجداول التقييم ومتابعة الحلقات.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 font-bold">
+                        <input
+                          type="checkbox"
+                          checked={!!currentSelectedTerm.manualWeekOverride}
+                          onChange={(e) =>
+                            handleSelectedTermChange({ manualWeekOverride: e.target.checked })
+                          }
+                          className="rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>تثبيت يدوي</span>
+                      </label>
+
+                      {currentSelectedTerm.manualWeekOverride ? (
                         <select
-                          value={currentSurah}
-                          onChange={(e) => {
-                            const newTargets = {
-                              ...academicForm.gradeTargets,
-                              [stageKey]: { minSurah: e.target.value, label: stage.name },
-                            };
-                            if (stageKey === 'baraem') {
-                              newTargets.tamheedi = { minSurah: e.target.value };
-                              newTargets.grade1 = { minSurah: e.target.value };
-                            }
-                            handleAcademicFormChange({
-                              gradeTargets: newTargets,
-                            });
-                          }}
-                          className="w-full px-2.5 py-1.5 bg-white rounded-lg border border-slate-300 font-medium text-slate-800 focus:outline-emerald-600"
+                          value={currentSelectedTerm.currentWeek}
+                          onChange={(e) =>
+                            handleSelectedTermChange({ currentWeek: parseInt(e.target.value) })
+                          }
+                          className="px-3 py-1.5 rounded-lg border border-amber-500 bg-amber-50 font-black text-amber-900"
                         >
-                          {SURAHS_LIST.map((s) => (
-                            <option key={s.number} value={s.name}>
-                              سورة {s.name}
+                          {Array.from({ length: 12 }, (_, i) => i + 3).map((w) => (
+                            <option key={w} value={w}>
+                              الأسبوع {w} (تثبيت يدوي)
                             </option>
                           ))}
                         </select>
-                      </div>
-
-                      {stage.targetQuranAmount && (
-                        <div className="mt-2 text-[10px] text-amber-900 bg-amber-50/80 px-2 py-1 rounded border border-amber-200/60 font-semibold">
-                          المقدار: {stage.targetQuranAmount}
+                      ) : (
+                        <div className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center gap-2">
+                          <span>الأسبوع {currentSelectedTerm.currentWeek}</span>
+                          <span className="text-[10px] bg-emerald-200 px-1.5 py-0.5 rounded text-emerald-800">
+                            محسوب آلياً
+                          </span>
                         </div>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
 
-            <div className="pt-4 flex items-center justify-between">
-              {configSaved ? (
-                <span className="text-emerald-700 font-bold flex items-center gap-1">
-                  <CheckCircle className="w-4 h-4" />
-                  <span>تم حفظ الإعدادات بنجاح!</span>
-                </span>
-              ) : (
-                <span></span>
+                  {/* Holidays & Vacations for this Term */}
+                  <div className="pt-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 flex items-center gap-1.5 text-sm">
+                        <Calendar className="w-4 h-4 text-purple-600" />
+                        <span>الإجازات والعطلات المعتمدة لـ ({currentSelectedTerm.name}):</span>
+                      </h4>
+                      <span className="text-[11px] text-slate-500">
+                        {(currentSelectedTerm.officialHolidays || []).length} إجازات مسجلة
+                      </span>
+                    </div>
+
+                    {/* Add Holiday for Selected Term */}
+                    <div className="bg-purple-50/50 border border-purple-200 rounded-xl p-3 mb-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-bold text-purple-950 mb-1">مسمى الإجازة</label>
+                          <input
+                            type="text"
+                            value={newHolidayName}
+                            onChange={(e) => setNewHolidayName(e.target.value)}
+                            placeholder="مثال: إجازة مطولة، اليوم الوطني، التأسيس، عيد الفطر..."
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-purple-300 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-purple-950 mb-1">تاريخ البداية</label>
+                          <input
+                            type="date"
+                            value={newHolidayStart}
+                            onChange={(e) => setNewHolidayStart(e.target.value)}
+                            className="w-full px-2.5 py-2 text-xs rounded-lg border border-purple-300 bg-white font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-purple-950 mb-1">تاريخ النهاية</label>
+                          <input
+                            type="date"
+                            value={newHolidayEnd}
+                            onChange={(e) => setNewHolidayEnd(e.target.value)}
+                            className="w-full px-2.5 py-2 text-xs rounded-lg border border-purple-300 bg-white font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-2.5 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleAddHoliday}
+                          disabled={!newHolidayStart}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>إضافة الإجازة لتقويم {currentSelectedTerm.name}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Holidays List */}
+                    {currentSelectedTerm.officialHolidays && currentSelectedTerm.officialHolidays.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {currentSelectedTerm.officialHolidays.map((hol) => (
+                          <div
+                            key={hol.id}
+                            className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg shadow-2xs hover:border-purple-300 transition-colors"
+                          >
+                            <div>
+                              <div className="font-bold text-xs text-slate-900 flex items-center gap-1">
+                                <span>🏖️</span>
+                                <span>{hol.name}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                {hol.startDate === hol.endDate ? hol.startDate : `${hol.startDate} ← ${hol.endDate}`}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveHoliday(hol.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                              title="حذف الإجازة"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">لا توجد إجازات رسمية مسجلة لهذا الفصل الدراسي.</p>
+                    )}
+                  </div>
+
+                  {/* Per-Term Quranic Minimum Targets by Educational Stage */}
+                  <div className="pt-3 border-t border-slate-100">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-3">
+                      <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <BookOpen className="w-4 h-4 text-emerald-600" />
+                        <span>مستهدفات الحد الأدنى القرآني لـ ({currentSelectedTerm.name}):</span>
+                      </h4>
+                      <span className="text-[11px] text-slate-500">
+                        مستهدفات مستقلة خاصة بكل فصل دراسي (من البراعم إلى الجامعيين)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                      {stages.map((stage) => {
+                        const stageKey = stage.id;
+                        const termTargets = currentSelectedTerm.gradeTargets || {};
+                        const currentSurah =
+                          termTargets[stageKey]?.minSurah ||
+                          (stageKey === 'baraem' && termTargets.tamheedi?.minSurah) ||
+                          stage.defaultTargetSurah ||
+                          'الغاشية';
+
+                        return (
+                          <div
+                            key={stage.id}
+                            className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 hover:border-emerald-300 transition-colors"
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    stage.accentColor === 'emerald'
+                                      ? 'bg-emerald-500'
+                                      : stage.accentColor === 'blue'
+                                      ? 'bg-blue-500'
+                                      : stage.accentColor === 'amber'
+                                      ? 'bg-amber-500'
+                                      : stage.accentColor === 'teal'
+                                      ? 'bg-teal-500'
+                                      : stage.accentColor === 'purple'
+                                      ? 'bg-purple-500'
+                                      : 'bg-indigo-500'
+                                  }`}
+                                />
+                                {stage.name}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                {stage.ageRange}
+                              </span>
+                            </div>
+
+                            <div className="text-[11px] text-slate-600 mb-2">
+                              الصفوف: <strong className="text-slate-800">{(stage.targetGrades || []).join('، ')}</strong>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <label className="block text-[11px] text-slate-500 font-medium">
+                                السورة المرجعية لهذا الفصل:
+                              </label>
+                              <select
+                                value={currentSurah}
+                                onChange={(e) => {
+                                  const updatedTargets = {
+                                    ...termTargets,
+                                    [stageKey]: { minSurah: e.target.value, label: stage.name },
+                                  };
+                                  if (stageKey === 'baraem') {
+                                    updatedTargets.tamheedi = { minSurah: e.target.value };
+                                    updatedTargets.grade1 = { minSurah: e.target.value };
+                                  }
+                                  handleSelectedTermChange({
+                                    gradeTargets: updatedTargets,
+                                  });
+                                }}
+                                className="w-full px-2.5 py-1.5 bg-white rounded-lg border border-slate-300 font-medium text-slate-800 focus:outline-emerald-600"
+                              >
+                                {SURAHS_LIST.map((s) => (
+                                  <option key={s.number} value={s.name}>
+                                    سورة {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {stage.targetQuranAmount && (
+                              <div className="mt-2 text-[10px] text-amber-900 bg-amber-50/80 px-2 py-1 rounded border border-amber-200/60 font-semibold">
+                                المقدار المعتمد: {stage.targetQuranAmount}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Term Educational Outcome & Notes */}
+                  <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        المخرج التعليمي والتربوي لـ ({currentSelectedTerm.name})
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={currentSelectedTerm.outcomeText || ''}
+                        onChange={(e) => handleSelectedTermChange({ outcomeText: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                        placeholder="مثال: تأسيس الهجاء القرآني المطور وضبط مخارج الحروف وحفظ المفصل..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        توجيهات وملاحظات المشرف لهذا الفصل
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={currentSelectedTerm.notes || ''}
+                        onChange={(e) => handleSelectedTermChange({ notes: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                        placeholder="ملاحظات توجيهية خاصة بتنظيم الحلقات وجداول الاختبارات..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Actions & Save */}
+                  <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100">
+                    <div>
+                      {configSaved ? (
+                        <span className="text-emerald-700 font-bold flex items-center gap-1.5 text-xs">
+                          <CheckCircle className="w-4 h-4" />
+                          <span>تم حفظ وتحديث إعدادات العام الأكاديمي والفصول بنجاح!</span>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-[11px]">
+                          يتم حفظ التعديلات سحابياً ومزامنتها مع كافة حسابات المجمع
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs"
+                      >
+                        حفظ بيانات العام والفصول الأكاديمية
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              {/* Term Activation Confirmation Modal */}
+              {termToActivate && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                  <div className="bg-white rounded-3xl p-6 max-w-lg w-full border border-slate-200 shadow-2xl space-y-4">
+                    <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                      <div className="p-3 bg-amber-100 text-amber-900 rounded-2xl">
+                        <Sparkles className="w-6 h-6 text-amber-700" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-slate-900 text-base">
+                          تأكيد الانتقال إلى ({termToActivate.name})
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          تغيير الفصل الدراسي النشط المعتمد للمجمع
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-slate-700 space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                      <p className="font-bold text-slate-900">
+                        أنت على وشك تعيين ({termToActivate.name}) كفصل دراسي نشط:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-slate-600">
+                        <li>ستعتمد شاشات المعلمين والمشرفين تقويم وإجازات هذا الفصل.</li>
+                        <li>ستُحتسب الأسابيع التشغيلية بدءاً من {termToActivate.startDate || 'تاريخ البداية'}.</li>
+                        <li>ستظهر مستهدفات هذا الفصل في بطاقات المراحل والصفحة العامة.</li>
+                      </ul>
+                    </div>
+
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl border border-blue-200 bg-blue-50/60 cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={archivePreviousOnSwitch}
+                        onChange={(e) => setArchivePreviousOnSwitch(e.target.checked)}
+                        className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="text-blue-950 font-medium">
+                        <span className="font-bold block">
+                          أرشفة الفصل السابق تلقائياً في السجل التراكمي للطلاب (موصى به)
+                        </span>
+                        <span className="text-[11px] text-blue-800">
+                          حفظ نتائج الحضور والتقييمات للفصل السابق في ملفات الطلاب السحابية قبل الانتقال.
+                        </span>
+                      </div>
+                    </label>
+
+                    <div className="flex items-center justify-end gap-2.5 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setTermToActivate(null)}
+                        disabled={isSwitchingTerm}
+                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                      >
+                        إلغاء
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecuteTermSwitch}
+                        disabled={isSwitchingTerm}
+                        className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        {isSwitchingTerm ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>جارٍ تفعيل الفصل...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            <span>تأكيد الانتقال وتفعيل الفصل</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
 
-              <button
-                type="submit"
-                className="px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-xs transition-colors"
-              >
-                حفظ الإعدادات الأكاديمية
-              </button>
-            </div>
-          </form>
-
-          {/* Dynamic Reference Quran Outcome Card */}
+              {/* Dynamic Reference Quran Outcome Card */}
           <div className="mt-8 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/40 rounded-2xl p-6 border-2 border-amber-300 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-amber-200">
               <div className="flex items-center gap-2.5">

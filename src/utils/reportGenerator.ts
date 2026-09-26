@@ -186,8 +186,8 @@ export function generateGeneralParentsGroupReport(
 ⭐ نسبة الطلاب المتقدمين عن أهدافهم: *${metrics.spellingAdvancedPct}%*
 ✨ نسبة الحضور والمواظبة: *${metrics.overallAttendancePct}%*
 
-🌱 *الخطة التربوية للأسبوع:*
-${currentWeekPlan ? `الهدف: ${currentWeekPlan.educationalGoal}\nالشعار: ${currentWeekPlan.motto}\nالنشاط المنفذ: ${currentWeekPlan.activity}` : 'تم تنفيذ الأنشطة التربوية المعتمدة بنجاح.'}
+🌱 *الخطة التربوية للأسبوع${currentWeekPlan?.stageName ? ` (${currentWeekPlan.stageName})` : ''}:*
+${currentWeekPlan ? `الهدف: ${currentWeekPlan.educationalGoal}\nالشعار: ${currentWeekPlan.motto}\nالنشاط المنفذ: ${currentWeekPlan.activity}${currentWeekPlan.showSupervisorName !== false && currentWeekPlan.responsiblePerson ? `\nالمشرف المسؤول: ${currentWeekPlan.responsiblePerson}` : ''}` : 'تم تنفيذ الأنشطة التربوية المعتمدة بنجاح.'}
 
 نسأل الله تعالى أن يبارك في أبنائنا، وأن يجزيهم ووالديهم ومعلميهم خير الجزاء.
 _إدارة المجمع القرآني – ${tenantName}_`;
@@ -201,7 +201,7 @@ export function generatePrepWeekAnnouncement(
   const target = options?.targetSurah || 'المقرر المستهدف';
   const tenantName = options?.tenantName || 'مجمع حلقات جامع الغزاوي بجدة';
 
-  return `📢 *رسالة تحضيرية للأسبوع القادم (${nextWeekNumber})*
+  return `📢 *رسالة تحضيرية للأسبوع القادم (${nextWeekNumber})${nextWeekPlan?.stageName ? ` - ${nextWeekPlan.stageName}` : ''}*
 🕌 *${tenantName}*
 
 أولياء الأمور الكرام ومعلمي الحلقات الأفاضل،
@@ -209,7 +209,7 @@ export function generatePrepWeekAnnouncement(
 
 🎯 *الهدف التربوي:* ${nextWeekPlan?.educationalGoal || 'تعزيز الإتقان القرآني وتثبيت المهارات'}
 🌟 *شعار الأسبوع:* ${nextWeekPlan?.motto || '«همتي في قرآني»'}
-🎨 *النشاط المخطط:* ${nextWeekPlan?.activity || 'ورش تفاعلية وتسميع متميز'}
+🎨 *النشاط المخطط:* ${nextWeekPlan?.activity || 'ورش تفاعلية وتسميع متميز'}${nextWeekPlan?.showSupervisorName !== false && nextWeekPlan?.responsiblePerson ? `\n👤 *المشرف المسؤول:* ${nextWeekPlan.responsiblePerson}` : ''}
 📖 *التركيز القرآني:* إتمام دروس الهجاء المجدولة ومواصلة الحفظ نحو ${target}.
 
 نرجو حث الأبناء على الحضور المبكر وتجهيز المصاحف ودفاتر الهجاء.`;

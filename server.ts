@@ -1,10 +1,30 @@
-import express from 'express';
+import { spawn } from 'node:child_process';
 import path from 'path';
 import fs from 'fs';
-import { createApp } from './server/app';
-import { config } from './server/config/env';
 
-async function startServer() {
+// If started directly via `node server.ts` without TypeScript loader support,
+// re-execute with `--import tsx` so all extensionless internal TypeScript imports resolve properly.
+if (!process.env.TSX_ACTIVE && !process.execArgv.some((arg) => arg.includes('tsx'))) {
+  const child = spawn(process.execPath, ['--import', 'tsx', ...process.argv.slice(1)], {
+    stdio: 'inherit',
+    env: { ...process.env, TSX_ACTIVE: 'true' },
+  });
+  child.on('exit', (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    process.exit(code ?? 0);
+  });
+} else {
+  runApp().catch((err) => {
+    console.error('[QRMS Server] Failed to start:', err);
+    process.exit(1);
+  });
+}
+
+async function runApp() {
+  const express = (await import('express')).default;
+  const { createApp } = await import('./server/app');
+  const { config } = await import('./server/config/env');
+
   const app = createApp();
   const PORT = config.port || 3000;
   const isProd = process.env.NODE_ENV === 'production';
@@ -39,7 +59,3 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('[QRMS Server] Failed to start:', err);
-  process.exit(1);
-});

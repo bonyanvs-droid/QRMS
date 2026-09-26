@@ -11,16 +11,16 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['baraem-logo.png', 'mosque-logo.jpeg', 'pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png'],
+        includeAssets: ['mosque-logo.png', 'mosque-logo.jpeg', 'pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png', 'favicon.ico'],
         manifest: {
-          name: 'نظام إدارة المجمعات القرآنية',
-          short_name: 'المجمعات القرآنية',
-          description: 'نظام إدارة المجمعات القرآنية وحلقات التحفيظ والمخرجات التعليمية والتربوية (Quranic Centers Management System)',
+          name: 'مجمع الغزاوي القرآني',
+          short_name: 'مجمع الغزاوي',
+          description: 'نظام إدارة مجمع الغزاوي القرآني وحلقات التحفيظ والمخرجات التعليمية والتربوية (Quranic Centers Management System)',
           theme_color: '#065f46',
           background_color: '#f8fafc',
           display: 'standalone',
           orientation: 'portrait',
-          start_url: '/',
+          start_url: '/#/t/ghazawi',
           scope: '/',
           lang: 'ar',
           dir: 'rtl',
@@ -29,17 +29,25 @@ export default defineConfig(() => {
               src: '/pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'maskable',
             },
             {
               src: '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
+              purpose: 'any',
             },
             {
               src: '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
-              purpose: 'any maskable',
+              purpose: 'maskable',
             },
           ],
         },
@@ -87,6 +95,9 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (id.includes('quranData')) {
+              return 'quran-json';
+            }
             if (id.includes('node_modules')) {
               if (id.includes('xlsx')) return 'vendor-xlsx';
               if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('html-to-image') || id.includes('print-js')) return 'vendor-export';

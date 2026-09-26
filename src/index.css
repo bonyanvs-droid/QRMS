@@ -174,3 +174,32 @@ html, body {
 .qrms-safe-top {
   padding-top: env(safe-area-inset-top, 0px);
 }
+
+/* Banner Text Fade Animation Effects */
+@keyframes bannerFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-banner-fade-in {
+  animation: bannerFadeIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-banner-fade-delayed-1 {
+  animation: bannerFadeIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+}
+
+.animate-banner-fade-delayed-2 {
+  animation: bannerFadeIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.22s both;
+}
+
+.animate-banner-fade-delayed-3 {
+  animation: bannerFadeIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both;
+}
+

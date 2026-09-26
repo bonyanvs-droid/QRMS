@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPublicTenants, getTenantByIdOrSlug } from '../services/tenantService';
+import { getPublicTenants, getTenantByIdOrSlug, getTenantPublicStats } from '../services/tenantService';
 import { upsert, deleteRecord } from '../services/entityService';
 
 export const tenantRouter = Router();
@@ -16,6 +16,41 @@ tenantRouter.get('/', async (req, res, next) => {
       count: tenants.length,
       data: tenants,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/tenants/stats
+ * Returns public stats for the specified or current tenant.
+ */
+tenantRouter.get('/stats', async (req, res, next) => {
+  try {
+    const targetTenant = (req.query.tenantId as string) || req.tenantId || 'tenant_1789346881267';
+    const stats = await getTenantPublicStats(targetTenant);
+    if (!stats) {
+      res.status(404).json({ ok: false, error: 'Tenant stats not found' });
+      return;
+    }
+    res.json({ ok: true, data: stats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/tenants/:idOrSlug/stats
+ * Returns public aggregate stats for a specific tenant by ID or Slug.
+ */
+tenantRouter.get('/:idOrSlug/stats', async (req, res, next) => {
+  try {
+    const stats = await getTenantPublicStats(req.params.idOrSlug);
+    if (!stats) {
+      res.status(404).json({ ok: false, error: 'Tenant stats not found' });
+      return;
+    }
+    res.json({ ok: true, data: stats });
   } catch (err) {
     next(err);
   }
@@ -43,6 +78,7 @@ tenantRouter.get('/:idOrSlug', async (req, res, next) => {
     next(err);
   }
 });
+
 
 /**
  * POST /api/tenants
