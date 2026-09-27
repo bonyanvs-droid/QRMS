@@ -347,9 +347,13 @@ export interface StudentQuranPlan {
   recalculationHistory: RecalculationEvent[];
   revisions?: any[]; // Alias
 
+  // Optional Offsets
+  savingOffset?: number;
+  revisionOffset?: number;
+
   // Specific for Revision (e.g. revision by surahs)
   revisionSettings?: {
-    mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+    mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
     surahList?: number[]; // Specific surah numbers when revising by surah
     surahsPerDay?: number;
     /** Rolling-window granularity actually used by the engine */

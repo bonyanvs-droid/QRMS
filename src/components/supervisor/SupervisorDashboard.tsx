@@ -584,16 +584,48 @@ export const SupervisorDashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {canOpenPlan && (
-                      <button
-                        onClick={() => setComprehensiveStudent(s)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
-                        title={canEdit ? 'الخطة القرآنية الشاملة — عرض وإدارة' : 'الخطة القرآنية الشاملة — عرض فقط'}
-                      >
-                        <BookOpen className="w-3.5 h-3.5 text-amber-700" />
-                        <span>الخطة القرآنية</span>
-                      </button>
-                    )}
+                    {canOpenPlan && (() => {
+                      const hasPlan = Boolean(
+                        quranPlans.some((p) => p.studentId === s.id && p.status === 'active')
+                      );
+                      return (
+                        <button
+                          onClick={() => setComprehensiveStudent(s)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer border ${
+                            hasPlan
+                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                              : canEdit
+                              ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
+                              : 'bg-slate-100 text-slate-600 border-slate-300'
+                          }`}
+                          title={
+                            canEdit
+                              ? hasPlan
+                                ? 'إدارة وتعديل الخطة القرآنية الشاملة'
+                                : 'تأسيس واعتماد الخطة القرآنية للطالب'
+                              : 'عرض محددات الخطة القرآنية'
+                          }
+                        >
+                          {hasPlan ? (
+                            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+                          )}
+                          <span>
+                            {hasPlan
+                              ? canEdit
+                                ? 'إدارة الخطة'
+                                : 'الخطة القرآنية'
+                              : canEdit
+                              ? 'تأسيس الخطة'
+                              : 'بانتظار الخطة'}
+                          </span>
+                          {!hasPlan && canEdit && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                          )}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               );

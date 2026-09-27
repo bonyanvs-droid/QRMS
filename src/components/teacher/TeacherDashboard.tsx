@@ -1184,13 +1184,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                       className={`inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-2 px-1 rounded-xl text-[11px] font-bold border transition-colors shadow-2xs cursor-pointer ${
                         hasPlan
                           ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                          : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
                       }`}
-                      title={hasPlan ? 'الخطة القرآنية الشاملة' : 'يحتاج تأسيس خطة للطالب'}
+                      title={
+                        hasPlan
+                          ? 'عرض محددات وجدول الخطة القرآنية المعتمدة (للاطلاع فقط)'
+                          : 'بانتظار تأسيس واعتماد الخطة من المشرف التربوي المسؤول عن الحلقة'
+                      }
                     >
-                      <BookOpen className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                      <span>الخطة القرآنية</span>
-                      {!hasPlan && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
+                      <BookOpen
+                        className={`w-3.5 h-3.5 ${
+                          hasPlan ? 'text-amber-700' : 'text-slate-500'
+                        } shrink-0`}
+                      />
+                      <span>{hasPlan ? 'محددات الخطة' : 'بانتظار الخطة'}</span>
                     </button>
 
                     <button

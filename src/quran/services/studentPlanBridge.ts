@@ -97,6 +97,12 @@ export interface CreateRealStudentPlanParams {
   spellingLessons?: SpellingLesson[];
   /** Explicit revision direction override (independent of memorization direction) */
   customRevisionDirection?: PlanDirection;
+  /** Explicit revision mode override (e.g. 'pages', 'surahs', or 'none' to disable) */
+  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  /** Delay starting memorization by N sessions (focus on revision/prep) */
+  savingOffset?: number;
+  /** Delay starting revision by N sessions */
+  revisionOffset?: number;
   provider: IQuranDataProvider;
   memorizationEngine: QuranMemorizationPlanningEngine;
 }
@@ -319,13 +325,16 @@ export interface ResolvedPlanConfiguration {
   /** The academic-year grade target when it exists (for warnings/preview) */
   academicTarget?: QuranPosition;
   // Revision (independent configuration)
-  revisionMode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+  revisionMode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
   revisionUnitKind: 'page' | 'surah';
   revisionDailyPages: number;
   revisionUnitsPerWindow?: number;
   revisionDirection: PlanDirection;
   autoMinorRevisionMode: boolean;
   manualRevisionRange?: { start: QuranPosition; end: QuranPosition };
+  // Offsets
+  savingOffset?: number;
+  revisionOffset?: number;
   // Consolidation & schedule
   consolidationDays: number;
   schedule: WorkingDaysSchedule;
@@ -487,13 +496,14 @@ export function resolveQuranPlanConfiguration(
   // 5. Revision — independent configuration from the template's revision block.
   //    revision.mode is the SINGLE authority for the revision unit kind:
   //    'surahs' → surah units, everything else → real mushaf pages.
-  //    The legacy revision.unitType field must never override mode — stored
-  //    templates may carry a stale unitType='surah' contradicting mode='pages'.
+  //    'none' disables revision completely.
   const revCfg = stageConfig.revision || ({} as StageQuranConfig['revision']);
-  const revisionMode = revCfg.mode || 'pages';
+  const revisionMode = params.revisionMode || revCfg.mode || 'pages';
+  const isRevisionDisabled = revisionMode === 'none';
   const revisionUnitKind: 'page' | 'surah' =
     revisionMode === 'surahs' ? 'surah' : 'page';
   if (
+    !isRevisionDisabled &&
     revCfg.unitType &&
     (revCfg.unitType === 'surah') !== (revisionUnitKind === 'surah')
   ) {
@@ -501,18 +511,20 @@ export function resolveQuranPlanConfiguration(
       `النموذج "${stageConfig.name}" يحمل revision.unitType="${revCfg.unitType}" قديمًا يتعارض مع revision.mode="${revisionMode}" — اعتُمد mode بوصفه المرجع الوحيد لنوع وحدة المراجعة.`
     );
   }
-  const revisionDailyPages =
-    params.customRevisionDailyPages !== undefined
+  const revisionDailyPages = isRevisionDisabled
+    ? 0
+    : params.customRevisionDailyPages !== undefined
       ? params.customRevisionDailyPages
       : revCfg.defaultDailyPages ?? revCfg.defaultDailyAmount ?? 1;
-  const revisionUnitsPerWindow =
-    revisionUnitKind === 'surah'
+  const revisionUnitsPerWindow = isRevisionDisabled
+    ? undefined
+    : revisionUnitKind === 'surah'
       ? params.customRevisionUnitsPerWindow ??
         revCfg.surahsPerDay ??
         revCfg.defaultDailyAmount ??
         1
       : undefined;
-  if (revisionMode !== 'pages' && revisionMode !== 'surahs') {
+  if (!isRevisionDisabled && revisionMode !== 'pages' && revisionMode !== 'surahs') {
     warnings.push(
       `نمط المراجعة "${revisionMode}" في النموذج غير مدعوم بعد — طُبّقت مراجعة الصفحات المتدحرجة.`
     );
@@ -521,16 +533,24 @@ export function resolveQuranPlanConfiguration(
   // > memorization direction (documented last-resort fallback).
   const revisionDirection: PlanDirection =
     params.customRevisionDirection || revCfg.defaultDirection || direction;
-  const autoMinorRevisionMode =
-    params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true;
+  const autoMinorRevisionMode = isRevisionDisabled
+    ? false
+    : params.autoMinorRevisionMode !== undefined ? params.autoMinorRevisionMode : true;
   // Manual range: explicit teacher range > template default revision range
   const manualRevisionRange =
+    !isRevisionDisabled &&
     !autoMinorRevisionMode &&
     (params.manualRevisionRange ||
       (revCfg.defaultTargetStart && revCfg.defaultTargetEnd
         ? { start: revCfg.defaultTargetStart, end: revCfg.defaultTargetEnd }
         : undefined)) ||
     undefined;
+
+  // Offsets with mutual exclusivity: activating savingOffset locks revisionOffset to 0
+  const rawSavingOffset = Math.max(0, params.savingOffset || 0);
+  const rawRevisionOffset = Math.max(0, params.revisionOffset || 0);
+  const savingOffset = rawSavingOffset;
+  const revisionOffset = savingOffset > 0 ? 0 : rawRevisionOffset;
 
   // 6. Consolidation + schedule
   const consolidationDays =
@@ -605,6 +625,8 @@ export function resolveQuranPlanConfiguration(
     endDate,
     activeTrackIds,
     spellingEnabled,
+    savingOffset,
+    revisionOffset,
     warnings,
   };
 }
@@ -642,6 +664,8 @@ export async function createRealStudentPlan(
     revisionUnitKind: resolved.revisionUnitKind,
     revisionUnitsPerWindow: resolved.revisionUnitsPerWindow,
     revisionMode: resolved.revisionMode,
+    savingOffset: resolved.savingOffset,
+    revisionOffset: resolved.revisionOffset,
   });
 
   // Attach Real Student Metadata & Contextual Identifiers
@@ -662,6 +686,8 @@ export async function createRealStudentPlan(
     status: 'active',
     targetSource: resolved.targetSource,
     activeTrackIds: resolved.activeTrackIds,
+    savingOffset: resolved.savingOffset,
+    revisionOffset: resolved.revisionOffset,
   };
 
   // Spelling track: distribute the EXISTING lessons across plan working days

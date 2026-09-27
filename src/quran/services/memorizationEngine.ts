@@ -57,7 +57,11 @@ export interface CreateMemorizationPlanParams {
   /** Units per rolling window when revisionUnitKind = 'surah' (template surahsPerDay) */
   revisionUnitsPerWindow?: number;
   /** Template revision mode persisted into plan.revisionSettings */
-  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  /** Delay starting memorization by N sessions */
+  savingOffset?: number;
+  /** Delay starting revision by N sessions */
+  revisionOffset?: number;
 }
 
 export class QuranMemorizationPlanningEngine {
@@ -205,6 +209,9 @@ export class QuranMemorizationPlanningEngine {
       return `مراجعة: ${pages} صفحات`;
     };
     const defaultRevDisplay = formatRevisionLabel(revisionDailyPages);
+    const savingOffset = Math.max(0, params.savingOffset || 0);
+    const revisionOffset = Math.max(0, params.revisionOffset || 0);
+    const isRevisionDisabled = params.revisionMode === 'none';
 
     // 5. Construct DailyPlanItems
     const dailyPlans: DailyPlanItem[] = [];
@@ -216,21 +223,43 @@ export class QuranMemorizationPlanningEngine {
       const weekNumber = computeWeekNumber(dateStr, params.startDate);
       const monthNumber = computeMonthNumber(dateStr, params.startDate);
 
-      const hasUnit = i < units.length;
-      const unitForDay: PlanningUnit = hasUnit
-        ? units[i]
-        : {
-            type: params.unitType,
-            start: units[units.length - 1].end,
-            end: units[units.length - 1].end,
-            totalAyahs: 0,
-            displayLabel: 'يوم تثبيت ومراجعة عامة (تم إنجاز المقرر)',
-            isConsolidation: false,
-            revisionPages: revisionDailyPages,
-            revisionDisplay: defaultRevDisplay,
-          };
+      // Check saving offset (delayed memorization start)
+      const isSavingDelayed = savingOffset > 0 && i < savingOffset;
+      const effectiveUnitIndex = isSavingDelayed ? -1 : i - savingOffset;
+      const hasUnit = effectiveUnitIndex >= 0 && effectiveUnitIndex < units.length;
+
+      let unitForDay: PlanningUnit;
+      if (isSavingDelayed) {
+        unitForDay = {
+          type: params.unitType,
+          start: params.targetStart,
+          end: params.targetStart,
+          totalAyahs: 0,
+          displayLabel: `تمهيد وتلقين ومراجعة (حصة ${i + 1} من ${savingOffset})`,
+          isConsolidation: false,
+          revisionPages: isRevisionDisabled ? 0 : revisionDailyPages,
+          revisionDisplay: isRevisionDisabled ? undefined : defaultRevDisplay,
+        };
+      } else if (hasUnit) {
+        unitForDay = units[effectiveUnitIndex];
+      } else {
+        unitForDay = {
+          type: params.unitType,
+          start: units[units.length - 1].end,
+          end: units[units.length - 1].end,
+          totalAyahs: 0,
+          displayLabel: 'يوم تثبيت ومراجعة عامة (تم إنجاز المقرر)',
+          isConsolidation: false,
+          revisionPages: isRevisionDisabled ? 0 : revisionDailyPages,
+          revisionDisplay: isRevisionDisabled ? undefined : defaultRevDisplay,
+        };
+      }
 
       const isConsolidation = Boolean(unitForDay.isConsolidation);
+
+      // Check revision offset (delayed revision start) or disabled revision
+      const isRevDelayed = revisionOffset > 0 && i < revisionOffset;
+      const skipRevision = isRevisionDisabled || isRevDelayed;
 
       dailyPlans.push({
         id: `day_${planId}_${i + 1}_${dateStr}`,
@@ -240,17 +269,17 @@ export class QuranMemorizationPlanningEngine {
         weekNumber,
         monthNumber,
         itemIndex: i + 1,
-        planType: isConsolidation ? 'revision' : 'memorization',
-        dayType: isConsolidation ? 'consolidation' : hasUnit ? 'memorization' : 'general_revision',
+        planType: isConsolidation ? 'revision' : isSavingDelayed ? 'revision' : 'memorization',
+        dayType: isConsolidation ? 'consolidation' : isSavingDelayed ? 'revision' : hasUnit ? 'memorization' : 'general_revision',
         unitType: params.unitType,
         targetUnit: unitForDay,
         isConsolidationDay: isConsolidation,
         consolidationDayIndex: unitForDay.consolidationDayIndex,
         consolidationSurahNumber: unitForDay.consolidationSurahNumber,
-        revisionPagesAmount: unitForDay.revisionPages !== undefined ? unitForDay.revisionPages : revisionDailyPages,
-        revisionDisplayLabel: unitForDay.revisionDisplay || defaultRevDisplay,
-        revisionPageStart: unitForDay.revisionPageStart,
-        revisionPageEnd: unitForDay.revisionPageEnd,
+        revisionPagesAmount: skipRevision ? 0 : (unitForDay.revisionPages !== undefined ? unitForDay.revisionPages : revisionDailyPages),
+        revisionDisplayLabel: skipRevision ? undefined : (unitForDay.revisionDisplay || defaultRevDisplay),
+        revisionPageStart: skipRevision ? undefined : unitForDay.revisionPageStart,
+        revisionPageEnd: skipRevision ? undefined : unitForDay.revisionPageEnd,
         isHistorical: false,
         isLocked: false,
         status: 'pending',
@@ -354,6 +383,8 @@ export class QuranMemorizationPlanningEngine {
       autoMinorRevisionMode: autoMinorRevision,
       manualRevisionRange: params.manualRevisionRange,
       revisionDirection,
+      savingOffset,
+      revisionOffset,
       revisionSettings: {
         mode: params.revisionMode || 'pages',
         surahsPerDay: params.revisionUnitsPerWindow,
