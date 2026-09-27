@@ -695,6 +695,8 @@ export interface TenantModulesConfig {
   badgesAndRewards?: boolean; // منظومة الأوسمة والتحفيز الذكي
   whatsappNotifications?: boolean; // إشعارات وتقارير الواتساب
   parentPortal?: boolean; // البوابة الذكية لولي الأمر
+  meetings?: boolean; // إدارة الاجتماعات ومجالس الإدارة
+  seasonalPrograms?: boolean; // البرامج والأنشطة الموسمية
   spelling?: boolean; // alias for quranSpelling
   quran?: boolean; // alias for quranMemorization
   educational?: boolean; // alias for educationalValues
