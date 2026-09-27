@@ -279,6 +279,10 @@ import {
   DEMO_REGISTRATIONS,
   DEMO_NOMINATIONS,
   DEMO_BADGES,
+  DEMO_MEETINGS,
+  DEMO_PROGRAMS,
+  DEMO_ACTIVITIES,
+  DEMO_PARTICIPATIONS,
 } from '../data/demoFixtures';
 import { safeStorage } from '../lib/safeStorage';
 
@@ -2133,6 +2137,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAssociationNominations(DEMO_NOMINATIONS);
       setBadges(DEMO_BADGES);
       setUsers([demoUser, ...Object.values(DEMO_USERS)]);
+      setMeetings(DEMO_MEETINGS || []);
+      setSeasonalPrograms(DEMO_PROGRAMS || []);
+      setSeasonalActivities(DEMO_ACTIVITIES || []);
+      setSeasonalParticipations(DEMO_PARTICIPATIONS || []);
       setStaffAttendanceRecords([]);
 
       return true;

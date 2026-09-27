@@ -11,6 +11,11 @@ import {
   RegistrationRequest,
   AssociationNomination,
   StudentBadge,
+  StudentFinancialRecord,
+  Meeting,
+  SeasonalProgram,
+  SeasonalActivity,
+  SeasonalParticipation,
 } from '../types';
 
 export const DEMO_TENANT: MosqueComplexTenant = {
@@ -53,6 +58,8 @@ export const DEMO_TENANT: MosqueComplexTenant = {
     badgesAndRewards: true,
     whatsappNotifications: true,
     parentPortal: true,
+    meetings: true,
+    seasonalPrograms: true,
   },
 };
 
@@ -675,6 +682,27 @@ export const DEMO_SESSION_RECORDS: DailySessionRecord[] = [
     },
     createdAt: '2026-09-13T16:40:00Z',
   },
+  {
+    id: 'rec_demo_10_yesterday',
+    tenantId: 'al-furqan',
+    studentId: 'stu_demo_10',
+    teacherId: 'usr_demo_teacher_2',
+    halaqahId: 'hal_demo_2',
+    date: '2026-09-12',
+    weekNumber: 7,
+    attendance: 'present',
+    teacherRemarks: 'لم يتمكن من التسميع بالأمس لعدم الجاهزية',
+    memorization: {
+      surahFrom: 'النبأ',
+      ayahFrom: 1,
+      surahTo: 'النبأ',
+      ayahTo: 5,
+      score: 0,
+      unachieved: true,
+      notes: 'لم ينجز - يتطلب إعادة تسميع اليوم',
+    },
+    createdAt: '2026-09-12T16:00:00Z',
+  },
 ];
 
 export const DEMO_STAGES: EducationalStage[] = [
@@ -978,5 +1006,85 @@ export const DEMO_BADGES: StudentBadge[] = [
     awardedBy: 'النظام الآلي',
     notes: 'انضباط تام بدون أي غياب أو تأخر لمدة 12 يوماً متتالياً',
     isAutomatic: true,
+  },
+];
+
+export const DEMO_MEETINGS: Meeting[] = [
+  {
+    id: 'mtg_demo_1',
+    tenantId: 'al-furqan',
+    title: 'اجتماع مجلس إدارة المجمع - الفصل الأول',
+    description: 'مناقشة خطة التوسع واعتماد الميزانية التشغيلية',
+    date: '2026-09-15',
+    startTime: '19:00',
+    endTime: '21:00',
+    location: 'قاعة الاجتماعات الكبرى',
+    type: 'board',
+    status: 'scheduled',
+    agenda: [
+      'استعراض تقرير الأداء للفصل السابق',
+      'اعتماد خطة القبول والتسجيل الجديدة',
+      'مناقشة احتياجات المعلمين والتطوير المهني',
+    ],
+    attendees: [
+      { userId: 'usr_demo_admin', name: 'أ. محمد بن عبدالله القحطاني', role: 'campus_admin', status: 'confirmed' },
+      { userId: 'usr_demo_edu_sup', name: 'أ. إبراهيم بن صالح المنشاوي', role: 'supervisor', status: 'pending' },
+    ],
+    decisions: [],
+    recommendations: [],
+    postponedItems: [],
+    createdAt: '2026-09-01T10:00:00Z',
+    updatedAt: '2026-09-01T10:00:00Z',
+  },
+];
+
+export const DEMO_PROGRAMS: SeasonalProgram[] = [
+  {
+    id: 'prog_demo_summer',
+    tenantId: 'al-furqan',
+    title: 'نادي الفرقان الصيفي المبدع',
+    type: 'summer',
+    startDate: '2026-06-15',
+    endDate: '2026-07-30',
+    targetStageIds: ['ashbal', 'fityan'],
+    supervisorName: 'أ. سامي بن أحمد العمري',
+    status: 'active',
+    description: 'برنامج صيفي متميز يجمع بين المهارات الحياتية والنشاط الرياضي المكثف.',
+    goals: [
+      'تنمية مهارات القرن الحادي والعشرين',
+      'بناء الجسم السليم عبر الرياضات المتنوعة',
+      'تعزيز القيم الاجتماعية والعمل الجماعي',
+    ],
+    createdAt: '2026-05-01T10:00:00Z',
+  },
+];
+
+export const DEMO_ACTIVITIES: SeasonalActivity[] = [
+  {
+    id: 'act_demo_1',
+    programId: 'prog_demo_summer',
+    tenantId: 'al-furqan',
+    title: 'بطولة الفرقان لخماسيات كرة القدم',
+    category: 'sports',
+    date: '2026-09-20',
+    timeSlot: '04:00 م - 06:00 م',
+    location: 'الملعب الخارجي',
+    status: 'planned',
+    createdAt: '2026-09-01T10:00:00Z',
+  },
+];
+
+export const DEMO_PARTICIPATIONS: SeasonalParticipation[] = [
+  {
+    id: 'part_demo_1',
+    tenantId: 'al-furqan',
+    programId: 'prog_demo_summer',
+    activityId: 'act_demo_1',
+    studentId: 'stu_demo_1',
+    studentName: 'ريان بن عبدالرحمن الغامدي',
+    attendanceStatus: 'present',
+    participationLevel: 'excellent',
+    seasonalPointsEarned: 15,
+    recordedAt: '2026-09-20',
   },
 ];

@@ -314,7 +314,7 @@ export const PlatformLandingPage: React.FC<PlatformLandingPageProps> = ({
               <div className="text-xs text-slate-600 font-bold mt-1">بوابات متخصصة مستقلة للأدوار</div>
             </div>
             <div className="p-4 bg-white/80 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <div className="text-2xl font-black text-emerald-800 font-mono">16+</div>
+              <div className="text-2xl font-black text-emerald-800 font-mono">18+</div>
               <div className="text-xs text-slate-600 font-bold mt-1">وحدة تشغيلية قابلة للتهيئة</div>
             </div>
           </div>
@@ -430,7 +430,7 @@ export const PlatformLandingPage: React.FC<PlatformLandingPageProps> = ({
               </div>
               <h3 className="font-bold text-base text-white mb-2">إعادة الحساب التلقائي</h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                عند غياب الطالب أو تعثره، يقوم المحرك تلقائياً بإعادة توزيع الأوراد المتبقية على الأيام القادمة دون الإخلال بموعد الختم.
+                عند غياب الطالب أو تعثره، يقوم المحرك تلقائياً بإعادة توزيع الأوراد المتبقية على الأيام القادمة دون تراكم يمنع الإنجاز النوعي.
               </p>
             </div>
 
@@ -498,8 +498,10 @@ export const PlatformLandingPage: React.FC<PlatformLandingPageProps> = ({
               { icon: Send, title: 'التقارير وإرسال الواتساب', desc: 'توليد فوري للتقارير الفردية والجماعية والإرسال عبر واتساب.' },
               { icon: TrendingUp, title: 'رادار التدخل المبكر', desc: 'كشف الطلاب المعرضين للتأخر ووضع خطط علاجية فورية.' },
               { icon: Building2, title: 'إدارة المجمعات المتعددة', desc: 'بنية SaaS حقيقية تعزل كل مجمع ببياناته وإعداداته.' },
+              { icon: MessageCircle, title: 'الاجتماعات واللقاءات الإدارية', desc: 'توثيق محاضر الاجتماعات والقرارات والتعاميم وتتبع التنفيذ.' },
+              { icon: Zap, title: 'البرامج والأنشطة الموسمية', desc: 'إدارة المراكز الصيفية والرمضانية والرحلات بمسارات مستقلة.' },
               { icon: Sliders, title: 'تهيئة الوحدات المخصصة', desc: 'تفعيل وتعطيل أي ميزة برمجية حسب احتياج ورغبة كل مجمع.' },
-              { icon: Database, title: 'السحابة والأمان العالي', desc: 'حفظ آمن ومستمر في Firestore مع دعم العمل أوفلاين (PWA).' },
+              { icon: Database, title: 'السحابة ودعم العمل أوفلاين', desc: 'حفظ آمن ومستمر في Firestore مع دعم كامل للعمل أوفلاين (PWA).' },
             ].map((mod, i) => (
               <div
                 key={i}
