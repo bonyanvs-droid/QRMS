@@ -57,6 +57,42 @@ tenantRouter.get('/:idOrSlug/stats', async (req, res, next) => {
 });
 
 /**
+ * GET /api/tenants/:idOrSlug/logo
+ * Serves the tenant's logo as a real image response (decodes stored data URIs),
+ * so it can be referenced from PWA manifests which do not accept data: URIs.
+ */
+tenantRouter.get('/:idOrSlug/logo', async (req, res, next) => {
+  try {
+    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
+    const logoUrl = tenant?.logoUrl;
+    if (!logoUrl) {
+      res.status(404).json({ ok: false, error: 'Tenant logo not found' });
+      return;
+    }
+    // data:image/<type>;base64,<payload> → decode and stream
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl);
+    if (match) {
+      const buffer = Buffer.from(match[2], 'base64');
+      res.set({
+        'Content-Type': match[1],
+        'Content-Length': String(buffer.length),
+        'Cache-Control': 'public, max-age=86400',
+      });
+      res.send(buffer);
+      return;
+    }
+    // HTTP/absolute or site-relative path → redirect
+    if (/^https?:\/\//.test(logoUrl) || logoUrl.startsWith('/')) {
+      res.redirect(logoUrl);
+      return;
+    }
+    res.status(404).json({ ok: false, error: 'Unsupported logo format' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/tenants/:idOrSlug
  * Returns specific tenant details by ID or Slug.
  */

@@ -67,9 +67,17 @@ export function usePwaBranding(
 
     const origin = window.location.origin;
     const rawLogo = activeTenant.logoUrl || logoUrl;
-    // Exclude data/blob URIs and ensure baraem logo is never used as tenant/app icon
+    // Ensure baraem logo is never used as tenant/app icon
     const isBaraemLogo = Boolean(rawLogo && (rawLogo.includes('baraem') || rawLogo.includes('76101')));
-    const tenantLogo = rawLogo && !/^(data|blob):/i.test(rawLogo) && !isBaraemLogo ? rawLogo : null;
+    // data:/blob: URIs are not valid manifest icon sources — route through the logo endpoint
+    // which streams the decoded image from the server so every tenant gets its own icon
+    const tenantIdOrSlug = activeTenant.slug || activeTenant.id || '';
+    const tenantLogo =
+      rawLogo && !isBaraemLogo && tenantIdOrSlug
+        ? /^(https?:)?\/\//.test(rawLogo) || rawLogo.startsWith('/')
+          ? rawLogo
+          : `${origin}/api/tenants/${tenantIdOrSlug}/logo`
+        : null;
     const isSvgLogo = Boolean(tenantLogo && iconMime(tenantLogo) === 'image/svg+xml');
 
     // Build icons array:

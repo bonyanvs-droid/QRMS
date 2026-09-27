@@ -2647,6 +2647,34 @@ tenantRouter.get("/:idOrSlug/stats", async (req, res, next) => {
     next(err);
   }
 });
+tenantRouter.get("/:idOrSlug/logo", async (req, res, next) => {
+  try {
+    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
+    const logoUrl = tenant?.logoUrl;
+    if (!logoUrl) {
+      res.status(404).json({ ok: false, error: "Tenant logo not found" });
+      return;
+    }
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl);
+    if (match) {
+      const buffer = Buffer.from(match[2], "base64");
+      res.set({
+        "Content-Type": match[1],
+        "Content-Length": String(buffer.length),
+        "Cache-Control": "public, max-age=86400"
+      });
+      res.send(buffer);
+      return;
+    }
+    if (/^https?:\/\//.test(logoUrl) || logoUrl.startsWith("/")) {
+      res.redirect(logoUrl);
+      return;
+    }
+    res.status(404).json({ ok: false, error: "Unsupported logo format" });
+  } catch (err) {
+    next(err);
+  }
+});
 tenantRouter.get("/:idOrSlug", async (req, res, next) => {
   try {
     const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
