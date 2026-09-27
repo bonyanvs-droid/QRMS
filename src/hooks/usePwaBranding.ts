@@ -65,80 +65,35 @@ export function usePwaBranding(
       return;
     }
 
-    const origin = window.location.origin;
-    const rawLogo = activeTenant.logoUrl || logoUrl;
-    // Ensure baraem logo is never used as tenant/app icon
-    const isBaraemLogo = Boolean(rawLogo && (rawLogo.includes('baraem') || rawLogo.includes('76101')));
-    // data:/blob: URIs are not valid manifest icon sources — route through the logo endpoint
-    // which streams the decoded image from the server so every tenant gets its own icon
-    const tenantIdOrSlug = activeTenant.slug || activeTenant.id || '';
-    const tenantLogo =
-      rawLogo && !isBaraemLogo && tenantIdOrSlug
-        ? /^(https?:)?\/\//.test(rawLogo) || rawLogo.startsWith('/')
-          ? rawLogo
-          : `${origin}/api/tenants/${tenantIdOrSlug}/logo`
-        : null;
-    const isSvgLogo = Boolean(tenantLogo && iconMime(tenantLogo) === 'image/svg+xml');
+    const tenantSlug = activeTenant.slug || activeTenant.id || 'ghazawi';
+    const serverManifestUrl = `${origin}/api/tenants/${tenantSlug}/manifest.webmanifest`;
 
-    // Build icons array:
-    // Chromium specifically checks for 192x192 and 512x512 PNGs with purpose: "any" and "maskable"
-    // Using official Mosque Emblem PNGs guarantees the PWA installs with the Mosque logo
-    const icons: { src: string; sizes: string; type: string; purpose?: string }[] = [
-      { src: origin + DEFAULT_ICON_192, sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: origin + DEFAULT_ICON_192, sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: origin + DEFAULT_ICON_512, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ];
-
-    if (tenantLogo && tenantLogo !== DEFAULT_ICON_192 && tenantLogo !== DEFAULT_ICON_512) {
-      const isLogoEndpoint = tenantLogo.includes('/api/tenants/');
-      const absLogo = /^https?:\/\//.test(tenantLogo)
-        ? tenantLogo
-        : origin + (tenantLogo.startsWith('/') ? tenantLogo : '/' + tenantLogo);
-      // The logo endpoint normalizes to an exact square PNG — request matching sizes
-      // so Chrome accepts the icons instead of falling back to the defaults
-      const icon512 = isLogoEndpoint ? `${absLogo}?size=512` : absLogo;
-      const icon192 = isLogoEndpoint ? `${absLogo}?size=192` : absLogo;
-      icons.unshift(
-        { src: icon512, sizes: isSvgLogo ? 'any' : '512x512', type: isLogoEndpoint ? 'image/png' : iconMime(tenantLogo), purpose: 'any' },
-        { src: icon192, sizes: isSvgLogo ? 'any' : '192x192', type: isLogoEndpoint ? 'image/png' : iconMime(tenantLogo), purpose: 'any' }
-      );
+    // 1. Swap Web App Manifest link to the tenant's dynamic endpoint
+    if (manifestLink) {
+      manifestLink.href = serverManifestUrl;
+    }
+    if (manifestBlobUrl) {
+      URL.revokeObjectURL(manifestBlobUrl);
+      manifestBlobUrl = null;
     }
 
-    const tenantSlug = activeTenant.slug || activeTenant.id || 'ghazawi';
-    const startUrl = `${origin}/#/t/${tenantSlug}`;
-
-    const manifest = {
-      // Per-tenant app id → separate installable PWA per tenant (Chrome 96+)
-      id: `qrms-${activeTenant.id || 'ghazzawi'}`,
-      name: activeTenant.name || 'مجمع الغزاوي القرآني',
-      short_name: shortNameOf(activeTenant.name || 'مجمع الغزاوي'),
-      description: `${activeTenant.name || 'مجمع الغزاوي القرآني'} — منصة إدارة الحلقات القرآنية والمخرجات التعليمية`,
-      theme_color: DEFAULT_THEME,
-      background_color: '#f8fafc',
-      display: 'standalone',
-      orientation: 'portrait',
-      start_url: startUrl,
-      scope: `${origin}/`,
-      lang: 'ar',
-      dir: 'rtl',
-      icons,
-    };
-
-    // Swap manifest to tenant-branded Blob manifest
-    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-    const url = URL.createObjectURL(blob);
-    if (manifestLink) manifestLink.href = url;
-    if (manifestBlobUrl && manifestBlobUrl !== url) URL.revokeObjectURL(manifestBlobUrl);
-    manifestBlobUrl = url;
-
-    // Theme color + favicon + apple-touch-icon (raster only for apple)
+    // 2. Set theme color
     if (themeMeta) themeMeta.content = DEFAULT_THEME;
-    setLink('icon', origin + DEFAULT_ICON_192, 'image/png');
-    setLink('apple-touch-icon', origin + DEFAULT_APPLE_TOUCH);
+
+    // 3. Set tenant-specific favicon and apple-touch-icon
+    const tenantFavicon = `${origin}/api/tenants/${tenantSlug}/logo?size=192`;
+    const tenantAppleIcon = `${origin}/api/tenants/${tenantSlug}/logo?size=192&apple=1`;
+    setLink('icon', tenantFavicon, 'image/png');
+    setLink('apple-touch-icon', tenantAppleIcon);
+
+    // 4. Update Apple PWA title
+    const appTitleMeta = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]');
+    if (appTitleMeta) {
+      appTitleMeta.content = shortNameOf(activeTenant.name || 'المجمع');
+    }
 
     return () => {
-      // Don't revoke here — manifest link still references it; revoke on next swap
+      // Cleanup if needed
     };
   }, [activeTenant, logoUrl]);
 }

@@ -23,7 +23,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_express10 = __toESM(require("express"), 1);
-var import_path3 = __toESM(require("path"), 1);
+var import_path4 = __toESM(require("path"), 1);
 
 // server/app.ts
 var import_express9 = __toESM(require("express"), 1);
@@ -965,7 +965,7 @@ function createRemoteForwarder() {
       console.log(`[Forwarder] Skipping - Not in remote-proxy mode`);
       return next();
     }
-    if (req.originalUrl.includes("/api/auth/login") || req.originalUrl.includes("/api/auth/me") || req.originalUrl.includes("/api/auth/update-password") || req.originalUrl.includes("/api/tenants") && req.originalUrl.includes("/stats")) {
+    if (req.originalUrl.includes("/api/auth/login") || req.originalUrl.includes("/api/auth/me") || req.originalUrl.includes("/api/auth/update-password") || req.originalUrl.includes("/api/tenants") && (req.originalUrl.includes("/stats") || req.originalUrl.includes("/logo") || req.originalUrl.includes("/manifest.webmanifest"))) {
       console.log(`[FORWARDER-BYPASS] Bypassing proxy for: ${req.originalUrl}`);
       return next();
     }
@@ -1106,6 +1106,9 @@ healthRouter.get("/", async (req, res, next) => {
 
 // server/routes/tenantRoutes.ts
 var import_express3 = require("express");
+var import_sharp = __toESM(require("sharp"), 1);
+var import_path = __toESM(require("path"), 1);
+var import_fs = __toESM(require("fs"), 1);
 
 // server/services/entityService.ts
 var JSONB_PAYLOAD_COLUMNS = {
@@ -2651,26 +2654,122 @@ tenantRouter.get("/:idOrSlug/logo", async (req, res, next) => {
   try {
     const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
     const logoUrl = tenant?.logoUrl;
-    if (!logoUrl) {
-      res.status(404).json({ ok: false, error: "Tenant logo not found" });
-      return;
-    }
-    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl);
+    const size = Math.min(1024, Math.max(16, parseInt(String(req.query.size || "512"), 10) || 512));
+    const isMaskable = req.query.maskable === "1" || req.query.maskable === "true";
+    const isApple = req.query.apple === "1" || req.query.apple === "true";
+    const match = logoUrl ? /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl) : null;
     if (match) {
       const buffer = Buffer.from(match[2], "base64");
+      let png;
+      if (isMaskable) {
+        const innerSize = Math.round(size * 0.75);
+        const inner = await (0, import_sharp.default)(buffer).resize(innerSize, innerSize, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+        png = await (0, import_sharp.default)({
+          create: {
+            width: size,
+            height: size,
+            channels: 4,
+            background: { r: 255, g: 255, b: 255, alpha: 1 }
+          }
+        }).composite([{ input: inner, gravity: "center" }]).png().toBuffer();
+      } else if (isApple) {
+        const innerSize = Math.round(size * 0.85);
+        const inner = await (0, import_sharp.default)(buffer).resize(innerSize, innerSize, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+        png = await (0, import_sharp.default)({
+          create: {
+            width: size,
+            height: size,
+            channels: 4,
+            background: { r: 255, g: 255, b: 255, alpha: 1 }
+          }
+        }).composite([{ input: inner, gravity: "center" }]).png().toBuffer();
+      } else {
+        png = await (0, import_sharp.default)(buffer).resize(size, size, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+      }
       res.set({
-        "Content-Type": match[1],
-        "Content-Length": String(buffer.length),
+        "Content-Type": "image/png",
+        "Content-Length": String(png.length),
         "Cache-Control": "public, max-age=86400"
       });
-      res.send(buffer);
+      res.send(png);
       return;
     }
-    if (/^https?:\/\//.test(logoUrl) || logoUrl.startsWith("/")) {
+    if (logoUrl && (/^https?:\/\//.test(logoUrl) || logoUrl.startsWith("/"))) {
       res.redirect(logoUrl);
       return;
     }
-    res.status(404).json({ ok: false, error: "Unsupported logo format" });
+    const defaultIconPath = import_path.default.join(process.cwd(), "public", "pwa-512x512.png");
+    if (import_fs.default.existsSync(defaultIconPath)) {
+      const fallbackBuf = await (0, import_sharp.default)(defaultIconPath).resize(size, size, { fit: "contain" }).png().toBuffer();
+      res.set({
+        "Content-Type": "image/png",
+        "Content-Length": String(fallbackBuf.length),
+        "Cache-Control": "public, max-age=86400"
+      });
+      res.send(fallbackBuf);
+      return;
+    }
+    res.status(404).json({ ok: false, error: "Tenant logo not found" });
+  } catch (err) {
+    next(err);
+  }
+});
+tenantRouter.get("/:idOrSlug/manifest.webmanifest", async (req, res, next) => {
+  try {
+    const tenant = await getTenantByIdOrSlug(req.params.idOrSlug);
+    if (!tenant) {
+      res.status(404).json({ ok: false, error: "Tenant not found" });
+      return;
+    }
+    const tenantSlug = tenant.slug || tenant.id || "ghazawi";
+    const name = tenant.name || "\u0645\u062C\u0645\u0639 \u0627\u0644\u063A\u0632\u0627\u0648\u064A \u0627\u0644\u0642\u0631\u0622\u0646\u064A";
+    const words = name.trim().split(/\s+/);
+    const shortName = words.slice(0, 3).join(" ").slice(0, 15) || name.slice(0, 15);
+    const manifest = {
+      id: `/t/${tenantSlug}`,
+      name,
+      short_name: shortName,
+      description: `${name} \u2014 \u0645\u0646\u0635\u0629 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u062D\u0644\u0642\u0627\u062A \u0627\u0644\u0642\u0631\u0622\u0646\u064A\u0629 \u0648\u0627\u0644\u0645\u062E\u0631\u062C\u0627\u062A \u0627\u0644\u062A\u0639\u0644\u064A\u0645\u064A\u0629 \u0648\u0627\u0644\u062A\u0631\u0628\u0648\u064A\u0629`,
+      theme_color: "#065f46",
+      background_color: "#f8fafc",
+      display: "standalone",
+      orientation: "portrait",
+      start_url: `/#/t/${tenantSlug}`,
+      scope: "/",
+      lang: "ar",
+      dir: "rtl",
+      icons: [
+        {
+          src: `/api/tenants/${tenantSlug}/logo?size=192`,
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any"
+        },
+        {
+          src: `/api/tenants/${tenantSlug}/logo?size=192&maskable=1`,
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "maskable"
+        },
+        {
+          src: `/api/tenants/${tenantSlug}/logo?size=512`,
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any"
+        },
+        {
+          src: `/api/tenants/${tenantSlug}/logo?size=512&maskable=1`,
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "maskable"
+        }
+      ]
+    };
+    res.set({
+      "Content-Type": "application/manifest+json; charset=utf-8",
+      "Cache-Control": "public, max-age=3600"
+    });
+    res.json(manifest);
   } catch (err) {
     next(err);
   }
@@ -7889,13 +7988,13 @@ backupRestoreRouter.post("/execute", requireAdminRole, async (req, res) => {
 
 // server/routes/databaseBackupRoutes.ts
 var import_express8 = require("express");
-var import_fs2 = __toESM(require("fs"), 1);
-var import_path2 = __toESM(require("path"), 1);
+var import_fs3 = __toESM(require("fs"), 1);
+var import_path3 = __toESM(require("path"), 1);
 
 // server/services/databaseBackupService.ts
 var import_child_process = require("child_process");
-var import_fs = __toESM(require("fs"), 1);
-var import_path = __toESM(require("path"), 1);
+var import_fs2 = __toESM(require("fs"), 1);
+var import_path2 = __toESM(require("path"), 1);
 var BACKUP_DIR = "/home/schoolscreen.sa/backups/qrms";
 var BACKUP_FILENAME_PREFIX = "qrms_production";
 function parseDatabaseUrl(url) {
@@ -7945,18 +8044,18 @@ async function createPostgresBackup(databaseUrl) {
     return { ok: false, error: "\u062A\u0643\u0648\u064A\u0646 \u0627\u062A\u0635\u0627\u0644 \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645." };
   }
   try {
-    if (!import_fs.default.existsSync(BACKUP_DIR)) {
-      import_fs.default.mkdirSync(BACKUP_DIR, { recursive: true, mode: 448 });
+    if (!import_fs2.default.existsSync(BACKUP_DIR)) {
+      import_fs2.default.mkdirSync(BACKUP_DIR, { recursive: true, mode: 448 });
     }
   } catch (err) {
     return { ok: false, error: `\u062A\u0639\u0630\u0651\u0631 \u062A\u0647\u064A\u0626\u0629 \u0645\u062C\u0644\u062F \u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A: ${err?.message || err}` };
   }
   let filename = generateBackupFilename();
-  let filePath = import_path.default.join(BACKUP_DIR, filename);
+  let filePath = import_path2.default.join(BACKUP_DIR, filename);
   let suffix = 1;
-  while (import_fs.default.existsSync(filePath)) {
+  while (import_fs2.default.existsSync(filePath)) {
     filename = `${generateBackupFilename()}_${suffix}`;
-    filePath = import_path.default.join(BACKUP_DIR, filename);
+    filePath = import_path2.default.join(BACKUP_DIR, filename);
     suffix++;
   }
   const env = { ...process.env };
@@ -7977,20 +8076,20 @@ async function createPostgresBackup(databaseUrl) {
     parsed.database
   ];
   const dumpResult = await runCommand("pg_dump", dumpArgs, env);
-  if (dumpResult.code !== 0 || !import_fs.default.existsSync(filePath)) {
+  if (dumpResult.code !== 0 || !import_fs2.default.existsSync(filePath)) {
     try {
-      if (import_fs.default.existsSync(filePath)) {
-        import_fs.default.unlinkSync(filePath);
+      if (import_fs2.default.existsSync(filePath)) {
+        import_fs2.default.unlinkSync(filePath);
       }
     } catch {
     }
     const diagnostic = (dumpResult.stderr || "unknown pg_dump failure").trim().slice(0, 400);
     return { ok: false, error: `\u0641\u0634\u0644 pg_dump (\u0631\u0645\u0632 \u0627\u0644\u062E\u0631\u0648\u062C: ${dumpResult.code}): ${diagnostic}` };
   }
-  const stat = import_fs.default.statSync(filePath);
+  const stat = import_fs2.default.statSync(filePath);
   if (stat.size <= 0) {
     try {
-      import_fs.default.unlinkSync(filePath);
+      import_fs2.default.unlinkSync(filePath);
     } catch {
     }
     return { ok: false, error: "\u0641\u0634\u0644 pg_dump: \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0646\u0627\u062A\u062C \u0641\u0627\u0631\u063A." };
@@ -7998,7 +8097,7 @@ async function createPostgresBackup(databaseUrl) {
   const restoreCheck = await runCommand("pg_restore", ["--list", filePath], env);
   const verified = restoreCheck.code === 0;
   try {
-    import_fs.default.chmodSync(filePath, 384);
+    import_fs2.default.chmodSync(filePath, 384);
   } catch {
   }
   return {
@@ -8013,13 +8112,13 @@ async function createPostgresBackup(databaseUrl) {
 }
 function listBackups() {
   try {
-    if (!import_fs.default.existsSync(BACKUP_DIR)) {
+    if (!import_fs2.default.existsSync(BACKUP_DIR)) {
       return [];
     }
-    return import_fs.default.readdirSync(BACKUP_DIR).filter((name) => name.startsWith(BACKUP_FILENAME_PREFIX) && name.endsWith(".dump")).map((name) => {
-      const filePath = import_path.default.join(BACKUP_DIR, name);
+    return import_fs2.default.readdirSync(BACKUP_DIR).filter((name) => name.startsWith(BACKUP_FILENAME_PREFIX) && name.endsWith(".dump")).map((name) => {
+      const filePath = import_path2.default.join(BACKUP_DIR, name);
       try {
-        const stat = import_fs.default.statSync(filePath);
+        const stat = import_fs2.default.statSync(filePath);
         return {
           filename: name,
           sizeBytes: stat.size,
@@ -8098,17 +8197,17 @@ databaseBackupRouter.get("/database/history", requireAdminRole2, (req, res) => {
   }
 });
 databaseBackupRouter.get("/database/download/:filename", requireAdminRole2, (req, res) => {
-  const filename = import_path2.default.basename(String(req.params.filename || ""));
+  const filename = import_path3.default.basename(String(req.params.filename || ""));
   if (!isValidBackupFilename(filename)) {
     return res.status(400).json({ success: false, error: "\u0627\u0633\u0645 \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D." });
   }
-  const filePath = import_path2.default.join(BACKUP_DIR, filename);
-  if (!filePath.startsWith(BACKUP_DIR) || !import_fs2.default.existsSync(filePath)) {
+  const filePath = import_path3.default.join(BACKUP_DIR, filename);
+  if (!filePath.startsWith(BACKUP_DIR) || !import_fs3.default.existsSync(filePath)) {
     return res.status(404).json({ success: false, error: "\u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629." });
   }
   res.setHeader("Content-Type", "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  import_fs2.default.createReadStream(filePath).pipe(res);
+  import_fs3.default.createReadStream(filePath).pipe(res);
 });
 
 // server/app.ts
@@ -8154,13 +8253,13 @@ function createApp() {
 async function startServer() {
   const app = createApp();
   const PORT = config.port || 3e3;
-  const distPath = import_path3.default.join(process.cwd(), "dist");
+  const distPath = import_path4.default.join(process.cwd(), "dist");
   app.use(import_express10.default.static(distPath));
   app.get("*all", (req, res, next) => {
     if (req.path.startsWith("/api")) {
       return next();
     }
-    res.sendFile(import_path3.default.join(distPath, "index.html"));
+    res.sendFile(import_path4.default.join(distPath, "index.html"));
   });
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[QRMS Server] Running on http://0.0.0.0:${PORT} (Production Static Mode)`);

@@ -261,7 +261,9 @@ const MainLayout: React.FC = () => {
     document.title = baseTitle;
 
     // Update favicon: use tenant custom logo if available, or fall back to Quran icon
-    const faviconUrl = !isPlatformView && activeTenant?.logoUrl ? activeTenant.logoUrl : '/quran-favicon.svg';
+    const faviconUrl = !isPlatformView && activeTenant
+      ? `/api/tenants/${activeTenant.slug || activeTenant.id}/logo?size=192`
+      : '/quran-favicon.svg';
     let iconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
     if (!iconLink) {
       iconLink = document.createElement('link');

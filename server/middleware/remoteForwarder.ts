@@ -164,13 +164,17 @@ export function createRemoteForwarder() {
       return next();
     }
 
-    // Fix Root Cause: Skip proxying for auth and tenant stats routes to allow local handling.
-    // This allows local authRouter and tenantRouter to compute and return live stats.
+    // Fix Root Cause: Skip proxying for auth and tenant local routes (stats, logo, manifest) to allow local handling.
+    // This allows local authRouter and tenantRouter to serve branding, icons, and compute live stats.
     if (
       req.originalUrl.includes('/api/auth/login') || 
       req.originalUrl.includes('/api/auth/me') || 
       req.originalUrl.includes('/api/auth/update-password') ||
-      (req.originalUrl.includes('/api/tenants') && req.originalUrl.includes('/stats'))
+      (req.originalUrl.includes('/api/tenants') && (
+        req.originalUrl.includes('/stats') ||
+        req.originalUrl.includes('/logo') ||
+        req.originalUrl.includes('/manifest.webmanifest')
+      ))
     ) {
       console.log(`[FORWARDER-BYPASS] Bypassing proxy for: ${req.originalUrl}`);
       return next();
