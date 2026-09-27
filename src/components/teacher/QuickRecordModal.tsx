@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -70,13 +70,24 @@ const STAR_LEVELS = [
   { stars: 1, score: 20, label: 'غير متقن / إعادة التسميع', desc: 'لم يستحضر الآيات والمطلوب حفظه', color: 'text-rose-600', bg: 'bg-rose-50 border-rose-200' },
 ];
 
-/** 5-Star interactive rating component — 1-click fast recording for halaqah teachers */
+/** 5-Star interactive rating component with unachieved toggle and debt guard */
 const FiveStarRating: React.FC<{
   value: number; // 0-100 percentage (20, 40, 60, 80, 100)
   onChange: (v: number) => void;
   label: string;
   theme?: 'blue' | 'amber';
-}> = ({ value, onChange, label, theme = 'blue' }) => {
+  isUnachieved?: boolean;
+  onToggleUnachieved?: () => void;
+  hasPendingDebt?: boolean;
+}> = ({
+  value,
+  onChange,
+  label,
+  theme = 'blue',
+  isUnachieved = false,
+  onToggleUnachieved,
+  hasPendingDebt = false,
+}) => {
   // Map percentage to stars (1-5): exactly 20% per star
   const currentStars = useMemo(() => {
     if (value >= 90) return 5;
@@ -90,47 +101,101 @@ const FiveStarRating: React.FC<{
 
   return (
     <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
         <span className="text-xs font-bold text-slate-800">{label}</span>
-        <span className="text-xs font-black text-slate-700 font-mono bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-          {value}%
-        </span>
-      </div>
 
-      <div className="flex items-center justify-between gap-1 py-1">
-        {[1, 2, 3, 4, 5].map((s) => {
-          const isSelected = s <= currentStars;
-          const levelInfo = STAR_LEVELS.find((l) => l.stars === s);
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onChange(levelInfo?.score || 90)}
-              className="flex-1 flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-slate-50 transition-all cursor-pointer group"
-              title={`${levelInfo?.stars} نجوم: ${levelInfo?.label}`}
+        <div className="flex items-center gap-2">
+          {hasPendingDebt ? (
+            <span
+              className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs"
+              title="الطالب لديه واجب غير منجز من الجلسة السابقة — يلزم إثباته اليوم ولا يمكن تأجيله ليومين"
             >
-              <Star
-                className={`w-6 h-6 transition-transform group-hover:scale-110 ${
-                  isSelected
-                    ? theme === 'blue'
-                      ? 'fill-amber-400 text-amber-500'
-                      : 'fill-amber-400 text-amber-500'
-                    : 'text-slate-300 fill-slate-100'
-                }`}
-              />
-              <span className="text-[10px] text-slate-400 mt-1 font-mono font-bold group-hover:text-slate-700">
-                {s}
-              </span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+              <span>واجب متراكم — يلزم الإنجاز اليوم</span>
+            </span>
+          ) : onToggleUnachieved ? (
+            <button
+              type="button"
+              onClick={onToggleUnachieved}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                isUnachieved
+                  ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+              }`}
+              title={isUnachieved ? 'إلغاء وسم عدم الإنجاز وتفعيل التقييم' : 'وسم هذا المسار كغير منجز لهذا اليوم'}
+            >
+              {isUnachieved ? (
+                <>
+                  <X className="w-3.5 h-3.5" />
+                  <span>تم الوسم: لم يُنجز</span>
+                </>
+              ) : (
+                <span>لم يُنجز اليوم ✕</span>
+              )}
             </button>
-          );
-        })}
+          ) : null}
+
+          {!isUnachieved && (
+            <span className="text-xs font-black text-slate-700 font-mono bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+              {value}%
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Dynamic pedagogical description badge */}
-      <div className={`mt-2 px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between ${activeLevel.bg}`}>
-        <span className={`font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
-        <span className="text-[11px] text-slate-500">{activeLevel.desc}</span>
-      </div>
+      {isUnachieved ? (
+        <div className="p-3 bg-rose-50/90 border border-rose-200 rounded-lg text-center my-1.5 animate-fadeIn">
+          <p className="text-xs font-bold text-rose-800">
+            تم استثناء هذا المسار لجلسة اليوم (لن تُسجل له درجات، وسيبقى واجباً متراكماً للجلسة القادمة).
+          </p>
+          {onToggleUnachieved && (
+            <button
+              type="button"
+              onClick={onToggleUnachieved}
+              className="mt-1.5 text-[11px] text-rose-700 underline font-semibold cursor-pointer hover:text-rose-900"
+            >
+              تراجع وتفعيل التقييم بالنجوم
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-1 py-1">
+            {[1, 2, 3, 4, 5].map((s) => {
+              const isSelected = s <= currentStars;
+              const levelInfo = STAR_LEVELS.find((l) => l.stars === s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onChange(levelInfo?.score || 90)}
+                  className="flex-1 flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-slate-50 transition-all cursor-pointer group"
+                  title={`${levelInfo?.stars} نجوم: ${levelInfo?.label}`}
+                >
+                  <Star
+                    className={`w-6 h-6 transition-transform group-hover:scale-110 ${
+                      isSelected
+                        ? theme === 'blue'
+                          ? 'fill-amber-400 text-amber-500'
+                          : 'fill-amber-400 text-amber-500'
+                        : 'text-slate-300 fill-slate-100'
+                    }`}
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 font-mono font-bold group-hover:text-slate-700">
+                    {s}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Dynamic pedagogical description badge */}
+          <div className={`mt-2 px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between ${activeLevel.bg}`}>
+            <span className={`font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
+            <span className="text-[11px] text-slate-500">{activeLevel.desc}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -249,6 +314,48 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [generalNotes, setGeneralNotes] = useState('');
   const [isSaved, setIsSaved] = useState(false);
 
+  // ── Track debt detection from student's historical sessions ──
+  const studentPreviousSessions = useMemo(() => {
+    return (sessionRecords || [])
+      .filter((r) => r.studentId === student.id && r.date <= todayIso)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [sessionRecords, student.id, todayIso]);
+
+  const lastMemRecord = useMemo(() => {
+    return studentPreviousSessions.find((r) => r.memorization !== undefined);
+  }, [studentPreviousSessions]);
+
+  const lastRevRecord = useMemo(() => {
+    return studentPreviousSessions.find((r) => r.revision !== undefined);
+  }, [studentPreviousSessions]);
+
+  const lastSpellingRecord = useMemo(() => {
+    return studentPreviousSessions.find((r) => r.spelling !== undefined);
+  }, [studentPreviousSessions]);
+
+  // Has pending debt if the last recorded session had the track explicitly unachieved
+  const memHasPendingDebt = useMemo(() => {
+    return Boolean(lastMemRecord?.memorization?.unachieved);
+  }, [lastMemRecord]);
+
+  const revHasPendingDebt = useMemo(() => {
+    return Boolean(lastRevRecord?.revision?.unachieved);
+  }, [lastRevRecord]);
+
+  const spellingHasPendingDebt = useMemo(() => {
+    return Boolean(lastSpellingRecord?.spelling?.unachieved);
+  }, [lastSpellingRecord]);
+
+  // Teacher selections for unachieved tracks today
+  const [unachievedTracks, setUnachievedTracks] = useState<Record<string, boolean>>({});
+
+  const toggleTrackUnachieved = (trackKey: string) => {
+    setUnachievedTracks((prev) => ({
+      ...prev,
+      [trackKey]: !prev[trackKey],
+    }));
+  };
+
   // ── Wizard: tracks required TODAY, driven by the student's plan + halaqah enabled tracks ──
   const studentHalaqah =
     halaqahs.find((h) => h.id === student.halaqahId) ||
@@ -259,7 +366,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
   const steps = useMemo<SessionTrack[]>(() => {
     const list: SessionTrack[] = [];
-    if (isSpellingTrackEnabled) list.push('spelling');
+    if (isSpellingTrackEnabled || spellingHasPendingDebt) list.push('spelling');
     if (!isQuranTrackEnabled) {
       for (const tid of enabledTrackIds) {
         if (!NON_SESSION_TRACK_IDS.includes(tid) && !list.includes(tid)) list.push(tid);
@@ -268,11 +375,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     }
     if (todayDailyItem) {
       const dt = todayDailyItem.dayType;
-      if (!dt || dt === 'memorization' || dt === 'consolidation') list.push('memorization');
+      if (!dt || dt === 'memorization' || dt === 'consolidation' || memHasPendingDebt) list.push('memorization');
       if (
         dt === 'revision' ||
         dt === 'general_revision' ||
-        (todayDailyItem.revisionPagesAmount ?? 0) > 0
+        (todayDailyItem.revisionPagesAmount ?? 0) > 0 ||
+        revHasPendingDebt
       )
         list.push('revision');
     } else {
@@ -285,7 +393,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled]);
+  }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled, memHasPendingDebt, revHasPendingDebt, spellingHasPendingDebt]);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -337,7 +445,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const handleSave = async (andSendReport = false) => {
     const todayStr = new Date().toISOString().split('T')[0];
 
+    const isSpellingUnachieved = Boolean(unachievedTracks['spelling']);
+    const isMemUnachieved = Boolean(unachievedTracks['memorization']);
+    const isRevUnachieved = Boolean(unachievedTracks['revision']);
+
     const recordData: Omit<DailySessionRecord, 'id' | 'createdAt'> = {
+      tenantId: student.tenantId,
       studentId: student.id,
       teacherId: student.teacherId,
       halaqahId: student.halaqahId,
@@ -347,11 +460,13 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       customTracks: (() => {
         const ids = steps.filter((t) => !BUILTIN_STEP_IDS.includes(t));
         if (ids.length === 0) return undefined;
-        const out: Record<string, { score: number; notes?: string }> = {};
+        const out: Record<string, { score: number; notes?: string; unachieved?: boolean }> = {};
         for (const id of ids) {
+          const isUnach = Boolean(unachievedTracks[id]);
           out[id] = {
-            score: customTrackScores[id] ?? 85,
-            notes: customTrackNotes[id] || undefined,
+            score: isUnach ? 0 : customTrackScores[id] ?? 85,
+            notes: isUnach ? 'لم يُنجز اليوم (مؤجل)' : customTrackNotes[id] || undefined,
+            unachieved: isUnach,
           };
         }
         return out;
@@ -360,11 +475,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
         ? {
             lessonId: selectedLesson.id,
             lessonNumber: selectedLesson.lessonNumber,
-            subLessonScores: subScores,
-            finalScore: spellingFinalScore,
-            isMastered: spellingFinalScore >= academicConfig.spellingPassingThreshold,
-            statusTag: spellingStatusTag,
-            notes: spellingNotes,
+            subLessonScores: isSpellingUnachieved ? {} : subScores,
+            finalScore: isSpellingUnachieved ? 0 : spellingFinalScore,
+            isMastered: isSpellingUnachieved ? false : spellingFinalScore >= academicConfig.spellingPassingThreshold,
+            statusTag: isSpellingUnachieved ? 'لم ينتقل بعد' : spellingStatusTag,
+            notes: isSpellingUnachieved ? 'لم يُنجز اليوم (مؤجل)' : spellingNotes,
+            unachieved: isSpellingUnachieved,
           }
         : undefined,
       memorization: steps.includes('memorization')
@@ -373,8 +489,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             ayahFrom,
             surahTo,
             ayahTo,
-            score: memScore,
-            notes: memNotes,
+            score: isMemUnachieved ? 0 : memScore,
+            notes: isMemUnachieved ? 'لم يُنجز اليوم (مؤجل)' : memNotes,
+            unachieved: isMemUnachieved,
           }
         : undefined,
       revision: steps.includes('revision')
@@ -382,10 +499,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             surahFrom: revSurahFrom,
             surahTo: revSurahTo,
             type: revType,
-            score: revScore,
+            score: isRevUnachieved ? 0 : revScore,
             ...(autoRevision && autoRevLabel && !revManualOverride
               ? { isAutoRange: true, autoRangeLabel: autoRevLabel }
               : {}),
+            notes: isRevUnachieved ? 'لم يُنجز اليوم (مؤجل)' : undefined,
+            unachieved: isRevUnachieved,
           }
         : undefined,
       teacherRemarks: generalNotes,
@@ -393,11 +512,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
     await recordDailySession(recordData);
 
-    // Sync with Quran Planning Engine if plan is active — record the ACTUAL
+    // Sync with Quran Planning Engine if plan is active and memorization was achieved — record the ACTUAL
     // memorized end position so the engine rebuilds the remaining term from
-    // the true last-achieved verse (overachievement advances, underachievement
-    // replans, nothing is assumed).
-    if (activeQuranPlan && todayDailyItem && steps.includes('memorization')) {
+    // the true last-achieved verse. When unachieved, do not advance so the milestone waits for next session.
+    if (activeQuranPlan && todayDailyItem && steps.includes('memorization') && !isMemUnachieved) {
       try {
         const endMeta = findSurahMetadata(surahTo);
         const dir = activeQuranPlan.direction || 'backward';
@@ -502,6 +620,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             {steps.map((st, i) => {
               const done = completedSteps.has(i);
               const active = i === safeIndex;
+              const isUnach = Boolean(unachievedTracks[st]);
               const meta = TRACK_META[st] || {
                 label: trackShortLabel(
                   tracks.find((tr) => tr.id === st)?.name || st
@@ -513,13 +632,23 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                   key={st}
                   className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
                     active
-                      ? 'bg-emerald-700 text-white shadow-xs'
+                      ? isUnach
+                        ? 'bg-rose-700 text-white shadow-xs'
+                        : 'bg-emerald-700 text-white shadow-xs'
+                      : isUnach
+                      ? 'bg-rose-50 text-rose-800 border border-rose-300'
                       : done
                       ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                       : 'bg-slate-100 text-slate-500'
                   }`}
                 >
-                  {done && !active ? <Check className="w-3.5 h-3.5" /> : meta.icon}
+                  {isUnach ? (
+                    <X className="w-3.5 h-3.5 text-rose-500" />
+                  ) : done && !active ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    meta.icon
+                  )}
                   <span className="truncate">{meta.label}</span>
                 </div>
               );
@@ -542,104 +671,152 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           )}
           {currentStep === 'spelling' && selectedLesson && (
             <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-700" />
                   <h4 className="text-xs font-bold text-emerald-950">✏️ الهجاء القرآني</h4>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-700 font-medium">الدرجة:</span>
-                  <span className="text-base font-black text-emerald-800 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-300">
-                    {spellingFinalScore}%
-                  </span>
+                  {spellingHasPendingDebt ? (
+                    <span
+                      className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs"
+                      title="الطالب لديه درس هجاء متراكم من الجلسة السابقة — يلزم إثباته اليوم ولا يمكن تأجيله"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                      <span>واجب متراكم — يلزم الإنجاز اليوم</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toggleTrackUnachieved('spelling')}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                        unachievedTracks['spelling']
+                          ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+                      }`}
+                      title={unachievedTracks['spelling'] ? 'إلغاء وسم عدم الإنجاز' : 'وسم الهجاء كغير منجز لهذا اليوم'}
+                    >
+                      {unachievedTracks['spelling'] ? (
+                        <>
+                          <X className="w-3.5 h-3.5" />
+                          <span>تم الوسم: لم يُنجز</span>
+                        </>
+                      ) : (
+                        <span>لم يُنجز اليوم ✕</span>
+                      )}
+                    </button>
+                  )}
+
+                  {!unachievedTracks['spelling'] && (
+                    <span className="text-base font-black text-emerald-800 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-300">
+                      {spellingFinalScore}%
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Lesson Dropdown */}
-              <div className="mb-3">
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">الدرس الهجائي المستهدف</label>
-                <select
-                  value={selectedLessonId}
-                  onChange={(e) => handleLessonChange(e.target.value)}
-                  className="w-full text-xs font-semibold px-3 py-2 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500/20"
-                >
-                  {spellingLessons.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      الدرس {l.lessonNumber}: {l.title} ({l.targetGrade})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {unachievedTracks['spelling'] ? (
+                <div className="p-4 bg-rose-50/90 border border-rose-200 rounded-xl text-center my-2 animate-fadeIn">
+                  <p className="text-xs font-bold text-rose-800">
+                    تم استثناء درس الهجاء لجلسة اليوم (لن تُسجل له درجات أو يتم تصعيد الدرس).
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => toggleTrackUnachieved('spelling')}
+                    className="mt-1.5 text-[11px] text-rose-700 underline font-semibold cursor-pointer hover:text-rose-900"
+                  >
+                    تراجع وتفعيل تقييم الدرس
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Lesson Dropdown */}
+                  <div className="mb-3">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">الدرس الهجائي المستهدف</label>
+                    <select
+                      value={selectedLessonId}
+                      onChange={(e) => handleLessonChange(e.target.value)}
+                      className="w-full text-xs font-semibold px-3 py-2 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      {spellingLessons.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          الدرس {l.lessonNumber}: {l.title} ({l.targetGrade})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Sub-Lessons List */}
-              <div className="space-y-2 bg-white p-3 rounded-xl border border-slate-200">
-                <span className="text-[11px] font-bold text-slate-700 block mb-1">المهام الجزئية للدرس:</span>
-                {(selectedLesson?.subLessons || []).map((sub) => (
-                  <div key={sub.id} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-slate-800 flex-1 truncate">{sub.title}</span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min="50"
-                        max="100"
-                        step="5"
-                        value={subScores[sub.id] || 85}
-                        onChange={(e) => handleSubScoreChange(sub.id, parseInt(e.target.value))}
-                        className="w-24 accent-emerald-600"
-                      />
-                      <span className="w-10 text-left font-mono font-bold text-emerald-800">
-                        {subScores[sub.id] || 85}%
+                  {/* Sub-Lessons List */}
+                  <div className="space-y-2 bg-white p-3 rounded-xl border border-slate-200">
+                    <span className="text-[11px] font-bold text-slate-700 block mb-1">المهام الجزئية للدرس:</span>
+                    {(selectedLesson?.subLessons || []).map((sub) => (
+                      <div key={sub.id} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="text-slate-800 flex-1 truncate">{sub.title}</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="50"
+                            max="100"
+                            step="5"
+                            value={subScores[sub.id] || 85}
+                            onChange={(e) => handleSubScoreChange(sub.id, parseInt(e.target.value))}
+                            className="w-24 accent-emerald-600"
+                          />
+                          <span className="w-10 text-left font-mono font-bold text-emerald-800">
+                            {subScores[sub.id] || 85}%
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Colored mastery slider — the sole decision input (4 zones) */}
+                  <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between mb-1.5 text-[11px] font-bold text-slate-700">
+                      <span>مؤشر إتقان الهجاء</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-mono text-slate-800">{spellingFinalScore}%</span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-black border ${
+                            spellingStatusTag === 'أتقن'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : spellingStatusTag === 'يحتاج تثبيت'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : spellingStatusTag === 'يحتاج مراجعة'
+                              ? 'bg-rose-50 text-rose-800 border-rose-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          {spellingStatusTag}
+                        </span>
                       </span>
                     </div>
+                    <div className="relative">
+                      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-2 rounded-full overflow-hidden flex" dir="ltr">
+                        <div className="h-full bg-emerald-300" style={{ width: '25%' }} />
+                        <div className="h-full bg-amber-300" style={{ width: '25%' }} />
+                        <div className="h-full bg-rose-300" style={{ width: '25%' }} />
+                        <div className="h-full bg-slate-300" style={{ width: '25%' }} />
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={spellingFinalScore}
+                        onChange={(e) => handleSpellingScoreChange(parseInt(e.target.value))}
+                        className="relative w-full h-2 appearance-none bg-transparent accent-slate-800"
+                      />
+                    </div>
+                    <div className="flex text-[10px] font-bold mt-1">
+                      <span className="text-slate-500 text-center flex-1">لم ينتقل بعد</span>
+                      <span className="text-rose-700 text-center flex-1">يحتاج مراجعة</span>
+                      <span className="text-amber-700 text-center flex-1">يحتاج تثبيت</span>
+                      <span className="text-emerald-700 text-center flex-1">أتقن</span>
+                    </div>
                   </div>
-                ))}
-              </div>
-
-              {/* Colored mastery slider — the sole decision input (4 zones) */}
-              <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200">
-                <div className="flex items-center justify-between mb-1.5 text-[11px] font-bold text-slate-700">
-                  <span>مؤشر إتقان الهجاء</span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="font-mono text-slate-800">{spellingFinalScore}%</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-black border ${
-                        spellingStatusTag === 'أتقن'
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                          : spellingStatusTag === 'يحتاج تثبيت'
-                          ? 'bg-amber-50 text-amber-800 border-amber-200'
-                          : spellingStatusTag === 'يحتاج مراجعة'
-                          ? 'bg-rose-50 text-rose-800 border-rose-200'
-                          : 'bg-slate-100 text-slate-700 border-slate-300'
-                      }`}
-                    >
-                      {spellingStatusTag}
-                    </span>
-                  </span>
-                </div>
-                <div className="relative">
-                  <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-2 rounded-full overflow-hidden flex" dir="ltr">
-                    <div className="h-full bg-emerald-300" style={{ width: '25%' }} />
-                    <div className="h-full bg-amber-300" style={{ width: '25%' }} />
-                    <div className="h-full bg-rose-300" style={{ width: '25%' }} />
-                    <div className="h-full bg-slate-300" style={{ width: '25%' }} />
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={spellingFinalScore}
-                    onChange={(e) => handleSpellingScoreChange(parseInt(e.target.value))}
-                    className="relative w-full h-2 appearance-none bg-transparent accent-slate-800"
-                  />
-                </div>
-                <div className="flex text-[10px] font-bold mt-1">
-                  <span className="text-slate-500 text-center flex-1">لم ينتقل بعد</span>
-                  <span className="text-rose-700 text-center flex-1">يحتاج مراجعة</span>
-                  <span className="text-amber-700 text-center flex-1">يحتاج تثبيت</span>
-                  <span className="text-emerald-700 text-center flex-1">أتقن</span>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           )}
 
@@ -659,8 +836,26 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
+              {/* Pending Debt Banner if previous session memorization was unachieved */}
+              {memHasPendingDebt && (
+                <div className="mb-3 bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0" />
+                    <div>
+                      <span className="text-[10px] text-amber-900 font-bold block">واجب متراكم من الجلسة السابقة:</span>
+                      <span className="font-bold text-amber-950 font-['Amiri',serif]">
+                        {todayDailyItem?.targetUnit?.displayLabel || `${surahFrom} (${ayahFrom}-${ayahTo})`}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-200 text-amber-900 border border-amber-300">
+                    مستحق التسميع اليوم
+                  </span>
+                </div>
+              )}
+
               {/* Quran Plan Daily Unit Banner */}
-              {todayDailyItem && (
+              {todayDailyItem && !memHasPendingDebt && (
                 <div className="mb-3 bg-white p-2.5 rounded-xl border border-blue-200 flex items-center justify-between text-xs">
                   <div>
                     <span className="text-[10px] text-blue-600 font-bold block">مقرر ورد اليوم بالخطة القرآنية:</span>
@@ -751,6 +946,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 value={memScore}
                 onChange={setMemScore}
                 theme="blue"
+                isUnachieved={Boolean(unachievedTracks['memorization'])}
+                onToggleUnachieved={() => toggleTrackUnachieved('memorization')}
+                hasPendingDebt={memHasPendingDebt}
               />
             </div>
           )}
@@ -771,8 +969,26 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
+              {/* Pending Debt Banner if previous session revision was unachieved */}
+              {revHasPendingDebt && (
+                <div className="mb-3 bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0" />
+                    <div>
+                      <span className="text-[10px] text-amber-900 font-bold block">واجب مراجعة متراكم من الجلسة السابقة:</span>
+                      <span className="font-bold text-amber-950">
+                        {todayDailyItem?.revisionDisplayLabel || `${revSurahFrom} إلى ${revSurahTo}`}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-200 text-amber-900 border border-amber-300">
+                    مستحق المراجعة اليوم
+                  </span>
+                </div>
+              )}
+
               {/* Plan-driven daily revision banner */}
-              {todayDailyItem?.revisionDisplayLabel && (
+              {todayDailyItem?.revisionDisplayLabel && !revHasPendingDebt && (
                 <div className="mb-3 bg-white p-2.5 rounded-xl border border-amber-200 flex items-center justify-between text-xs">
                   <div>
                     <span className="text-[10px] text-amber-700 font-bold block">مقرر مراجعة اليوم بالخطة:</span>
@@ -924,7 +1140,93 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 value={revScore}
                 onChange={setRevScore}
                 theme="amber"
+                isUnachieved={Boolean(unachievedTracks['revision'])}
+                onToggleUnachieved={() => toggleTrackUnachieved('revision')}
+                hasPendingDebt={revHasPendingDebt}
               />
+            </div>
+          )}
+
+          {/* STEP: DYNAMIC / CUSTOM TRACK */}
+          {!BUILTIN_STEP_IDS.includes(currentStep) && (
+            <div className="p-4 rounded-xl bg-purple-50/50 border border-purple-200">
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-700" />
+                  <h4 className="text-xs font-bold text-purple-950">
+                    {tracks.find((t) => t.id === currentStep)?.name || currentStep}
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleTrackUnachieved(currentStep)}
+                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                      unachievedTracks[currentStep]
+                        ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+                    }`}
+                  >
+                    {unachievedTracks[currentStep] ? (
+                      <>
+                        <X className="w-3.5 h-3.5" />
+                        <span>تم الوسم: لم يُنجز</span>
+                      </>
+                    ) : (
+                      <span>لم يُنجز اليوم ✕</span>
+                    )}
+                  </button>
+
+                  {!unachievedTracks[currentStep] && (
+                    <span className="text-base font-black text-purple-900 bg-white px-2.5 py-0.5 rounded-lg border border-purple-300">
+                      {customTrackScores[currentStep] ?? 85}%
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {unachievedTracks[currentStep] ? (
+                <div className="p-3.5 bg-rose-50/90 border border-rose-200 rounded-xl text-center my-2 animate-fadeIn">
+                  <p className="text-xs font-bold text-rose-800">
+                    تم استثناء هذا المسار لجلسة اليوم (لن تُسجل له درجات).
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => toggleTrackUnachieved(currentStep)}
+                    className="mt-1.5 text-[11px] text-rose-700 underline font-semibold cursor-pointer hover:text-rose-900"
+                  >
+                    تراجع وتفعيل التقييم
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <FiveStarRating
+                    label="تقييم إتقان المسار (بالنجوم):"
+                    value={customTrackScores[currentStep] ?? 85}
+                    onChange={(sc) =>
+                      setCustomTrackScores((prev) => ({ ...prev, [currentStep]: sc }))
+                    }
+                    theme="blue"
+                  />
+                  <div className="mt-3">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                      ملاحظة المسار
+                    </label>
+                    <input
+                      type="text"
+                      value={customTrackNotes[currentStep] || ''}
+                      onChange={(e) =>
+                        setCustomTrackNotes((prev) => ({
+                          ...prev,
+                          [currentStep]: e.target.value,
+                        }))
+                      }
+                      placeholder="ملاحظة خاصة بهذا المسار..."
+                      className="w-full text-xs px-3 py-2 bg-white rounded-lg border border-slate-300"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
 

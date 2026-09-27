@@ -325,6 +325,7 @@ export interface DailySessionRecord {
     isMastered: boolean;
     statusTag: 'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة' | 'لم يجتز' | 'غياب';
     notes?: string;
+    unachieved?: boolean;
   };
   memorization?: {
     surahFrom: string;
@@ -333,6 +334,7 @@ export interface DailySessionRecord {
     ayahTo: number;
     score: number;
     notes?: string;
+    unachieved?: boolean;
   };
   revision?: {
     surahFrom: string;
@@ -343,6 +345,7 @@ export interface DailySessionRecord {
     /** Set when the revision range was auto-determined by the plan engine (Auto Minor Revision) */
     isAutoRange?: boolean;
     autoRangeLabel?: string;
+    unachieved?: boolean;
   };
   customTracks?: Record<string, any>; // مسارات مخصصة مستقبلية
   createdAt?: string;
