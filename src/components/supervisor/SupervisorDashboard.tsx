@@ -11,7 +11,6 @@ import {
 import { SupervisorType, SupervisorScope } from '../../types';
 import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
 import { filterStudentsByScope, filterHalaqahsByScope, hasPermission } from '../../lib/permissions';
-import { StudentQuranPlanModal } from '../quran/StudentQuranPlanModal';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { Student } from '../../types';
 import {
@@ -82,7 +81,6 @@ export const SupervisorDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedHalaqahId, setSelectedHalaqahId] = useState<string>('all');
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('all');
-  const [planModalStudent, setPlanModalStudent] = useState<Student | null>(null);
   const [comprehensiveStudent, setComprehensiveStudent] = useState<Student | null>(null);
 
   const isAssociationActive = isModuleEnabled(activeTenant, 'association');
@@ -588,21 +586,14 @@ export const SupervisorDashboard: React.FC = () => {
                   <div className="flex items-center gap-1.5 shrink-0">
                     {canOpenPlan && (
                       <button
-                        onClick={() => setPlanModalStudent(s)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
-                        title={canEdit ? 'الخطة القرآنية — عرض وإدارة' : 'الخطة القرآنية — عرض فقط'}
+                        onClick={() => setComprehensiveStudent(s)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+                        title={canEdit ? 'الخطة القرآنية الشاملة — عرض وإدارة' : 'الخطة القرآنية الشاملة — عرض فقط'}
                       >
-                        <BookOpen className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">الخطة القرآنية</span>
+                        <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+                        <span>الخطة القرآنية</span>
                       </button>
                     )}
-                    <button
-                      onClick={() => setComprehensiveStudent(s)}
-                      className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
-                      title="الخطة القرآنية الشاملة"
-                    >
-                      <Layers className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
               );
@@ -958,12 +949,6 @@ export const SupervisorDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Quran Plan Modals — gated internally by manage_quran_plan (edit) */}
-      <StudentQuranPlanModal
-        isOpen={Boolean(planModalStudent)}
-        student={planModalStudent}
-        onClose={() => setPlanModalStudent(null)}
-      />
       {comprehensiveStudent && (
         <ComprehensiveQuranPlanModal
           student={comprehensiveStudent}

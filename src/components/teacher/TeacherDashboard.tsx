@@ -48,7 +48,6 @@ import {
   generateTeacherWeeklyReport,
 } from '../../utils/reportGenerator';
 import { Student } from '../../types';
-import { StudentQuranPlanModal } from '../quran/StudentQuranPlanModal';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { getAcademicOutcome } from '../../quran/services/outcomeService';
 import { isModuleEnabled } from '../../lib/moduleChecker';
@@ -226,7 +225,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   // Active Report Modal Data
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [officialReportModalOpen, setOfficialReportModalOpen] = useState(false);
-  const [selectedPlanStudent, setSelectedPlanStudent] = useState<Student | null>(null);
   const [comprehensivePlanStudent, setComprehensivePlanStudent] = useState<Student | null>(null);
   const [reportData, setReportData] = useState<{
     title: string;
@@ -1170,8 +1168,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                     </p>
                   </div>
 
-                  {/* Action Buttons — 5 equal-width responsive actions */}
-                  <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-5 gap-1.5">
+                  {/* Action Buttons — 4 equal-width responsive actions */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-4 gap-2">
                     <button
                       onClick={() => setActiveStudentRecord(student)}
                       className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-bold transition-colors shadow-2xs cursor-pointer"
@@ -1182,30 +1180,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                     </button>
 
                     <button
-                      onClick={() => setSelectedPlanStudent(student)}
-                      className={`inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 rounded-xl text-[11px] font-bold border transition-colors shadow-2xs cursor-pointer ${
+                      onClick={() => setComprehensivePlanStudent(student)}
+                      className={`inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-2 px-1 rounded-xl text-[11px] font-bold border transition-colors shadow-2xs cursor-pointer ${
                         hasPlan
                           ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                           : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
                       }`}
-                      title={
-                        hasPlan
-                          ? 'معدل الخطة القرآنية (ورد اليوم، الأسبوع، الشهر، الفصل)'
-                          : 'يحتاج تحديد نقطة البداية'
-                      }
+                      title={hasPlan ? 'الخطة القرآنية الشاملة' : 'يحتاج تأسيس خطة للطالب'}
                     >
                       <BookOpen className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                      <span>المعدل</span>
+                      <span>الخطة القرآنية</span>
                       {!hasPlan && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
-                    </button>
-
-                    <button
-                      onClick={() => setComprehensivePlanStudent(student)}
-                      className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer"
-                      title="الخطة القرآنية الشاملة (من البداية إلى المستهدف)"
-                    >
-                      <Layers className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
-                      <span>الخطة</span>
                     </button>
 
                     <button
@@ -1302,11 +1287,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
         />
       )}
 
-      <StudentQuranPlanModal
-        isOpen={Boolean(selectedPlanStudent)}
-        student={selectedPlanStudent}
-        onClose={() => setSelectedPlanStudent(null)}
-      />
 
       {/* Track Nomination Modal for Teacher */}
       <TeacherTrackNominationModal

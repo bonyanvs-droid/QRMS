@@ -368,11 +368,65 @@ authRouter.post("/login", async (req, res, next) => {
       return;
     }
     const verified = candidates.filter((u) => verifyUserPassword(password, u));
-    const ROLE_PRIORITY = ["parent", "student"];
-    const userRow = [...verified].sort(
-      (a, b) => (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) - (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
-    )[0];
-    if (!userRow) {
+    if (verified.length === 0) {
+      res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
+      return;
+    }
+    const isDisabled = (u) => u.isActive === false || u.is_active === false || u.isArchived === true || u.is_archived === true;
+    const activeVerified = verified.filter((u) => !isDisabled(u));
+    if (activeVerified.length === 0) {
+      res.status(403).json({ ok: false, error: "\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0637\u0644 \u0623\u0648 \u0645\u0624\u0631\u0634\u0641. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062C\u0645\u0639." });
+      return;
+    }
+    if (activeVerified.length > 1) {
+      res.json({
+        ok: true,
+        requiresAccountSelection: true,
+        accounts: activeVerified.map((u) => ({
+          id: u.id,
+          name: u.full_name || u.fullName || u.name,
+          role: u.role,
+          staffRole: u.staff_role || u.staffRole || null,
+          tenantId: u.tenant_id || u.tenantId || null
+        }))
+      });
+      return;
+    }
+    const userRow = activeVerified[0];
+    const sessionId = `sess_${import_crypto.default.randomBytes(24).toString("hex")}`;
+    const { passwordHash, password_hash, ...safeUser } = userRow;
+    activeSessions.set(sessionId, {
+      user: safeUser,
+      createdAt: Date.now()
+    });
+    res.cookie("session_id", sessionId, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1e3
+    });
+    res.json({
+      ok: true,
+      user: safeUser,
+      token: sessionId,
+      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
+    });
+  } catch (err) {
+    console.error("[AUTH] Login unexpected error:", err);
+    next(err);
+  }
+});
+authRouter.post("/login/select", async (req, res, next) => {
+  try {
+    const { identifier, password, selectedUserId } = req.body;
+    if (!identifier || !password || !selectedUserId) {
+      res.status(400).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0645\u0643\u062A\u0645\u0644\u0629. \u064A\u0631\u062C\u0649 \u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644." });
+      return;
+    }
+    const candidates = await findUsersByIdentifier(String(identifier));
+    const userRow = candidates.find((u) => u.id === selectedUserId);
+    if (!userRow || !verifyUserPassword(String(password), userRow)) {
       res.status(401).json({ ok: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629." });
       return;
     }
@@ -400,7 +454,7 @@ authRouter.post("/login", async (req, res, next) => {
       mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false
     });
   } catch (err) {
-    console.error("[AUTH] Login unexpected error:", err);
+    console.error("[AUTH] Login select unexpected error:", err);
     next(err);
   }
 });
@@ -1109,6 +1163,390 @@ var import_express3 = require("express");
 var import_sharp = __toESM(require("sharp"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_fs = __toESM(require("fs"), 1);
+
+// server/services/accountSyncService.ts
+var import_crypto2 = __toESM(require("crypto"), 1);
+var STUDENT_DEFAULT_PASSWORD = "Student@2026";
+var PARENT_DEFAULT_PASSWORD = "Parent@2026";
+var SALT = "_ghazzawi_salt_2026";
+function hashPassword(password) {
+  return import_crypto2.default.createHash("sha256").update(password.trim() + SALT).digest("hex");
+}
+function db() {
+  const pool2 = getDbPool();
+  if (!pool2) throw new Error("Database is not connected.");
+  return pool2;
+}
+function digits(val) {
+  return String(val ?? "").replace(/\D/g, "");
+}
+function f(row, ...keys) {
+  for (const k of keys) {
+    if (row && row[k] !== void 0 && row[k] !== null) return row[k];
+  }
+  return void 0;
+}
+function phoneVariants(raw) {
+  const rawStr = String(raw ?? "").trim();
+  const d = digits(rawStr);
+  const variants = /* @__PURE__ */ new Set([rawStr, d]);
+  let core = d;
+  if (core.startsWith("00966")) core = core.slice(5);
+  else if (core.startsWith("966")) core = core.slice(3);
+  if (core) {
+    variants.add(core);
+    if (!core.startsWith("0")) variants.add("0" + core);
+    variants.add("966" + (core.startsWith("0") ? core.slice(1) : core));
+  }
+  return Array.from(variants).filter(Boolean);
+}
+function guardianPhoneOf(student) {
+  const rel = String(f(student, "guardian_relationship", "guardianRelationship") ?? "");
+  const mother = f(student, "mother_phone", "motherPhone");
+  const father = f(student, "parent_phone", "parentPhone");
+  if (rel === "\u0623\u0645" && digits(mother)) return String(mother).trim();
+  return String(father ?? "").trim();
+}
+async function findStudentUsers(q, tenantId, studentId, nationalId) {
+  const res = await q.query(
+    `SELECT * FROM users
+      WHERE tenant_id = $1 AND role = 'student' AND (
+        student_id = $2
+        OR id = $3
+        OR ($4 <> '' AND id = $5)
+        OR ($4 <> '' AND national_id = $4)
+      )`,
+    [tenantId, studentId, `usr_${studentId}`, nationalId, `usr_stu_${nationalId}`]
+  );
+  return res.rows;
+}
+async function ensureStudentUser(q, student) {
+  const sid = String(f(student, "id"));
+  const tenantId = String(f(student, "tenant_id", "tenantId") ?? "");
+  const nationalId = String(f(student, "national_id", "nationalId") ?? "").trim();
+  const name = String(f(student, "full_name", "fullName", "name") ?? "\u0637\u0627\u0644\u0628");
+  const halaqahId = f(student, "halaqah_id", "halaqahId") ?? null;
+  const isActive = f(student, "is_active", "isActive") !== false && f(student, "is_archived", "isArchived") !== true;
+  const gPhone = guardianPhoneOf(student);
+  const existing = await findStudentUsers(q, tenantId, sid, nationalId);
+  if (existing.length > 0) {
+    await q.query(
+      `UPDATE users SET
+         name = $2, full_name = $2,
+         national_id = COALESCE(NULLIF($3, ''), national_id),
+         login_identifier = COALESCE(NULLIF($3, ''), login_identifier),
+         phone = $4, halaqah_id = $5, is_active = $6, updated_at = NOW()
+       WHERE id = $1`,
+      [existing[0].id, name, nationalId, gPhone || null, halaqahId, isActive]
+    );
+    return;
+  }
+  const userId = nationalId ? `usr_stu_${nationalId}` : `usr_${sid}`;
+  await q.query(
+    `INSERT INTO users (id, tenant_id, name, full_name, phone, national_id, login_identifier,
+                        password_hash, role, student_id, halaqah_id, is_active,
+                        must_change_password, is_archived, created_at, updated_at)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,'student',$8,$9,$10,TRUE,FALSE,NOW(),NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name, full_name = EXCLUDED.full_name, phone = EXCLUDED.phone,
+       national_id = EXCLUDED.national_id, student_id = EXCLUDED.student_id,
+       halaqah_id = EXCLUDED.halaqah_id, is_active = EXCLUDED.is_active, updated_at = NOW()`,
+    [
+      userId,
+      tenantId,
+      name,
+      gPhone || null,
+      nationalId || null,
+      nationalId || userId,
+      hashPassword(STUDENT_DEFAULT_PASSWORD),
+      sid,
+      halaqahId,
+      isActive
+    ]
+  );
+}
+async function deleteStudentUsers(q, tenantId, studentId, nationalId) {
+  await q.query(
+    `DELETE FROM users
+      WHERE tenant_id = $1 AND role = 'student' AND (
+        student_id = $2 OR id = $3 OR ($4 <> '' AND national_id = $4) OR ($4 <> '' AND id = $5)
+      )`,
+    [tenantId, studentId, `usr_${studentId}`, nationalId, `usr_stu_${nationalId}`]
+  );
+}
+async function findParentByPhone(q, tenantId, phone) {
+  const variants = phoneVariants(phone);
+  const res = await q.query(
+    `SELECT * FROM users
+      WHERE tenant_id = $1 AND role = 'parent'
+        AND (phone = ANY($2) OR login_identifier = ANY($2))`,
+    [tenantId, variants]
+  );
+  return res.rows[0];
+}
+async function ensureParentUser(q, student) {
+  const sid = String(f(student, "id"));
+  const tenantId = String(f(student, "tenant_id", "tenantId") ?? "");
+  const gPhone = guardianPhoneOf(student);
+  const gDigits = digits(gPhone);
+  if (!gDigits) return;
+  const parentName = String(f(student, "parent_name", "parentName") ?? "").trim() || `\u0648\u0644\u064A \u0623\u0645\u0631 \u0627\u0644\u0637\u0627\u0644\u0628 (${String(f(student, "full_name", "fullName", "name") ?? "")})`;
+  const isActive = f(student, "is_active", "isActive") !== false && f(student, "is_archived", "isArchived") !== true;
+  const existing = await findParentByPhone(q, tenantId, gPhone);
+  if (existing) {
+    await q.query(
+      `UPDATE users SET
+         student_ids = CASE
+           WHEN student_ids @> $2::jsonb THEN student_ids
+           ELSE COALESCE(student_ids, '[]'::jsonb) || $2::jsonb
+         END,
+         name = COALESCE(NULLIF($3, ''), name),
+         full_name = COALESCE(NULLIF($3, ''), full_name),
+         is_active = CASE WHEN $4 THEN TRUE ELSE is_active END,
+         updated_at = NOW()
+       WHERE id = $1`,
+      [existing.id, JSON.stringify([sid]), parentName, isActive]
+    );
+    return;
+  }
+  await q.query(
+    `INSERT INTO users (id, tenant_id, name, full_name, phone, login_identifier,
+                        password_hash, role, student_ids, is_active,
+                        must_change_password, is_archived, created_at, updated_at)
+     VALUES ($1,$2,$3,$3,$4,$4,$5,'parent',$6::jsonb,TRUE,TRUE,FALSE,NOW(),NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       student_ids = CASE
+         WHEN users.student_ids @> EXCLUDED.student_ids THEN users.student_ids
+         ELSE COALESCE(users.student_ids, '[]'::jsonb) || EXCLUDED.student_ids
+       END,
+       is_active = TRUE, is_archived = FALSE, updated_at = NOW()`,
+    [`usr_parent_${gDigits}`, tenantId, parentName, gPhone, hashPassword(PARENT_DEFAULT_PASSWORD), JSON.stringify([sid])]
+  );
+}
+async function countActiveChildrenForPhone(q, tenantId, phone) {
+  const variants = phoneVariants(phone);
+  const res = await q.query(
+    `SELECT COUNT(*)::int AS c FROM students
+      WHERE tenant_id = $1 AND COALESCE(is_active, TRUE) = TRUE AND COALESCE(is_archived, FALSE) = FALSE
+        AND (parent_phone = ANY($2) OR mother_phone = ANY($2))`,
+    [tenantId, variants]
+  );
+  return res.rows[0]?.c ?? 0;
+}
+async function deleteOrDeactivateParent(q, parentId, mode) {
+  if (mode === "deactivate") {
+    await q.query(`UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND role = 'parent'`, [parentId]);
+    return;
+  }
+  try {
+    const res = await q.query(
+      `DELETE FROM users
+        WHERE id = $1 AND role = 'parent' AND staff_role IS NULL
+          AND COALESCE(student_ids, '[]'::jsonb) = '[]'::jsonb`,
+      [parentId]
+    );
+    if (res.rowCount === 0) {
+      await q.query(`UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND role = 'parent'`, [parentId]);
+    }
+  } catch (err) {
+    console.warn(`[SYNC] Parent delete fallback to deactivate for ${parentId}:`, err);
+    await q.query(`UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND role = 'parent'`, [parentId]);
+  }
+}
+async function detachStudentFromParents(q, tenantId, studentId, guardianPhones, mode, matchByStudentIds = true) {
+  const sidArray = JSON.stringify([studentId]);
+  const phoneList = guardianPhones.map(digits).filter(Boolean);
+  const variants = Array.from(new Set(phoneList.flatMap(phoneVariants)));
+  const res = await q.query(
+    `SELECT * FROM users
+      WHERE tenant_id = $1 AND role = 'parent' AND (
+        ($4::boolean AND student_ids @> $2::jsonb)
+        OR ($3::text[] <> '{}' AND (phone = ANY($3) OR login_identifier = ANY($3)))
+      )`,
+    [tenantId, sidArray, variants, matchByStudentIds]
+  );
+  for (const parent of res.rows) {
+    const currentIds = Array.isArray(parent.student_ids) ? parent.student_ids : [];
+    const remaining = currentIds.filter((x) => x !== studentId);
+    const phoneMatches = !parent.phone || phoneList.includes(digits(parent.phone));
+    const shouldDetach = currentIds.includes(studentId) || phoneMatches;
+    if (!shouldDetach) continue;
+    if (currentIds.includes(studentId)) {
+      await q.query(`UPDATE users SET student_ids = $2::jsonb, updated_at = NOW() WHERE id = $1`, [parent.id, JSON.stringify(remaining)]);
+    }
+    const stillLinked = currentIds.includes(studentId) ? remaining.length : currentIds.length;
+    const activeChildren = parent.phone ? await countActiveChildrenForPhone(q, tenantId, parent.phone) : 0;
+    if (stillLinked === 0 && activeChildren === 0) {
+      await deleteOrDeactivateParent(q, parent.id, mode);
+    }
+  }
+}
+async function syncStudentWrite(q, student, prevRow) {
+  const client = q ?? db();
+  const sid = String(f(student, "id"));
+  const tenantId = String(f(student, "tenant_id", "tenantId") ?? "");
+  if (!tenantId) return;
+  const isActive = f(student, "is_active", "isActive") !== false && f(student, "is_archived", "isArchived") !== true;
+  if (isActive) {
+    await ensureStudentUser(client, student);
+    await ensureParentUser(client, student);
+  } else {
+    const nationalId = String(f(student, "national_id", "nationalId") ?? "").trim();
+    const users = await findStudentUsers(client, tenantId, sid, nationalId);
+    for (const u of users) {
+      await client.query(`UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [u.id]);
+    }
+    const phones = [guardianPhoneOf(student), String(f(student, "parent_phone", "parentPhone") ?? "")];
+    await detachStudentFromParents(client, tenantId, sid, phones, "deactivate");
+  }
+  if (prevRow) {
+    const oldPhone = digits(guardianPhoneOf(prevRow));
+    const newPhone = digits(guardianPhoneOf(student));
+    if (oldPhone && oldPhone !== newPhone) {
+      await detachStudentFromParents(client, tenantId, sid, [oldPhone], "delete", false);
+    }
+  }
+}
+async function syncStudentDeleted(q, deletedRow) {
+  const client = q ?? db();
+  const sid = String(f(deletedRow, "id"));
+  const tenantId = String(f(deletedRow, "tenant_id", "tenantId") ?? "");
+  if (!tenantId) return;
+  const nationalId = String(f(deletedRow, "national_id", "nationalId") ?? "").trim();
+  await deleteStudentUsers(client, tenantId, sid, nationalId);
+  const phones = [
+    guardianPhoneOf(deletedRow),
+    String(f(deletedRow, "parent_phone", "parentPhone") ?? ""),
+    String(f(deletedRow, "mother_phone", "motherPhone") ?? "")
+  ];
+  await detachStudentFromParents(client, tenantId, sid, phones, "delete");
+}
+async function syncStudentsBulk(q, students, prevRows) {
+  if (!students.length) return;
+  const tenantId = String(f(students[0], "tenant_id", "tenantId") ?? "");
+  if (!tenantId) return;
+  const active = students.filter(
+    (s) => f(s, "is_active", "isActive") !== false && f(s, "is_archived", "isArchived") !== true
+  );
+  const inactive = students.filter((s) => !active.includes(s));
+  const ids = students.map((s) => String(f(s, "id")));
+  const natIds = students.map((s) => String(f(s, "national_id", "nationalId") ?? "").trim()).filter(Boolean);
+  const existingStudentUsers = await q.query(
+    `SELECT * FROM users WHERE tenant_id = $1 AND role = 'student' AND (
+       student_id = ANY($2) OR id = ANY($3) OR (national_id <> '' AND national_id = ANY($4))
+     )`,
+    [tenantId, ids, ids.map((i) => `usr_${i}`), natIds]
+  );
+  const studentUserByStudentId = /* @__PURE__ */ new Map();
+  const studentUserById = /* @__PURE__ */ new Map();
+  const studentUserByNatId = /* @__PURE__ */ new Map();
+  for (const u of existingStudentUsers.rows) {
+    if (u.student_id) studentUserByStudentId.set(u.student_id, u);
+    studentUserById.set(u.id, u);
+    if (u.national_id) studentUserByNatId.set(u.national_id, u);
+  }
+  const guardianPhones = active.map(guardianPhoneOf).map(digits).filter(Boolean);
+  const uniquePhones = Array.from(new Set(guardianPhones));
+  const allVariants = Array.from(new Set(uniquePhones.flatMap(phoneVariants)));
+  const existingParents = allVariants.length ? await q.query(
+    `SELECT * FROM users WHERE tenant_id = $1 AND role = 'parent' AND (phone = ANY($2) OR login_identifier = ANY($2))`,
+    [tenantId, allVariants]
+  ) : { rows: [] };
+  const parentByPhone = /* @__PURE__ */ new Map();
+  for (const p of existingParents.rows) {
+    for (const v of phoneVariants(p.phone)) parentByPhone.set(digits(v), p);
+    for (const v of phoneVariants(p.login_identifier)) parentByPhone.set(digits(v), p);
+  }
+  for (const s of active) {
+    await ensureStudentUser(q, s);
+    await ensureParentUser(q, s);
+  }
+  for (const s of inactive) {
+    await syncStudentWrite(q, s, prevRows.get(String(f(s, "id"))) ?? null);
+  }
+  for (const s of students) {
+    const prev = prevRows.get(String(f(s, "id")));
+    if (!prev) continue;
+    const oldPhone = digits(guardianPhoneOf(prev));
+    const newPhone = digits(guardianPhoneOf(s));
+    if (oldPhone && oldPhone !== newPhone) {
+      await detachStudentFromParents(q, tenantId, String(f(s, "id")), [oldPhone], "delete", false);
+    }
+  }
+}
+async function syncUserWrite(userRow, prevRow) {
+  const q = db();
+  const warnings = [];
+  const id = String(f(userRow, "id"));
+  const tenantId = String(f(userRow, "tenant_id", "tenantId") ?? "");
+  const role = String(f(userRow, "role") ?? "");
+  const staffRole = f(userRow, "staff_role", "staffRole");
+  const isStaff = staffRole || !["parent", "student"].includes(role);
+  if (isStaff && prevRow) {
+    const oldPhone = String(f(prevRow, "phone") ?? "").trim();
+    const newPhone = String(f(userRow, "phone") ?? "").trim();
+    const oldLogin = String(f(prevRow, "login_identifier") ?? "").trim();
+    const loginWasDefault = !oldLogin || oldLogin === oldPhone || digits(oldLogin) === digits(oldPhone);
+    if (newPhone && digits(newPhone) !== digits(oldPhone) && loginWasDefault) {
+      await q.query(`UPDATE users SET login_identifier = $2, updated_at = NOW() WHERE id = $1`, [id, newPhone]);
+      userRow.login_identifier = newPhone;
+      userRow.loginIdentifier = newPhone;
+    }
+  }
+  const isTeacher = role === "teacher" || staffRole === "teacher";
+  if (isTeacher && prevRow && tenantId) {
+    const oldScope = Array.isArray(f(prevRow, "assigned_halaqah_ids")) ? f(prevRow, "assigned_halaqah_ids") : [];
+    const newScope = Array.isArray(f(userRow, "assigned_halaqah_ids")) ? f(userRow, "assigned_halaqah_ids") : [];
+    const added = newScope.filter((hid) => !oldScope.includes(hid));
+    const removed = oldScope.filter((hid) => !newScope.includes(hid));
+    const displayName = String(f(userRow, "full_name", "fullName") || f(userRow, "name") || "\u0645\u0639\u0644\u0645");
+    for (const hid of added) {
+      await q.query(
+        `UPDATE halaqahs
+            SET assistant_teachers = COALESCE(assistant_teachers, '[]'::jsonb) || $2::jsonb,
+                updated_at = NOW()
+          WHERE tenant_id = $1 AND id = $3
+            AND COALESCE(teacher_id, '') <> $4
+            AND NOT (COALESCE(assistant_teachers, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', $4)))`,
+        [tenantId, JSON.stringify([{ id, name: displayName }]), hid, id]
+      );
+    }
+    for (const hid of removed) {
+      await q.query(
+        `UPDATE halaqahs
+            SET assistant_teachers = COALESCE((
+                  SELECT jsonb_agg(elem) FROM jsonb_array_elements(assistant_teachers) elem
+                  WHERE elem->>'id' <> $3
+                ), '[]'::jsonb),
+                updated_at = NOW()
+          WHERE tenant_id = $1 AND id = $2
+            AND COALESCE(assistant_teachers, '[]'::jsonb)::text LIKE '%' || $3 || '%'`,
+        [tenantId, hid, id]
+      );
+    }
+  }
+  const ident = String(f(userRow, "login_identifier", "loginIdentifier") ?? "").trim();
+  const phone = String(f(userRow, "phone") ?? "").trim();
+  const variants = Array.from(/* @__PURE__ */ new Set([...phoneVariants(ident), ...phoneVariants(phone)]));
+  if (variants.length && tenantId) {
+    const coll = await q.query(
+      `SELECT id, name, role FROM users
+        WHERE tenant_id = $1 AND id <> $2 AND COALESCE(is_active, TRUE) = TRUE
+          AND COALESCE(is_archived, FALSE) = FALSE
+          AND (login_identifier = ANY($3) OR phone = ANY($3))`,
+      [tenantId, id, variants]
+    );
+    for (const c of coll.rows) {
+      if (c.role === role) continue;
+      warnings.push({
+        type: "identifier_collision",
+        message: `\u0645\u0639\u0631\u0641 \u0627\u0644\u062F\u062E\u0648\u0644 \u064A\u062A\u0637\u0627\u0628\u0642 \u0645\u0639 \u062D\u0633\u0627\u0628 \u0622\u062E\u0631 \u0646\u0634\u0637: ${c.name} (${c.role}) \u2014 \u0633\u064A\u0638\u0647\u0631 \u0644\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u0639\u0646\u062F \u0627\u0644\u062F\u062E\u0648\u0644.`,
+        details: { otherUserId: c.id, otherRole: c.role }
+      });
+    }
+  }
+  return warnings;
+}
 
 // server/services/entityService.ts
 var JSONB_PAYLOAD_COLUMNS = {
@@ -2292,9 +2730,9 @@ function resolveTableConfig(collectionName) {
 }
 function sessionPhoneVariants(rawPhone) {
   const raw = String(rawPhone || "").trim();
-  const digits = raw.replace(/\D/g, "");
-  const variants = /* @__PURE__ */ new Set([raw, digits]);
-  let core = digits;
+  const digits2 = raw.replace(/\D/g, "");
+  const variants = /* @__PURE__ */ new Set([raw, digits2]);
+  let core = digits2;
   if (core.startsWith("00966")) core = core.slice(5);
   else if (core.startsWith("966")) core = core.slice(3);
   if (core) {
@@ -2521,6 +2959,13 @@ async function upsert(collectionName, rawData, tenantId) {
   if (config2.tableName === "users" && sanitized.role === void 0 && sanitized.staff_role) {
     sanitized.role = sanitized.staff_role;
   }
+  let prevRow = null;
+  if (config2.tableName === "students" || config2.tableName === "users") {
+    prevRow = await executeQuerySingle(
+      `SELECT * FROM ${config2.tableName} WHERE ${config2.primaryKey} = $1`,
+      [sanitized[config2.primaryKey]]
+    );
+  }
   const keys = Object.keys(sanitized);
   if (keys.length === 0) {
     throw new Error(`No valid columns provided for table '${config2.tableName}'`);
@@ -2555,7 +3000,26 @@ async function upsert(collectionName, rawData, tenantId) {
     }
     return existing;
   }
-  return hydrateRow(config2, result);
+  const savedRow = hydrateRow(config2, result);
+  const syncWarnings = [];
+  if (config2.tableName === "students") {
+    try {
+      await syncStudentWrite(void 0, savedRow, prevRow);
+    } catch (syncErr) {
+      console.error("[SYNC] syncStudentWrite failed:", syncErr);
+      syncWarnings.push({ type: "sync_error", message: "\u062A\u0639\u0630\u0631\u062A \u0645\u0632\u0627\u0645\u0646\u0629 \u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0644\u0647\u0630\u0627 \u0627\u0644\u0637\u0627\u0644\u0628." });
+    }
+  } else if (config2.tableName === "users") {
+    try {
+      syncWarnings.push(...await syncUserWrite(savedRow, prevRow));
+    } catch (syncErr) {
+      console.error("[SYNC] syncUserWrite failed:", syncErr);
+    }
+  }
+  if (syncWarnings.length) {
+    savedRow._syncWarnings = syncWarnings;
+  }
+  return savedRow;
 }
 async function bulkUpsert(collectionName, items, tenantId) {
   if (!Array.isArray(items) || items.length === 0) {
@@ -2573,6 +3037,14 @@ async function bulkUpsert(collectionName, items, tenantId) {
   const results = [];
   try {
     await client.query("BEGIN");
+    const prevRows = /* @__PURE__ */ new Map();
+    if (config2.tableName === "students") {
+      const ids = items.map((i) => i.id).filter(Boolean);
+      if (ids.length) {
+        const prev = await client.query(`SELECT * FROM students WHERE id = ANY($1)`, [ids]);
+        for (const r of prev.rows) prevRows.set(r.id, r);
+      }
+    }
     for (const item of items) {
       const sanitized = prepareRecord(config2, item, tenantId);
       const keys = Object.keys(sanitized);
@@ -2585,6 +3057,9 @@ async function bulkUpsert(collectionName, items, tenantId) {
       if (res.rows.length > 0) {
         results.push(hydrateRow(config2, snakeToCamelCase(res.rows[0])));
       }
+    }
+    if (config2.tableName === "students" && results.length > 0) {
+      await syncStudentsBulk(client, results, prevRows);
     }
     await client.query("COMMIT");
     return { count: results.length, items: results };
@@ -2600,6 +3075,27 @@ async function deleteRecord(collectionName, id, tenantId) {
   if (!config2) {
     throw new Error(`Unknown or unsupported collection: '${collectionName}'`);
   }
+  let deletedRow = null;
+  if (config2.tableName === "students") {
+    deletedRow = await executeQuerySingle(
+      `SELECT * FROM students WHERE ${config2.primaryKey} = $1`,
+      [id]
+    );
+  }
+  if (config2.tableName === "users") {
+    const target = await executeQuerySingle(`SELECT role, student_id, tenant_id, is_active FROM users WHERE id = $1`, [id]);
+    if (target && target.role === "student" && target.student_id) {
+      const linked = await executeQuerySingle(
+        `SELECT id FROM students WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE AND COALESCE(is_archived, FALSE) = FALSE`,
+        [target.student_id]
+      );
+      if (linked) {
+        const err = new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u062D\u0633\u0627\u0628 \u0637\u0627\u0644\u0628 \u0645\u0627 \u062F\u0627\u0645 \u0633\u062C\u0644 \u0627\u0644\u0637\u0627\u0644\u0628 \u0646\u0634\u0637\u0627\u064B \u2014 \u0627\u062D\u0630\u0641 \u0623\u0648 \u0623\u0631\u0634\u0641 \u0627\u0644\u0637\u0627\u0644\u0628 \u0623\u0648\u0644\u0627\u064B.");
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+  }
   const conditions = [`${config2.primaryKey} = $1`];
   const params = [id];
   if (config2.isTenantScoped && tenantId) {
@@ -2608,6 +3104,13 @@ async function deleteRecord(collectionName, id, tenantId) {
   }
   const query = `DELETE FROM ${config2.tableName} WHERE ${conditions.join(" AND ")} RETURNING ${config2.primaryKey}`;
   const deleted = await executeQuerySingle(query, params);
+  if (deleted && config2.tableName === "students" && deletedRow) {
+    try {
+      await syncStudentDeleted(void 0, deletedRow);
+    } catch (syncErr) {
+      console.error("[SYNC] syncStudentDeleted failed:", syncErr);
+    }
+  }
   return !!deleted;
 }
 
@@ -7202,7 +7705,7 @@ async function verifyPostCommitData(client, expectations) {
     });
   }
   const failed = results.filter((r) => !r.ok);
-  const summary = failed.length === 0 ? `\u062A\u0645 \u0627\u0644\u062A\u062D\u0642\u0642 \u0628\u0639\u062F COMMIT \u0628\u0646\u062C\u0627\u062D: \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u062F\u0627\u0648\u0644 \u0627\u0644\u0623\u0633\u0627\u0633\u064A\u0629 \u062A\u062D\u062A\u0648\u064A \u0627\u0644\u0623\u0639\u062F\u0627\u062F \u0627\u0644\u0645\u062A\u0648\u0642\u0639\u0629 \u062A\u0645\u0627\u0645\u064B\u0627 (${results.length} \u062C\u062F\u0627\u0648\u0644).` : `\u0627\u0644\u0633\u062C\u0644\u0627\u062A \u0627\u0644\u0645\u064F\u0639\u062A\u0645\u062F\u0629 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0645\u062A\u0648\u0642\u0639: ${failed.map((f) => `${f.table} (\u0645\u062A\u0648\u0642\u0639 ${f.expectedCount} / \u0641\u0639\u0644\u064A ${f.actualCount})`).join("\u060C ")}`;
+  const summary = failed.length === 0 ? `\u062A\u0645 \u0627\u0644\u062A\u062D\u0642\u0642 \u0628\u0639\u062F COMMIT \u0628\u0646\u062C\u0627\u062D: \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u062F\u0627\u0648\u0644 \u0627\u0644\u0623\u0633\u0627\u0633\u064A\u0629 \u062A\u062D\u062A\u0648\u064A \u0627\u0644\u0623\u0639\u062F\u0627\u062F \u0627\u0644\u0645\u062A\u0648\u0642\u0639\u0629 \u062A\u0645\u0627\u0645\u064B\u0627 (${results.length} \u062C\u062F\u0627\u0648\u0644).` : `\u0627\u0644\u0633\u062C\u0644\u0627\u062A \u0627\u0644\u0645\u064F\u0639\u062A\u0645\u062F\u0629 \u063A\u064A\u0631 \u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0645\u062A\u0648\u0642\u0639: ${failed.map((f2) => `${f2.table} (\u0645\u062A\u0648\u0642\u0639 ${f2.expectedCount} / \u0641\u0639\u0644\u064A ${f2.actualCount})`).join("\u060C ")}`;
   return { ok: failed.length === 0, summary, results };
 }
 async function persistMigrationRunPostCommit(client, runRecord, logs) {
