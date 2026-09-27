@@ -238,8 +238,8 @@ import { getHalaqahActiveDays } from '../utils/scheduleCalculator';
 import { StudentQuranPlan } from '../quran/types/plan';
 import { selectActiveStudentPlan } from '../quran/utils/planNormalizer';
 import { StageQuranConfig, DEFAULT_STAGE_CONFIGS } from '../quran/models/stageConfig';
-import { BundledQuranProvider } from '../quran/providers/BundledQuranProvider';
 import { QuranMemorizationPlanningEngine } from '../quran/services/memorizationEngine';
+import { QuranRevisionPlanningEngine } from '../quran/services/revisionEngine';
 import { PlanRecalculationService } from '../quran/services/recalculationService';
 import { buildPlanArchive } from '../quran/services/planArchiveService';
 import { QuranPosition, MushafProfile } from '../quran/types';
@@ -4183,6 +4183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ): Promise<StudentQuranPlan> => {
       const provider = integrationManager.getActiveProvider();
       const memorizationEngine = new QuranMemorizationPlanningEngine(provider);
+      const revisionEngine = new QuranRevisionPlanningEngine(provider);
       const studentHalaqah =
         halaqahs.find((h) => h.id === params.student.halaqahId) ||
         halaqahs.find((h) => h.name === params.student.halaqahName);
@@ -4197,6 +4198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         spellingLessons,
         provider,
         memorizationEngine,
+        revisionEngine,
       });
     },
     [quranStageConfigs, academicConfig, integrationManager, sessionRecords, halaqahs, stages, activeTenant, spellingLessons]

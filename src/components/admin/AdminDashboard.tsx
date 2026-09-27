@@ -987,6 +987,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   // Dynamic Tab Protection based on UNIFIED_NAV_ITEMS and RBAC
   if (!currentUser) return null;
 
+  // Parents and students are strictly excluded from administrative dashboard
+  if (currentUser.role === 'parent' || currentUser.role === 'student') {
+    return <Navigate to={currentUser.role === 'parent' ? '/parent' : '/student'} replace />;
+  }
+
   const currentNavItem = UNIFIED_NAV_ITEMS.find(item => item.id === activeTab || (activeTab === 'overview' && item.id === 'dashboard'));
   let hasAccess = false;
   

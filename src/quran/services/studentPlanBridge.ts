@@ -23,6 +23,7 @@ import {
 } from '../types/plan';
 import { StageQuranConfig, findStageConfigForStudent } from '../models/stageConfig';
 import { QuranMemorizationPlanningEngine } from './memorizationEngine';
+import { QuranRevisionPlanningEngine } from './revisionEngine';
 import {
   resolveStudentWorkingDays,
   getStudentPreferredWorkingDays,
@@ -103,8 +104,11 @@ export interface CreateRealStudentPlanParams {
   savingOffset?: number;
   /** Delay starting revision by N sessions */
   revisionOffset?: number;
+  /** Overall plan type: memorization only, revision only, or combined */
+  planType?: 'memorization' | 'revision' | 'combined';
   provider: IQuranDataProvider;
   memorizationEngine: QuranMemorizationPlanningEngine;
+  revisionEngine?: QuranRevisionPlanningEngine;
 }
 
 /**
@@ -646,27 +650,48 @@ export async function createRealStudentPlan(
   const { stageConfig } = resolved;
 
   // Generate Core Universal Plan via Engine (dumb deterministic planner)
-  const basePlan = await memorizationEngine.createPlan({
-    studentId: student.id,
-    startDate: resolved.startDate,
-    endDate: resolved.endDate,
-    targetStart: resolved.targetStart,
-    targetEnd: resolved.targetEnd,
-    direction: resolved.direction,
-    unitType: resolved.unitType,
-    dailyAmount: resolved.dailyAmount,
-    revisionDailyPages: resolved.revisionDailyPages,
-    consolidationDaysPerSurah: resolved.consolidationDays,
-    schedule: resolved.schedule,
-    autoMinorRevisionMode: resolved.autoMinorRevisionMode,
-    manualRevisionRange: resolved.manualRevisionRange,
-    revisionDirection: resolved.revisionDirection,
-    revisionUnitKind: resolved.revisionUnitKind,
-    revisionUnitsPerWindow: resolved.revisionUnitsPerWindow,
-    revisionMode: resolved.revisionMode,
-    savingOffset: resolved.savingOffset,
-    revisionOffset: resolved.revisionOffset,
-  });
+  let basePlan: StudentQuranPlan;
+  if (params.planType === 'revision') {
+    const revEngine = params.revisionEngine || new QuranRevisionPlanningEngine(provider);
+    const revMode = resolved.revisionMode === 'surahs' ? 'surahs' : 'pages';
+    basePlan = await revEngine.createPlan({
+      studentId: student.id,
+      startDate: resolved.startDate,
+      endDate: resolved.endDate,
+      targetStart: resolved.targetStart,
+      targetEnd: resolved.targetEnd,
+      direction: resolved.revisionDirection || resolved.direction,
+      mode: revMode,
+      dailyAmount: revMode === 'surahs' ? (resolved.revisionUnitsPerWindow || 1) : (resolved.revisionDailyPages || 1),
+      schedule: resolved.schedule,
+    });
+  } else {
+    basePlan = await memorizationEngine.createPlan({
+      studentId: student.id,
+      startDate: resolved.startDate,
+      endDate: resolved.endDate,
+      targetStart: resolved.targetStart,
+      targetEnd: resolved.targetEnd,
+      direction: resolved.direction,
+      unitType: resolved.unitType,
+      dailyAmount: resolved.dailyAmount,
+      revisionDailyPages: resolved.revisionDailyPages,
+      consolidationDaysPerSurah: resolved.consolidationDays,
+      schedule: resolved.schedule,
+      autoMinorRevisionMode: resolved.autoMinorRevisionMode,
+      manualRevisionRange: resolved.manualRevisionRange,
+      revisionDirection: resolved.revisionDirection,
+      revisionUnitKind: resolved.revisionUnitKind,
+      revisionUnitsPerWindow: resolved.revisionUnitsPerWindow,
+      revisionMode: resolved.revisionMode,
+      savingOffset: resolved.savingOffset,
+      revisionOffset: resolved.revisionOffset,
+    });
+  }
+
+  const effectivePlanType: 'memorization' | 'revision' | 'combined' =
+    params.planType ||
+    (resolved.revisionMode === 'none' ? 'memorization' : 'combined');
 
   // Attach Real Student Metadata & Contextual Identifiers
   const planTitle = title || `خطة ${stageConfig.name} - ${student.fullName}`;
@@ -683,6 +708,7 @@ export async function createRealStudentPlan(
     halaqahId: student.halaqahId,
     teacherId: student.teacherId,
     tenantId: student.tenantId,
+    planType: effectivePlanType,
     status: 'active',
     targetSource: resolved.targetSource,
     activeTrackIds: resolved.activeTrackIds,

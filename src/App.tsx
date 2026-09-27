@@ -228,8 +228,23 @@ const MainLayout: React.FC = () => {
   }, [effectiveUser, activeTenant]);
 
   const handleLogout = async () => {
+    const targetTenant =
+      activeTenant ||
+      (effectiveUser?.tenantId ? tenants.find((t) => t.id === effectiveUser.tenantId) : null) ||
+      (INITIAL_TENANTS[0]);
+    const tenantSlug = targetTenant?.slug || targetTenant?.id || 'ghazzawi';
+    const isPlatformAdmin =
+      (currentUser?.role === 'system_admin' || effectiveUser?.role === 'system_admin') &&
+      !currentUser?.tenantId &&
+      !effectiveUser?.tenantId;
+
     await logout();
-    navigate('/', { replace: true });
+
+    if (isPlatformAdmin) {
+      navigate('/platform', { replace: true });
+    } else {
+      navigate(`/t/${tenantSlug}`, { replace: true });
+    }
   };
 
   // Sync tenant from URL params (e.g. ?tenant=ghazzawi or ?tenant=al-furqan)
@@ -414,12 +429,14 @@ const MainLayout: React.FC = () => {
           className={`flex-1 min-w-0 w-full ${isStandalonePublicPage ? '' : 'p-3 sm:p-5 lg:p-6 pb-24 lg:pb-12 max-w-7xl'}`}
         >
           <Routes>
-          {/* TIER 1: PLATFORM COMMERCIAL WEBSITE */}
+          {/* TIER 1: PLATFORM COMMERCIAL WEBSITE OR CAMPUS LANDING ISOLATION */}
           <Route
             path="/"
             element={
               effectiveUser ? (
                 <Navigate to={getRolePortalRoute(effectiveUser.role, effectiveUser.tenantId)} replace />
+              ) : activeTenant ? (
+                <Navigate to={`/t/${activeTenant.slug || activeTenant.id}`} replace />
               ) : (
                 <PlatformLandingPage
                   onNavigateToTenant={(id) => {
@@ -578,8 +595,12 @@ const MainLayout: React.FC = () => {
           <Route
             path="/admin"
             element={
-              effectiveUser ? (
+              effectiveUser && !['parent', 'student'].includes(effectiveUser.role) ? (
                 <AdminDashboard />
+              ) : effectiveUser?.role === 'parent' ? (
+                <Navigate to="/parent" replace />
+              ) : effectiveUser?.role === 'student' ? (
+                <Navigate to="/student" replace />
               ) : (
                 <AdminAuthGateway />
               )
@@ -588,8 +609,12 @@ const MainLayout: React.FC = () => {
           <Route
             path="/admin/:subtab"
             element={
-              effectiveUser ? (
+              effectiveUser && !['parent', 'student'].includes(effectiveUser.role) ? (
                 <AdminDashboard />
+              ) : effectiveUser?.role === 'parent' ? (
+                <Navigate to="/parent" replace />
+              ) : effectiveUser?.role === 'student' ? (
+                <Navigate to="/student" replace />
               ) : (
                 <AdminAuthGateway />
               )

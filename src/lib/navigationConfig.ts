@@ -74,7 +74,7 @@ export const UNIFIED_NAV_ITEMS: NavigationItem[] = [
   { id: 'stages', label: 'المراحل الدراسية', shortLabel: 'المراحل', path: '/admin/stages', icon: Layers, category: 'teachers_halaqahs', requiredPermission: ['view_stages', 'manage_stages', 'manage_programs', 'manage_halaqahs'], badgeKey: 'stages' },
   { id: 'halaqahs', label: 'الحلقات القرآنية', shortLabel: 'الحلقات', path: '/admin/halaqahs', icon: BookOpen, category: 'teachers_halaqahs', requiredPermission: ['view_halaqahs', 'manage_halaqahs'], badgeKey: 'halaqahs' },
   { id: 'teachers', label: 'إدارة المعلمين', shortLabel: 'المعلمون', path: '/admin/teachers', icon: Users, category: 'teachers_halaqahs', requiredPermission: ['view_teachers', 'manage_teachers'], badgeKey: 'teachers' },
-  { id: 'students', label: 'إدارة الطلاب', shortLabel: 'الطلاب', path: '/admin/students', icon: Users, category: 'teachers_halaqahs', requiredPermission: ['view_students', 'manage_students'], badgeKey: 'students' },
+  { id: 'students', label: 'إدارة الطلاب', shortLabel: 'الطلاب', path: '/admin/students', icon: Users, category: 'teachers_halaqahs', requiredPermission: 'manage_students', requiredRoles: ['admin', 'campus_admin', 'system_admin', 'supervisor'], badgeKey: 'students' },
   { id: 'supervisors', label: 'إدارة المشرفين', shortLabel: 'المشرفون', path: '/admin/supervisors', icon: ShieldCheck, category: 'teachers_halaqahs', requiredPermission: ['view_supervisors', 'manage_supervisors', 'manage_staff'], badgeKey: 'supervisors' },
   { id: 'attendance', label: 'الحضور والانصراف', shortLabel: 'الحضور', path: '/admin/attendance', icon: Calendar, category: 'teachers_halaqahs', requiredPermission: ['view_attendance', 'manage_attendance'] },
 
@@ -192,6 +192,11 @@ export function getNavigationGroups(
       if (!item.requiredRoles.includes(currentUser.role)) {
         continue;
       }
+    }
+
+    // 2.2 Administrative Isolation: Parents and students must NEVER see /admin paths
+    if ((currentUser.role === 'parent' || currentUser.role === 'student') && item.path?.startsWith('/admin')) {
+      continue;
     }
 
     // 2.5 Custom Authorization Check (e.g. for Finance & Collection)

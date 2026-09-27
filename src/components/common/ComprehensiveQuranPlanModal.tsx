@@ -180,6 +180,13 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   const [useStageTemplate, setUseStageTemplate] = useState<boolean>(false);
   const [selectedStageConfigId, setSelectedStageConfigId] = useState<string>('');
 
+  // Overall Quran Plan Type: 'combined' (حفظ ومراجعة) | 'memorization' (حفظ فقط) | 'revision' (مراجعة فقط)
+  const [setupPlanType, setSetupPlanType] = useState<'combined' | 'memorization' | 'revision'>(() => {
+    if (activePlan?.planType === 'revision') return 'revision';
+    if (activePlan?.planType === 'memorization' || activePlan?.revisionMode === 'none') return 'memorization';
+    return 'combined';
+  });
+
   // Target Boundaries
   const [setupStartSurah, setSetupStartSurah] = useState<string>('الناس');
   const [setupStartAyah, setSetupStartAyah] = useState<number>(1);
@@ -375,15 +382,16 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         customDirection: setupDirection,
         customRevisionDirection: setupRevisionDirection,
         customUnitType: setupUnitType,
+        planType: setupPlanType,
         customDailyAmount: setupDailyAmount,
-        customRevisionDailyPages: setupRevisionMode === 'none' ? 0 : setupRevisionDailyPages,
-        customRevisionUnitsPerWindow: setupRevisionMode === 'surahs' ? setupRevisionUnitsPerWindow : undefined,
-        revisionMode: setupRevisionMode,
-        savingOffset: setupSavingOffset,
-        revisionOffset: setupRevisionOffset,
-        customConsolidationDays: setupConsolidationDays,
+        customRevisionDailyPages: setupPlanType === 'memorization' || setupRevisionMode === 'none' ? 0 : setupRevisionDailyPages,
+        customRevisionUnitsPerWindow: setupPlanType === 'memorization' || setupRevisionMode === 'none' ? undefined : (setupRevisionMode === 'surahs' ? setupRevisionUnitsPerWindow : undefined),
+        revisionMode: setupPlanType === 'memorization' ? 'none' : setupRevisionMode,
+        savingOffset: setupPlanType === 'revision' ? 0 : setupSavingOffset,
+        revisionOffset: setupPlanType === 'memorization' ? 0 : setupRevisionOffset,
+        customConsolidationDays: setupPlanType === 'revision' ? 0 : setupConsolidationDays,
         customWorkingDays: setupWorkingDays,
-        autoMinorRevisionMode: setupRevisionMode !== 'none' && setupAutoMinorRevision,
+        autoMinorRevisionMode: setupPlanType !== 'memorization' && setupRevisionMode !== 'none' && setupAutoMinorRevision,
         manualRevisionRange,
         sessionRecords: (sessionRecords || []).filter((r) => r.studentId === student.id),
         halaqah: studentHalaqah,
@@ -559,9 +567,8 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     if (!printRef.current || isPrinting) return;
     setIsPrinting(true);
     try {
-      await executePrintOrPdfFallback({
-        element: printRef.current,
-        filename: `خطة_القرآن_${student.fullName.replace(/\s+/g, '_')}`,
+      await executePrintOrPdfFallback(printRef.current, {
+        fileName: `خطة_القرآن_${student.fullName.replace(/\s+/g, '_')}`,
         title: `الخطة القرآنية الشاملة — ${student.fullName}`,
       });
     } catch (err) {
@@ -803,6 +810,64 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                   )}
                 </div>
 
+                {/* 0. اختيار نوع الخطة القرآنية المطلوب اعتمادها */}
+                <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200">
+                  <label className="text-xs font-black text-emerald-950 block mb-2">
+                    نوع ومسار الخطة القرآنية المطلوب تأسيسها:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSetupPlanType('combined');
+                        if (setupRevisionMode === 'none') setSetupRevisionMode('pages');
+                      }}
+                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
+                        setupPlanType === 'combined'
+                          ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
+                      }`}
+                    >
+                      حفظ ومراجعة (شامل)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSetupPlanType('memorization');
+                        setSetupRevisionMode('none');
+                        setSetupRevisionOffset(0);
+                      }}
+                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
+                        setupPlanType === 'memorization'
+                          ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
+                      }`}
+                    >
+                      حفظ فقط (الاستغناء عن المراجعة)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSetupPlanType('revision');
+                        if (setupRevisionMode === 'none') setSetupRevisionMode('pages');
+                        setSetupSavingOffset(0);
+                      }}
+                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
+                        setupPlanType === 'revision'
+                          ? 'bg-indigo-700 text-white border-indigo-800 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'
+                      }`}
+                    >
+                      مراجعة فقط (بدون حفظ جديد)
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-emerald-800 mt-2 font-medium">
+                    {setupPlanType === 'combined' && 'المسار المتكامل: إنجاز يومي متزامن للحفظ الجديد مع مراجعة تراكمية متدحرجة أو بالسور.'}
+                    {setupPlanType === 'memorization' && 'الاستغناء عن المراجعة: يركز الطالب على مقرر الحفظ الجديد فقط، ويكون ويزارد المعلم مخصصاً للحفظ دون إجبار على المراجعة.'}
+                    {setupPlanType === 'revision' && 'مسار المراجعة والتثبيت: يركز الطالب على مراجعة المحفوظ السابق دون تكليفه بحفظ جديد في ويزارد المعلم.'}
+                  </p>
+                </div>
+
                 {/* Optional Stage Template Selector */}
                 <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between gap-3">
@@ -995,7 +1060,10 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
-                        onClick={() => setSetupRevisionMode('pages')}
+                        onClick={() => {
+                          setSetupRevisionMode('pages');
+                          if (setupPlanType === 'memorization') setSetupPlanType('combined');
+                        }}
                         className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
                           setupRevisionMode === 'pages'
                             ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
@@ -1006,7 +1074,10 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setSetupRevisionMode('surahs')}
+                        onClick={() => {
+                          setSetupRevisionMode('surahs');
+                          if (setupPlanType === 'memorization') setSetupPlanType('combined');
+                        }}
                         className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
                           setupRevisionMode === 'surahs'
                             ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
@@ -1017,14 +1088,18 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setSetupRevisionMode('none')}
+                        onClick={() => {
+                          setSetupRevisionMode('none');
+                          setSetupRevisionOffset(0);
+                          if (setupPlanType !== 'revision') setSetupPlanType('memorization');
+                        }}
                         className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
                           setupRevisionMode === 'none'
                             ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
-                        بدون مراجعة (إلغاء)
+                        بدون مراجعة (الاستغناء)
                       </button>
                     </div>
                   </div>
@@ -1426,9 +1501,14 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block">المسارات النشطة</span>
+                      <span className="text-slate-400 block">نوع ومسار الخطة</span>
                       <span className="font-black text-emerald-800">
-                        حفظ ومراجعة قرآنية{spellingTrackOn ? ' + هجاء' : ''}
+                        {effectivePlan.planType === 'revision'
+                          ? 'مراجعة فقط (بدون حفظ جديد)'
+                          : effectivePlan.planType === 'memorization' || effectivePlan.revisionMode === 'none'
+                          ? 'حفظ فقط (الاستغناء عن المراجعة)'
+                          : 'حفظ ومراجعة متكاملة'}
+                        {spellingTrackOn ? ' + هجاء' : ''}
                       </span>
                     </div>
                     <div>
@@ -1772,7 +1852,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     {/* Spelling */}
                                     {spellingTrackOn && (
                                       <td className="py-2 px-2.5 text-slate-600">
-                                        {day.spellingLessonTitle || '—'}
+                                        {day.spellingAssignment?.title || '—'}
                                       </td>
                                     )}
 

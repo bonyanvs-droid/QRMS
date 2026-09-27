@@ -333,6 +333,7 @@ export interface DailySessionRecord {
     surahTo: string;
     ayahTo: number;
     score: number;
+    evaluation?: 'excellent' | 'very_good' | 'good' | 'needs_practice' | string;
     notes?: string;
     unachieved?: boolean;
   };
@@ -341,6 +342,7 @@ export interface DailySessionRecord {
     surahTo: string;
     type: 'قريبة' | 'بعيدة';
     score: number;
+    evaluation?: 'excellent' | 'very_good' | 'good' | 'needs_practice' | string;
     notes?: string;
     /** Set when the revision range was auto-determined by the plan engine (Auto Minor Revision) */
     isAutoRange?: boolean;
@@ -348,6 +350,7 @@ export interface DailySessionRecord {
     unachieved?: boolean;
   };
   customTracks?: Record<string, any>; // مسارات مخصصة مستقبلية
+  status?: string; // Compatibility status field
   createdAt?: string;
 }
 

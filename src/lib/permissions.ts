@@ -590,7 +590,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   ],
   parent: [
     'view_dashboard',
-    'view_students',
     'view_quran',
     'view_points',
   ],

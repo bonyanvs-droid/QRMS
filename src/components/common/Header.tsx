@@ -134,8 +134,14 @@ export const Header: React.FC<HeaderProps> = ({
   }, [location.pathname]);
 
   const handleLogout = async () => {
+    const tenantSlug = activeTenant?.slug || activeTenant?.id || currentUser?.tenantId || 'ghazzawi';
+    const isPlatformAdmin = currentUser?.role === 'system_admin' && !currentUser?.tenantId;
     await logout();
-    navigate('/', { replace: true });
+    if (isPlatformAdmin) {
+      navigate('/platform', { replace: true });
+    } else {
+      navigate(`/t/${tenantSlug}`, { replace: true });
+    }
   };
 
   const headerRef = useRef<HTMLElement>(null);

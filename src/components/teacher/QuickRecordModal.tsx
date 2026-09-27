@@ -250,6 +250,8 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   }, [activeQuranPlan, todayIso]);
 
   // Auto Minor Revision: engine-determined range, teacher only records the actual result
+  const isRevisionPlan = activeQuranPlan?.planType === 'revision';
+  const isMemOnlyPlan = activeQuranPlan?.planType === 'memorization' || activeQuranPlan?.revisionMode === 'none';
   const autoRevision = activeQuranPlan?.autoMinorRevisionMode === true;
   const autoRevLabel = todayDailyItem?.revisionDisplayLabel;
   const autoRevPages = todayDailyItem?.revisionPagesAmount;
@@ -263,6 +265,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       ALL_114_SURAHS.find((s) => s.number === planUnit.start.surahNumber)?.name
     );
   }, [planUnit]);
+
   const planEndSurah = useMemo(() => {
     if (!planUnit?.end) return undefined;
     return (
@@ -298,11 +301,23 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [memScore, setMemScore] = useState<number>(100);
   const [memNotes, setMemNotes] = useState('');
 
-  // Revision Track State
-  const [revSurahFrom, setRevSurahFrom] = useState<string>('الناس');
-  const [revAyahFrom, setRevAyahFrom] = useState<number>(1);
-  const [revSurahTo, setRevSurahTo] = useState<string>(student.currentSurah);
-  const [revAyahTo, setRevAyahTo] = useState<number>(student.currentAyah || 1);
+  // Revision Track State — prefilled from revision target when plan is revision-only
+  const [revSurahFrom, setRevSurahFrom] = useState<string>(() => {
+    if (isRevisionPlan && planStartSurah) return planStartSurah;
+    return 'الناس';
+  });
+  const [revAyahFrom, setRevAyahFrom] = useState<number>(() => {
+    if (isRevisionPlan && planUnit?.start?.ayahNumber) return planUnit.start.ayahNumber;
+    return 1;
+  });
+  const [revSurahTo, setRevSurahTo] = useState<string>(() => {
+    if (isRevisionPlan && planEndSurah) return planEndSurah;
+    return student.currentSurah || 'الفاتحة';
+  });
+  const [revAyahTo, setRevAyahTo] = useState<number>(() => {
+    if (isRevisionPlan && planUnit?.end?.ayahNumber) return planUnit.end.ayahNumber;
+    return student.currentAyah || 1;
+  });
   const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>('قريبة');
   const [revScore, setRevScore] = useState<number>(100);
   const [revManualOverride, setRevManualOverride] = useState(false);
@@ -373,27 +388,57 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       }
       return list;
     }
+
     if (todayDailyItem) {
       const dt = todayDailyItem.dayType;
-      if (!dt || dt === 'memorization' || dt === 'consolidation' || memHasPendingDebt) list.push('memorization');
-      if (
-        dt === 'revision' ||
-        dt === 'general_revision' ||
-        (todayDailyItem.revisionPagesAmount ?? 0) > 0 ||
-        revHasPendingDebt
-      )
+      // 1. Memorization track step:
+      if (!isRevisionPlan) {
+        if (!dt || dt === 'memorization' || dt === 'consolidation' || memHasPendingDebt) {
+          list.push('memorization');
+        }
+      } else if (memHasPendingDebt) {
+        list.push('memorization');
+      }
+
+      // 2. Revision track step:
+      if (!isMemOnlyPlan) {
+        if (
+          isRevisionPlan ||
+          dt === 'revision' ||
+          dt === 'general_revision' ||
+          (todayDailyItem.revisionPagesAmount ?? 0) > 0 ||
+          revHasPendingDebt
+        ) {
+          list.push('revision');
+        }
+      } else if (revHasPendingDebt) {
         list.push('revision');
+      }
     } else {
-      list.push('memorization', 'revision');
+      if (isRevisionPlan) {
+        list.push('revision');
+      } else if (isMemOnlyPlan) {
+        list.push('memorization');
+      } else {
+        list.push('memorization', 'revision');
+      }
     }
-    if (list.length === 0) list.push('memorization');
+
+    if (list.length === 0) {
+      if (isRevisionPlan) {
+        list.push('revision');
+      } else {
+        list.push('memorization');
+      }
+    }
+
     // Custom admin-defined tracks → generic wizard steps, in halaqah track order
     for (const tid of enabledTrackIds) {
       if (!NON_SESSION_TRACK_IDS.includes(tid) && !list.includes(tid)) list.push(tid);
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled, memHasPendingDebt, revHasPendingDebt, spellingHasPendingDebt]);
+  }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled, memHasPendingDebt, revHasPendingDebt, spellingHasPendingDebt, isRevisionPlan, isMemOnlyPlan, enabledTrackIds]);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -554,6 +599,38 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
         });
       } catch (err) {
         console.error('Quran plan recording sync warning:', err);
+      }
+    }
+
+    // Sync with Quran Planning Engine when student is on a Revision-Only plan
+    if (activeQuranPlan && todayDailyItem && isRevisionPlan && steps.includes('revision') && !isRevUnachieved) {
+      try {
+        const endMeta = findSurahMetadata(revSurahTo);
+        let actualEndPosition: { surahNumber: number; ayahNumber: number } | undefined;
+        if (endMeta) {
+          actualEndPosition = {
+            surahNumber: endMeta.number,
+            ayahNumber: Math.min(Math.max(1, revAyahTo), getSurahAyahsCount(endMeta.number)),
+          };
+        }
+        const milestoneDate = todayDailyItem.date || todayIso;
+        await recordQuranPlanAchievement({
+          planId: activeQuranPlan.id,
+          dayDate: milestoneDate,
+          status: 'completed',
+          actualEndPosition,
+          evaluation:
+            revScore >= 90
+              ? 'excellent'
+              : revScore >= 70
+              ? 'very_good'
+              : revScore >= 50
+              ? 'good'
+              : 'needs_practice',
+          notes: 'تمت المراجعة عبر نافذة التسجيل السريع للمعلم',
+        });
+      } catch (err) {
+        console.error('Quran revision plan recording sync warning:', err);
       }
     }
 

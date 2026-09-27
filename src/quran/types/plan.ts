@@ -277,6 +277,12 @@ export interface StudentQuranPlan {
   dailyAmount: number;
   revisionDailyPages?: number;
   consolidationDaysPerSurah?: number;
+  /** Backwards compatibility alias for revisionSettings.mode */
+  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  /** Backwards compatibility alias for revisionDailyPages */
+  dailyRevisionPages?: number;
+  /** Backwards compatibility alias for consolidationDaysPerSurah */
+  consolidationDays?: number;
 
   /**
    * Automatic Minor Revision Mode — when true, the planning engine seeds the rolling

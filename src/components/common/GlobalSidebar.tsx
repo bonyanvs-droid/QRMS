@@ -196,8 +196,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (onLogout) {
       onLogout();
     } else {
+      const tenantSlug = activeTenant?.slug || activeTenant?.id || currentUser?.tenantId || 'ghazzawi';
+      const isPlatformAdmin = currentUser?.role === 'system_admin' && !currentUser?.tenantId;
       logout();
-      navigate('/');
+      if (isPlatformAdmin) {
+        navigate('/platform');
+      } else {
+        navigate(`/t/${tenantSlug}`);
+      }
     }
   };
 
