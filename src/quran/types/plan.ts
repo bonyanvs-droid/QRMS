@@ -72,7 +72,7 @@ export interface DailyPlanItem {
   monthNumber: number;
   itemIndex: number; // 1-based sequential day of work
   planType: 'memorization' | 'revision';
-  dayType?: 'memorization' | 'consolidation' | 'revision' | 'general_revision';
+  dayType?: 'memorization' | 'consolidation' | 'revision' | 'general_revision' | 'holiday';
   unitType: PlanningUnitType;
   targetUnit: PlanningUnit;
 

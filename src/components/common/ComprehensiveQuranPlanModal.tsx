@@ -26,7 +26,6 @@ import {
   DailyPlanItem,
   PlanDirection,
   PlanningUnitType,
-  ManualRevisionRange,
 } from '../../quran/types/plan';
 import {
   formatHijriDate,
@@ -87,6 +86,9 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     teachers,
     activeTenant,
     quranStageConfigs,
+    academicConfig,
+    stages,
+    spellingLessons,
     previewStudentQuranPlan,
     approveStudentQuranPlan,
     archiveStudentQuranPlan,
@@ -276,34 +278,43 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     }
 
     try {
-      const manualRevisionRange: ManualRevisionRange | undefined = !setupAutoMinorRevision
+      const revStartMeta = findSurahMetadata(setupRevStartSurah);
+      const revEndMeta = findSurahMetadata(setupRevEndSurah);
+      const manualRevisionRange = !setupAutoMinorRevision
         ? {
-            startSurah: setupRevStartSurah,
-            startAyah: setupRevStartAyah,
-            endSurah: setupRevEndSurah,
-            endAyah: setupRevEndAyah,
+            start: { surahNumber: revStartMeta?.number ?? 1, ayahNumber: setupRevStartAyah },
+            end: { surahNumber: revEndMeta?.number ?? 114, ayahNumber: setupRevEndAyah },
           }
         : undefined;
 
-      const built = await previewStudentQuranPlan(
-        {
-          stageConfigId: useStageTemplate && selectedStageConfigId ? selectedStageConfigId : undefined,
-          targetStartSurah: setupStartSurah,
-          targetStartAyah: setupStartAyah,
-          targetEndSurah: setupEndSurah,
-          targetEndAyah: setupEndAyah,
-          customDirection: setupDirection,
-          customRevisionDirection: setupRevisionDirection,
-          customUnitType: setupUnitType,
-          customDailyAmount: setupDailyAmount,
-          customRevisionDailyPages: setupRevisionDailyPages,
-          customConsolidationDays: setupConsolidationDays,
-          customWorkingDays: setupWorkingDays,
-          autoMinorRevisionMode: setupAutoMinorRevision,
-          manualRevisionRange,
-        },
-        student
-      );
+      const stageConfig =
+        useStageTemplate && selectedStageConfigId
+          ? quranStageConfigs.find((c) => c.id === selectedStageConfigId)
+          : undefined;
+
+      const built = await previewStudentQuranPlan({
+        student,
+        stageConfig,
+        allStageConfigs: quranStageConfigs,
+        customTargetStart: { surahNumber: startSurahMeta.number, ayahNumber: setupStartAyah },
+        customTargetEnd: { surahNumber: endSurahMeta.number, ayahNumber: setupEndAyah },
+        customDirection: setupDirection,
+        customRevisionDirection: setupRevisionDirection,
+        customUnitType: setupUnitType,
+        customDailyAmount: setupDailyAmount,
+        customRevisionDailyPages: setupRevisionDailyPages,
+        customRevisionUnitsPerWindow: setupRevisionUnitsPerWindow,
+        customConsolidationDays: setupConsolidationDays,
+        customWorkingDays: setupWorkingDays,
+        autoMinorRevisionMode: setupAutoMinorRevision,
+        manualRevisionRange,
+        sessionRecords: (sessionRecords || []).filter((r) => r.studentId === student.id),
+        halaqah: halaqahs.find((h) => h.id === student.halaqahId),
+        tenant: activeTenant,
+        academicConfig,
+        stages,
+        spellingLessons,
+      });
 
       setPreviewPlan(built);
       setIsConfiguring(false);
@@ -346,7 +357,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     if (!activePlan) return;
     setIsArchiving(true);
     try {
-      await archiveStudentQuranPlan(student.id, archiveMode);
+      await archiveStudentQuranPlan({ planId: activePlan.id, archiveMode });
       setShowArchiveDialog(false);
       setIsConfiguring(true);
       setFeedbackMessage({
@@ -1313,7 +1324,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     return (
                                       <tr key={d.id || idx} className="bg-purple-50/70 border-y border-purple-100/90">
                                         <td
-                                          colSpan={calendar !== 'none' ? (spellingTrackOn ? 7 : 6) : (spellingTrackOn ? 6 : 5)}
+                                          colSpan={spellingTrackOn ? 7 : 6}
                                           className="px-3 py-2 text-center text-purple-950 font-bold text-xs"
                                         >
                                           <div className="flex items-center justify-center gap-2">
