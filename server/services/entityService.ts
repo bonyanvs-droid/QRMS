@@ -2,6 +2,12 @@ import { executeQuery, executeQuerySingle } from '../db/query';
 import { getDbPool } from '../config/db';
 import { snakeToCamelCase, camelToSnakeCase } from '../../src/db/schema';
 import { resolveCanonicalTenantId, getTenantAliases } from './tenantService';
+import {
+  syncStudentWrite,
+  syncStudentDeleted,
+  syncStudentsBulk,
+  syncUserWrite,
+} from './accountSyncService';
 
 export interface TableConfig {
   tableName: string;
@@ -1060,6 +1066,15 @@ export async function upsert<T = any>(
     sanitized.role = sanitized.staff_role;
   }
 
+  // Capture the pre-write row for tables participating in account sync
+  let prevRow: any = null;
+  if (config.tableName === 'students' || config.tableName === 'users') {
+    prevRow = await executeQuerySingle(
+      `SELECT * FROM ${config.tableName} WHERE ${config.primaryKey} = $1`,
+      [sanitized[config.primaryKey]]
+    );
+  }
+
   const keys = Object.keys(sanitized);
 
   if (keys.length === 0) {
@@ -1104,7 +1119,31 @@ export async function upsert<T = any>(
     return existing;
   }
 
-  return hydrateRow<T>(config, result);
+  const savedRow = hydrateRow<T>(config, result);
+
+  // Account synchronization hooks — keep users login accounts consistent with
+  // operational rows. Failures are logged and surfaced as non-blocking warnings
+  // so a sync hiccup never loses the primary write.
+  const syncWarnings: any[] = [];
+  if (config.tableName === 'students') {
+    try {
+      await syncStudentWrite(undefined, savedRow, prevRow);
+    } catch (syncErr) {
+      console.error('[SYNC] syncStudentWrite failed:', syncErr);
+      syncWarnings.push({ type: 'sync_error', message: 'تعذرت مزامنة حسابات الدخول لهذا الطالب.' });
+    }
+  } else if (config.tableName === 'users') {
+    try {
+      syncWarnings.push(...(await syncUserWrite(savedRow, prevRow)));
+    } catch (syncErr) {
+      console.error('[SYNC] syncUserWrite failed:', syncErr);
+    }
+  }
+  if (syncWarnings.length) {
+    (savedRow as any)._syncWarnings = syncWarnings;
+  }
+
+  return savedRow;
 }
 
 /**
@@ -1135,6 +1174,16 @@ export async function bulkUpsert<T = any>(
   try {
     await client.query('BEGIN');
 
+    // Pre-write snapshot for account sync (students: guardian relinking)
+    const prevRows = new Map<string, any>();
+    if (config.tableName === 'students') {
+      const ids = items.map((i) => i.id).filter(Boolean);
+      if (ids.length) {
+        const prev = await client.query(`SELECT * FROM students WHERE id = ANY($1)`, [ids]);
+        for (const r of prev.rows) prevRows.set(r.id, r);
+      }
+    }
+
     for (const item of items) {
       const sanitized = prepareRecord(config, item, tenantId);
       const keys = Object.keys(sanitized);
@@ -1154,6 +1203,12 @@ export async function bulkUpsert<T = any>(
       if (res.rows.length > 0) {
         results.push(hydrateRow<T>(config, snakeToCamelCase<T>(res.rows[0])));
       }
+    }
+
+    // Batch account sync inside the same transaction — students writes
+    // provision/update linked users accounts atomically with the data.
+    if (config.tableName === 'students' && results.length > 0) {
+      await syncStudentsBulk(client, results, prevRows);
     }
 
     await client.query('COMMIT');
@@ -1179,6 +1234,32 @@ export async function deleteRecord(
     throw new Error(`Unknown or unsupported collection: '${collectionName}'`);
   }
 
+  // Snapshot the row before deletion when account sync depends on it
+  let deletedRow: any = null;
+  if (config.tableName === 'students') {
+    deletedRow = await executeQuerySingle(
+      `SELECT * FROM students WHERE ${config.primaryKey} = $1`,
+      [id]
+    );
+  }
+
+  // Guard: a student login account cannot be deleted while its student record
+  // is still active — delete/archive the student record instead.
+  if (config.tableName === 'users') {
+    const target = await executeQuerySingle(`SELECT role, student_id, tenant_id, is_active FROM users WHERE id = $1`, [id]);
+    if (target && target.role === 'student' && target.student_id) {
+      const linked = await executeQuerySingle(
+        `SELECT id FROM students WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE AND COALESCE(is_archived, FALSE) = FALSE`,
+        [target.student_id]
+      );
+      if (linked) {
+        const err: any = new Error('لا يمكن حذف حساب طالب ما دام سجل الطالب نشطاً — احذف أو أرشف الطالب أولاً.');
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+  }
+
   const conditions: string[] = [`${config.primaryKey} = $1`];
   const params: any[] = [id];
 
@@ -1189,6 +1270,15 @@ export async function deleteRecord(
 
   const query = `DELETE FROM ${config.tableName} WHERE ${conditions.join(' AND ')} RETURNING ${config.primaryKey}`;
   const deleted = await executeQuerySingle(query, params);
+
+  // Post-delete account cleanup for students (orphan parents are removed)
+  if (deleted && config.tableName === 'students' && deletedRow) {
+    try {
+      await syncStudentDeleted(undefined, deletedRow);
+    } catch (syncErr) {
+      console.error('[SYNC] syncStudentDeleted failed:', syncErr);
+    }
+  }
 
   return !!deleted;
 }

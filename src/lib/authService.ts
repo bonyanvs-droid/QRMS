@@ -20,11 +20,21 @@ export async function hashPasswordWithSalt(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+export interface AccountChoice {
+  id: string;
+  name: string;
+  role: UserRole;
+  staffRole?: string | null;
+  tenantId?: string | null;
+}
+
 export interface AuthLoginResult {
   success: boolean;
   user?: User;
   errorMessage?: string;
   mustChangePassword?: boolean;
+  requiresAccountSelection?: boolean;
+  accounts?: AccountChoice[];
 }
 
 /**
@@ -67,10 +77,22 @@ export async function authenticateUser(
   }
 
   try {
-    const res = await apiClient.post<{ ok: boolean; user: User; mustChangePassword: boolean; error?: string }>(
-      '/auth/login',
-      { identifier: cleanIdentifier, password: plainPassword }
-    );
+    const res = await apiClient.post<{
+      ok: boolean;
+      user?: User;
+      mustChangePassword?: boolean;
+      error?: string;
+      requiresAccountSelection?: boolean;
+      accounts?: AccountChoice[];
+    }>('/auth/login', { identifier: cleanIdentifier, password: plainPassword });
+
+    if (res && res.requiresAccountSelection && res.accounts) {
+      return {
+        success: false,
+        requiresAccountSelection: true,
+        accounts: res.accounts,
+      };
+    }
 
     if (res && res.user) {
       // Record login in audit log
@@ -104,6 +126,39 @@ export async function authenticateUser(
     return {
       success: false,
       errorMessage: errorMsg,
+    };
+  }
+}
+
+/**
+ * Completes login after the user selected one of several verified accounts
+ * sharing the same identifier.
+ */
+export async function authenticateSelectedAccount(
+  identifier: string,
+  plainPassword: string,
+  selectedUserId: string
+): Promise<AuthLoginResult> {
+  try {
+    const res = await apiClient.post<{
+      ok: boolean;
+      user?: User;
+      mustChangePassword?: boolean;
+      error?: string;
+    }>('/auth/login/select', {
+      identifier: identifier.trim(),
+      password: plainPassword,
+      selectedUserId,
+    });
+
+    if (res && res.user) {
+      return { success: true, user: res.user, mustChangePassword: res.mustChangePassword };
+    }
+    return { success: false, errorMessage: res?.error || 'تعذر إكمال تسجيل الدخول.' };
+  } catch (apiErr: any) {
+    return {
+      success: false,
+      errorMessage: apiErr?.message || 'تعذر الاتصال بخادم المنظومة.',
     };
   }
 }

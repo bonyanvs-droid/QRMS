@@ -254,8 +254,10 @@ import {
 } from '../quran/services/studentPlanBridge';
 import {
   authenticateUser,
+  authenticateSelectedAccount,
   performLogout,
   updateUserPassword,
+  AccountChoice,
 } from '../lib/authService';
 import { getAcademicOutcome } from '../quran/services/outcomeService';
 import { resolveContextIdentity, ResolvedIdentity } from '../lib/identityResolver';
@@ -312,7 +314,9 @@ export interface AppContextType {
   clearDemoBlockedNotice: () => void;
   exitDemoSession: () => Promise<void>;
   // Auth methods
-  login: (phone: string, password?: string) => Promise<User | null>;
+  login: (phone: string, password?: string, selectedUserId?: string) => Promise<User | null | 'SELECT_ACCOUNT'>;
+  pendingAccountChoices: { identifier: string; password: string; accounts: AccountChoice[] } | null;
+  clearPendingAccountChoices: () => void;
   logout: () => void;
   resetOperationalMemory: () => void;
   changePassword: (newPassword: string) => Promise<boolean>;
@@ -2004,12 +2008,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // -------------------------------------------------------------
   // Secure Authentication with Firebase Auth & Audit
   // -------------------------------------------------------------
-  const login = useCallback(async (phone: string, password?: string): Promise<User | null> => {
+  const [pendingAccountChoices, setPendingAccountChoices] = useState<{
+    identifier: string;
+    password: string;
+    accounts: AccountChoice[];
+  } | null>(null);
+  const clearPendingAccountChoices = useCallback(() => setPendingAccountChoices(null), []);
+
+  const login = useCallback(async (phone: string, password?: string, selectedUserId?: string): Promise<User | null | 'SELECT_ACCOUNT'> => {
     try {
-      const authResult = await authenticateUser(phone, password);
+      const authResult = selectedUserId
+        ? await authenticateSelectedAccount(phone, password || '', selectedUserId)
+        : await authenticateUser(phone, password);
+
+      if (authResult.requiresAccountSelection && authResult.accounts) {
+        setPendingAccountChoices({ identifier: phone, password: password || '', accounts: authResult.accounts });
+        return 'SELECT_ACCOUNT';
+      }
+
       if (!authResult.success || !authResult.user) {
         return null;
       }
+
+      setPendingAccountChoices(null);
 
       const user = authResult.user;
       const defaultTenantId = INITIAL_TENANTS[0]?.id || '';
@@ -2278,63 +2299,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setStudents((prev) => [...prev, newStudent]);
     await dbSaveStudent(newStudent, currentActor);
-
-    // 1. Provision Platform User Account for the Student (Student login via nationalId)
-    const studentLoginId = (newStudent.nationalId || '').trim();
-    const studentUserId = studentLoginId ? `usr_stu_${studentLoginId}` : `usr_${newId}`;
-    const studentUser: User = {
-      id: studentUserId,
-      name: newStudent.fullName || newStudent.name || 'طالب',
-      fullName: newStudent.fullName || newStudent.name || 'طالب',
-      nationalId: studentLoginId || undefined,
-      loginIdentifier: studentLoginId || newStudent.parentPhone || newId,
-      phone: newStudent.parentPhone || '',
-      role: 'student',
-      studentId: newId,
-      halaqahId: newStudent.halaqahId,
-      tenantId: newStudent.tenantId || activeTenantId,
-      isActive: true,
-      mustChangePassword: true,
-    };
-    await dbSaveUser({ ...studentUser, plainPassword: 'Student@2026' }, currentActor);
-
-    // 2. Link or Provision Platform User Account for the Parent (Adult login via phone, supports multiple students)
-    const parentPhoneClean = (newStudent.parentPhone || '').replace(/[^\d+]/g, '').trim();
-    if (parentPhoneClean) {
-      const existingParent = users.find(
-        (u) => u.role === 'parent' && (u.phone?.replace(/[^\d+]/g, '') === parentPhoneClean || u.loginIdentifier === parentPhoneClean)
-      );
-
-      if (existingParent) {
-        const currentStudentIds = existingParent.studentIds || [];
-        if (!currentStudentIds.includes(newId)) {
-          const updatedStudentIds = [...currentStudentIds, newId];
-          const updatedParentUser: User = {
-            ...existingParent,
-            studentIds: updatedStudentIds,
-          };
-          setUsers((prev) => prev.map((u) => (u.id === existingParent.id ? updatedParentUser : u)));
-          await dbSaveUser(updatedParentUser, currentActor);
-        }
-      } else {
-        const parentUserId = `usr_parent_${parentPhoneClean}`;
-        const parentUser: User = {
-          id: parentUserId,
-          name: newStudent.parentName || `ولي أمر الطالب (${newStudent.fullName || newStudent.name})`,
-          fullName: newStudent.parentName || `ولي أمر الطالب (${newStudent.fullName || newStudent.name})`,
-          phone: parentPhoneClean,
-          loginIdentifier: parentPhoneClean,
-          role: 'parent',
-          studentIds: [newId],
-          tenantId: newStudent.tenantId || activeTenantId,
-          isActive: true,
-          mustChangePassword: true,
-        };
-        setUsers((prev) => [...prev, parentUser]);
-        await dbSaveUser({ ...parentUser, plainPassword: 'Parent@2026' }, currentActor);
-      }
-    }
-  }, [currentActor, activeTenantId, users]);
+    // Login accounts (student + guardian parent) are provisioned server-side by
+    // the accountSync hooks on the students collection — the users subscription
+    // picks them up automatically.
+  }, [currentActor, activeTenantId]);
 
   const updateStudent = useCallback(async (id: string, updates: Partial<Student>) => {
     if (guardDemoWrite('تعديل بيانات طالب')) return;
@@ -2350,35 +2318,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     if (updated) {
       await dbSaveStudent(updated, currentActor);
-
-      // Sync student's platform_user record
-      const studentUser = users.find((u) => u.studentId === id || u.id === `usr_${id}` || (updated?.nationalId && u.nationalId === updated.nationalId));
-      if (studentUser) {
-        const updatedUser: User = {
-          ...studentUser,
-          name: updated.fullName || updated.name || studentUser.name,
-          fullName: updated.fullName || updated.name || studentUser.fullName,
-          nationalId: updated.nationalId || studentUser.nationalId,
-          loginIdentifier: updated.nationalId || studentUser.loginIdentifier,
-          halaqahId: updated.halaqahId || studentUser.halaqahId,
-        };
-        await dbSaveUser(updatedUser, currentActor);
-      }
+      // Linked login accounts (student + parent) are synced server-side.
     }
-  }, [currentActor, users, guardDemoWrite]);
+  }, [currentActor, guardDemoWrite]);
 
   const deleteStudent = useCallback(async (id: string) => {
     if (guardDemoWrite('حذف طالب')) return;
     setStudents((prev) => prev.filter((s) => s.id !== id));
     await dbDeleteStudent(id, currentActor);
-
-    // Delete associated student platform user
-    const studentUser = users.find((u) => u.studentId === id || u.id === `usr_${id}`);
-    if (studentUser) {
-      setUsers((prev) => prev.filter((u) => u.id !== studentUser.id));
-      await dbDeleteUser(studentUser.id, currentActor);
-    }
-  }, [currentActor, users, guardDemoWrite]);
+    // The linked student login account and any orphaned parent account are
+    // cleaned up server-side by the accountSync delete hook.
+  }, [currentActor, guardDemoWrite]);
 
   const transferStudent = useCallback(async (studentId: string, newHalaqahId: string, newTeacherId: string) => {
     if (guardDemoWrite('نقل طالب بين الحلقات')) return;
@@ -2970,12 +2920,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // -------------------------------------------------------------
   const recordDailySession = useCallback(async (record: Omit<DailySessionRecord, 'id' | 'createdAt'>) => {
     if (guardDemoWrite('تسجيل حلقة يومية وتقييم طالب')) return;
-    const newRecord: DailySessionRecord = {
-      ...record,
-      id: `rec_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString(),
-    };
-    setSessionRecords((prev) => [newRecord, ...prev]);
+    // One record per student per day: merge into today's existing record when
+    // present. Recording an achievement marks attendance as present — even if
+    // the student was marked absent earlier (achieving proves presence).
+    const existing = sessionRecords.find(
+      (r) => r.studentId === record.studentId && r.date === record.date
+    );
+    const newRecord: DailySessionRecord = existing
+      ? {
+          ...existing,
+          ...record,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          // Achievement proves presence: flip 'absent' → 'present', but keep an
+          // explicit 'late' mark (he was late yet still achieved).
+          attendance: existing.attendance === 'absent' ? 'present' : (existing.attendance ?? 'present'),
+        }
+      : {
+          ...record,
+          id: `rec_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          createdAt: new Date().toISOString(),
+        };
+    setSessionRecords((prev) =>
+      existing ? prev.map((r) => (r.id === existing.id ? newRecord : r)) : [newRecord, ...prev]
+    );
 
     // Update student's fast progress pointer
     let updatedStudent: Student | null = null;
@@ -3005,7 +2973,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (updatedStudent) {
       await dbSaveStudent(updatedStudent, currentActor);
     }
-  }, [currentActor, guardDemoWrite]);
+  }, [currentActor, guardDemoWrite, sessionRecords]);
 
   const bulkMarkAttendance = useCallback(async (
     date: string,
@@ -3019,70 +2987,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const halaqah = halaqahs.find((h) => h.id === halaqahId);
     const teacherId = halaqah?.teacherId || '';
 
+    // Upsert semantics: one attendance record per student per day.
+    // Existing today's records get their `attendance` field updated in place;
+    // new rows are created only for students with no record today.
+    const buildAttendanceRecord = (sid: string, status: 'present' | 'late' | 'absent'): DailySessionRecord => {
+      const existing = sessionRecords.find((r) => r.studentId === sid && r.date === date);
+      if (existing) {
+        return { ...existing, attendance: status as any };
+      }
+      return {
+        id: `rec_att_${Date.now()}_${sid}`,
+        studentId: sid,
+        teacherId,
+        halaqahId,
+        date,
+        weekNumber,
+        attendance: status as any,
+        spelling: status === 'absent' ? {
+          lessonId: '',
+          lessonNumber: 0,
+          subLessonScores: {},
+          finalScore: 0,
+          isMastered: false,
+          statusTag: 'غياب',
+          notes: 'غائب',
+        } : undefined,
+        createdAt: new Date().toISOString(),
+      };
+    };
+
     if (Array.isArray(attendanceMapOrPresent)) {
       const presentStudentIds = attendanceMapOrPresent;
       const absIds = absentStudentIds || [];
-      presentStudentIds.forEach((sid) => {
-        newRecords.push({
-          id: `rec_att_${Date.now()}_${sid}`,
-          studentId: sid,
-          teacherId,
-          halaqahId,
-          date,
-          weekNumber,
-          attendance: 'present',
-          createdAt: new Date().toISOString(),
-        });
-      });
-      absIds.forEach((sid) => {
-        newRecords.push({
-          id: `rec_att_${Date.now()}_${sid}`,
-          studentId: sid,
-          teacherId,
-          halaqahId,
-          date,
-          weekNumber,
-          attendance: 'absent',
-          spelling: {
-            lessonId: '',
-            lessonNumber: 0,
-            subLessonScores: {},
-            finalScore: 0,
-            isMastered: false,
-            statusTag: 'غياب',
-            notes: 'غائب',
-          },
-          createdAt: new Date().toISOString(),
-        });
-      });
+      presentStudentIds.forEach((sid) => newRecords.push(buildAttendanceRecord(sid, 'present')));
+      absIds.forEach((sid) => newRecords.push(buildAttendanceRecord(sid, 'absent')));
     } else {
       const attendanceMap = attendanceMapOrPresent;
       Object.entries(attendanceMap).forEach(([sid, status]) => {
-        newRecords.push({
-          id: `rec_att_${Date.now()}_${sid}`,
-          studentId: sid,
-          teacherId,
-          halaqahId,
-          date,
-          weekNumber,
-          attendance: status as any,
-          spelling: status === 'absent' ? {
-            lessonId: '',
-            lessonNumber: 0,
-            subLessonScores: {},
-            finalScore: 0,
-            isMastered: false,
-            statusTag: 'غياب',
-            notes: 'غائب',
-          } : undefined,
-          createdAt: new Date().toISOString(),
-        });
+        newRecords.push(buildAttendanceRecord(sid, status));
       });
     }
 
-    setSessionRecords((prev) => [...newRecords, ...prev]);
+    const updatedIds = new Set(newRecords.map((r) => r.id));
+    setSessionRecords((prev) => [
+      ...newRecords,
+      ...prev.filter((r) => !updatedIds.has(r.id)),
+    ]);
     await dbSaveBulkAttendance(newRecords, currentActor);
-  }, [halaqahs, currentActor, guardDemoWrite]);
+  }, [halaqahs, sessionRecords, currentActor, guardDemoWrite]);
 
   // -------------------------------------------------------------
   // Academic Config & Educational Plan
@@ -5302,6 +5254,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isOffline,
         isCloudSyncing,
         login,
+        pendingAccountChoices,
+        clearPendingAccountChoices,
         logout,
         resetOperationalMemory,
         changePassword,

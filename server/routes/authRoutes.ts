@@ -243,30 +243,44 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     }
 
     // 3. Password verification across ALL matching rows — when several
-    // accounts share one identifier (e.g. parent + student on one phone),
-    // the correct account is the one whose password verifies.
+    // accounts share one identifier (e.g. parent + teacher on one phone),
+    // every account whose password verifies is a valid candidate.
     const verified = candidates.filter((u) => verifyUserPassword(password, u));
 
-    // Deterministic role preference when the same credential verifies
-    // multiple accounts sharing an identifier — a family phone should open
-    // the parent portal, not an arbitrary student account.
-    const ROLE_PRIORITY = ['parent', 'student'];
-    const userRow = [...verified].sort(
-      (a, b) =>
-        (ROLE_PRIORITY.indexOf(a.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(a.role)) -
-        (ROLE_PRIORITY.indexOf(b.role) === -1 ? 99 : ROLE_PRIORITY.indexOf(b.role))
-    )[0];
-
-    if (!userRow) {
+    if (verified.length === 0) {
       res.status(401).json({ ok: false, error: 'بيانات الدخول غير صحيحة. كلمة المرور غير مطابقة.' });
       return;
     }
 
-    // 4. Check account status
-    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
+    // 4. Split verified accounts by status — disabled/archived accounts are
+    // never offered for selection.
+    const isDisabled = (u: any) =>
+      u.isActive === false || u.is_active === false || u.isArchived === true || u.is_archived === true;
+    const activeVerified = verified.filter((u) => !isDisabled(u));
+
+    if (activeVerified.length === 0) {
       res.status(403).json({ ok: false, error: 'هذا الحساب معطل أو مؤرشف. يرجى التواصل مع إدارة المجمع.' });
       return;
     }
+
+    // 5. Multiple verified active accounts sharing this identifier → let the
+    // user choose which capacity to sign in as (معلم / ولي أمر / مشرف ...).
+    if (activeVerified.length > 1) {
+      res.json({
+        ok: true,
+        requiresAccountSelection: true,
+        accounts: activeVerified.map((u) => ({
+          id: u.id,
+          name: u.full_name || u.fullName || u.name,
+          role: u.role,
+          staffRole: u.staff_role || u.staffRole || null,
+          tenantId: u.tenant_id || u.tenantId || null,
+        })),
+      });
+      return;
+    }
+
+    const userRow = activeVerified[0];
 
     // 5. Create authenticated session for the matched user
     const sessionId = `sess_${crypto.randomBytes(24).toString('hex')}`;
@@ -293,6 +307,62 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     });
   } catch (err) {
     console.error('[AUTH] Login unexpected error:', err);
+    next(err);
+  }
+});
+
+/**
+ * POST /api/auth/login/select
+ * Completes login after the user picked one of several verified accounts
+ * sharing the same identifier. The password is re-verified against the
+ * selected account before a session is issued.
+ */
+authRouter.post('/login/select', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { identifier, password, selectedUserId } = req.body;
+
+    if (!identifier || !password || !selectedUserId) {
+      res.status(400).json({ ok: false, error: 'بيانات غير مكتملة. يرجى إعادة تسجيل الدخول.' });
+      return;
+    }
+
+    const candidates = await findUsersByIdentifier(String(identifier));
+    const userRow = candidates.find((u) => u.id === selectedUserId);
+
+    if (!userRow || !verifyUserPassword(String(password), userRow)) {
+      res.status(401).json({ ok: false, error: 'بيانات الدخول غير صحيحة. كلمة المرور غير مطابقة.' });
+      return;
+    }
+
+    if (userRow.isActive === false || userRow.is_active === false || userRow.isArchived === true || userRow.is_archived === true) {
+      res.status(403).json({ ok: false, error: 'هذا الحساب معطل أو مؤرشف. يرجى التواصل مع إدارة المجمع.' });
+      return;
+    }
+
+    const sessionId = `sess_${crypto.randomBytes(24).toString('hex')}`;
+    const { passwordHash, password_hash, ...safeUser } = userRow;
+
+    activeSessions.set(sessionId, {
+      user: safeUser,
+      createdAt: Date.now(),
+    });
+
+    res.cookie('session_id', sessionId, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({
+      ok: true,
+      user: safeUser,
+      token: sessionId,
+      mustChangePassword: userRow.mustChangePassword || userRow.must_change_password || false,
+    });
+  } catch (err) {
+    console.error('[AUTH] Login select unexpected error:', err);
     next(err);
   }
 });

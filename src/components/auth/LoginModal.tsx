@@ -1,9 +1,26 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { Lock, Phone, LogIn, X, Shield } from 'lucide-react';
+import { Lock, Phone, LogIn, X, Shield, UserCheck } from 'lucide-react';
 import { MosqueLogo } from '../common/logos/MosqueLogo';
 import { getRolePortalRoute } from '../../lib/roleRoutes';
+import { UserRole } from '../../types';
+
+const ACCOUNT_ROLE_LABELS: Record<string, string> = {
+  parent: 'ولي أمر',
+  student: 'طالب',
+  teacher: 'معلم',
+  supervisor: 'مشرف',
+  quran_supervisor: 'مشرف قرآني',
+  campus_admin: 'مدير مجمع',
+  admin: 'مدير نظام',
+  system_admin: 'مدير النظام العام',
+  charity_supervisor: 'مشرف الجمعية',
+};
+
+function accountLabel(role: UserRole | string, staffRole?: string | null): string {
+  return ACCOUNT_ROLE_LABELS[staffRole || role] || ACCOUNT_ROLE_LABELS[role] || String(role);
+}
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -19,7 +36,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   defaultTenantId,
 }) => {
   const navigate = useNavigate();
-  const { login, activeTenant, tenants } = useApp();
+  const { login, activeTenant, tenants, pendingAccountChoices, clearPendingAccountChoices } = useApp();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -40,13 +57,39 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     try {
       const user = await login(phone.trim(), password);
-      if (user) {
+      if (user === 'SELECT_ACCOUNT') {
+        // Account chooser rendered below via pendingAccountChoices state
+      } else if (user) {
         onClose();
         // Direct route transition to authenticated role portal (Single canonical source)
         const targetRoute = getRolePortalRoute(user.role, user.tenantId);
         navigate(targetRoute, { replace: true });
       } else {
         setError('بيانات الدخول غير صحيحة، يرجى التأكد من رقم الجوال أو رقم الهوية الوطنية وكلمة المرور.');
+      }
+    } catch {
+      setError('حدث خطأ أثناء تسجيل الدخول، يرجى التحقق من اتصالك بالشبكة.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAccountPick = async (accountId: string) => {
+    if (!pendingAccountChoices) return;
+    setError('');
+    setLoading(true);
+    try {
+      const user = await login(
+        pendingAccountChoices.identifier,
+        pendingAccountChoices.password,
+        accountId
+      );
+      if (user && user !== 'SELECT_ACCOUNT') {
+        onClose();
+        const targetRoute = getRolePortalRoute(user.role, user.tenantId);
+        navigate(targetRoute, { replace: true });
+      } else {
+        setError('تعذر إكمال تسجيل الدخول بالحساب المختار.');
       }
     } catch {
       setError('حدث خطأ أثناء تسجيل الدخول، يرجى التحقق من اتصالك بالشبكة.');
@@ -97,8 +140,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
 
 
+        {/* Account picker — shown when one identifier verifies multiple accounts */}
+        {pendingAccountChoices && (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs font-bold text-slate-700 mb-2">
+              هذا المعرف مرتبط بأكثر من حساب — اختر الصفة التي تريد الدخول بها:
+            </p>
+            {pendingAccountChoices.accounts.map((acc) => (
+              <button
+                key={acc.id}
+                type="button"
+                disabled={loading}
+                onClick={() => handleAccountPick(acc.id)}
+                className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 transition-colors text-right cursor-pointer disabled:opacity-50"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-slate-900 truncate">{acc.name}</p>
+                  <p className="text-[11px] text-slate-500">الدخول بصفة: {accountLabel(acc.role, acc.staffRole)}</p>
+                </div>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={clearPendingAccountChoices}
+              className="w-full text-center text-[11px] text-slate-500 hover:text-slate-700 py-1 cursor-pointer"
+            >
+              رجوع لتسجيل الدخول
+            </button>
+          </div>
+        )}
+
         {/* Regular Login Form */}
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5" style={{ display: pendingAccountChoices ? 'none' : undefined }}>
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               معرف تسجيل الدخول (رقم الهوية الوطنية أو رقم الجوال)

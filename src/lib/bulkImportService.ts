@@ -190,60 +190,29 @@ export async function executeBulkImport(
       await apiClient.post('/halaqahs/bulk', { items: halaqahsToInsert });
     }
 
-    // 3. Process & Save Parents
-    updateProgress('parents', 4, 'جاري تسجيل أولياء الأمور وتجهيز بوابات المتابعة...', 65);
-
-    const parentPhoneToIdMap = new Map<string, string>();
-    const parentsToInsert: any[] = [];
+    // 3. Parent accounts are NOT created here anymore — the server-side
+    // accountSync hook on /students/bulk provisions them (and student accounts)
+    // automatically from each student's guardian phone, keeping users linked
+    // and preventing orphaned accounts. We still report the credentials.
+    updateProgress('parents', 4, 'جاري تجهيز بوابات أولياء الأمور (مزامنة تلقائية من سجلات الطلاب)...', 65);
 
     for (const p of dataset.parents) {
-      const parentId = `prt_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const userId = `usr_${parentId}`;
-      parentPhoneToIdMap.set(p.phone, parentId);
-
-      const userDoc: Partial<User> = {
-        id: userId,
-        name: p.name,
-        fullName: p.name,
-        phone: p.phone,
-        nationalId: p.nationalId || '',
-        loginIdentifier: p.phone || p.nationalId || userId,
-        role: 'parent',
-        tenantId,
-        organizationId: targetTenant.organizationId || undefined,
-        passwordHash: defaultHash,
-        isActive: true,
-        mustChangePassword: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      parentsToInsert.push(userDoc);
-
-      stats.parentsCreated++;
-      stats.usersCreated++;
-
       credentials.push({
         name: p.name,
         role: 'ولي أمر',
         phone: p.phone,
-        plainPassword: defaultPassword,
+        plainPassword: 'Parent@2026',
         halaqahOrDetails: `الأبناء: ${p.studentNames.join(', ') || 'طالب'}`,
       });
-    }
-
-    if (parentsToInsert.length > 0) {
-      await apiClient.post('/users/bulk', { items: parentsToInsert });
     }
 
     // 4. Process & Save Students
     updateProgress('students', 5, 'جاري تسكين الطلاب وتوزيعهم على الحلقات والمسارات...', 85);
 
     const studentsToInsert: any[] = [];
-    const studentUsersToInsert: any[] = [];
 
     for (const st of dataset.students) {
       const studentId = `std_${tenantId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const userId = `usr_${studentId}`;
       const isActivitiesOnly = st.registrationType === 'activities_only';
 
       let halaqahId = '';
@@ -284,34 +253,13 @@ export async function executeBulkImport(
       };
       studentsToInsert.push(studentDoc);
 
-      const userDoc: Partial<User> = {
-        id: userId,
-        name: st.name,
-        fullName: st.name,
-        phone: st.parentPhone || '',
-        nationalId: st.nationalId || '',
-        loginIdentifier: st.nationalId || `std_${studentId}`,
-        studentId,
-        halaqahId: halaqahId || undefined,
-        role: 'student',
-        tenantId,
-        organizationId: targetTenant.organizationId || undefined,
-        passwordHash: defaultHash,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      studentUsersToInsert.push(userDoc);
-
+      // Student + parent login accounts are provisioned server-side by the
+      // accountSync hook on /students/bulk.
       stats.studentsCreated++;
-      stats.usersCreated++;
     }
 
     if (studentsToInsert.length > 0) {
       await apiClient.post('/students/bulk', { items: studentsToInsert });
-    }
-    if (studentUsersToInsert.length > 0) {
-      await apiClient.post('/users/bulk', { items: studentUsersToInsert });
     }
 
     // 5. Audit Log Entry

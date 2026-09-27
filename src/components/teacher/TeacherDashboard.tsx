@@ -139,8 +139,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
   const teacherHalaqahs = useMemo(() => {
     if (!isTeacher || !currentUser) return tenantHalaqahs;
-    return tenantHalaqahs.filter(
+    const mine = tenantHalaqahs.filter(
       h => h.teacherId === currentUser.id || h.assistantTeachers?.some(at => at.id === currentUser.id)
+    );
+    // Primary halaqahs first — the default view should land on the halaqah
+    // he actually leads, with assistant halaqahs listed after.
+    return [...mine].sort(
+      (a, b) => (b.teacherId === currentUser.id ? 1 : 0) - (a.teacherId === currentUser.id ? 1 : 0)
     );
   }, [isTeacher, currentUser, tenantHalaqahs]);
 
@@ -249,6 +254,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       if (selectedHalaqahId && teacherHalaqahs.some(h => h.id === selectedHalaqahId)) {
         return selectedHalaqahId;
       }
+      // Default → the halaqah he leads as primary teacher, then his stored
+      // halaqahId, then the first of his (primary-sorted) halaqahs.
+      const primaryHalaqah = teacherHalaqahs.find(h => h.teacherId === currentUser?.id);
+      if (primaryHalaqah) return primaryHalaqah.id;
       if (currentUser?.halaqahId && teacherHalaqahs.some(h => h.id === currentUser.halaqahId)) {
         return currentUser.halaqahId;
       }
@@ -264,6 +273,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   const activeHalaqah = useMemo(() => {
     return halaqahs.find((h) => h.id === effectiveHalaqahId) || tenantHalaqahs[0] || halaqahs[0];
   }, [halaqahs, effectiveHalaqahId, tenantHalaqahs]);
+
+  // Is the signed-in teacher an assistant (not the primary) in the active halaqah?
+  const isAssistantInActiveHalaqah = useMemo(() => {
+    if (!isTeacher || !currentUser || !activeHalaqah) return false;
+    return (
+      activeHalaqah.teacherId !== currentUser.id &&
+      !!activeHalaqah.assistantTeachers?.some((at) => at.id === currentUser.id)
+    );
+  }, [isTeacher, currentUser, activeHalaqah]);
 
   // Today session status calculated from halaqah weekly schedule & today prayer times
   const todaySession = useMemo(() => {
@@ -529,6 +547,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                           • أ. {teacherObj.name.replace(/^أ\.\s*/, '').split(' ')[0]}
                         </span>
                       )}
+                      {isTeacher && currentUser && h.teacherId !== currentUser.id &&
+                        h.assistantTeachers?.some((at) => at.id === currentUser.id) && (
+                          <span className={`text-[10px] font-bold px-1 py-0.5 rounded-md ${
+                            isSelected ? 'bg-sky-200/30 text-sky-100' : 'bg-sky-100 text-sky-700'
+                          }`}>
+                            مساعد
+                          </span>
+                        )}
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${
                           isSelected ? 'bg-emerald-900 text-amber-200' : 'bg-slate-100 text-slate-700'
@@ -744,6 +770,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
                     {activeStage?.name || 'مرحلة تعليمية'} • {activeHalaqah?.grade}
                   </span>
+                  {isAssistantInActiveHalaqah && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold border border-sky-200">
+                      معلم مساعد
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-600 mt-0.5">
                   المعلم المشرف: <strong className="text-slate-800">{activeTeacher?.name}</strong>
@@ -1102,48 +1133,51 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                     </p>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  {/* Action Buttons — 5 equal-width responsive actions */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-5 gap-1.5">
                     <button
                       onClick={() => setActiveStudentRecord(student)}
-                      className="flex-1 inline-flex items-center justify-center gap-1 py-2 px-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                      className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-bold transition-colors shadow-2xs cursor-pointer"
+                      title="تسجيل إنجاز الطالب"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                      <span>تسجيل إنجاز 📝</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                      <span>إنجاز</span>
                     </button>
 
                     <button
                       onClick={() => setSelectedPlanStudent(student)}
-                      className={`inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold border transition-colors shadow-2xs cursor-pointer ${
+                      className={`inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 rounded-xl text-[11px] font-bold border transition-colors shadow-2xs cursor-pointer ${
                         hasPlan
                           ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                           : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
                       }`}
                       title={
                         hasPlan
-                          ? 'الخطة القرآنية العامة (ورد اليوم، الأسبوع، الشهر، الفصل)'
+                          ? 'معدل الخطة القرآنية (ورد اليوم، الأسبوع، الشهر، الفصل)'
                           : 'يحتاج تحديد نقطة البداية'
                       }
                     >
                       <BookOpen className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                      <span>الخطة القرآنية</span>
-                      {!hasPlan && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
+                      <span>المعدل</span>
+                      {!hasPlan && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
                     </button>
 
                     <button
                       onClick={() => setComprehensivePlanStudent(student)}
-                      className="inline-flex items-center justify-center p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs border border-indigo-200 transition-colors cursor-pointer"
-                      title="عرض الخطة القرآنية الشاملة (من البداية إلى المستهدف)"
+                      className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer"
+                      title="الخطة القرآنية الشاملة (من البداية إلى المستهدف)"
                     >
-                      <Layers className="w-4 h-4 text-indigo-700" />
+                      <Layers className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
+                      <span>الخطة</span>
                     </button>
 
                     <button
                       onClick={() => handleOpenParentReport(student)}
-                      className="inline-flex items-center justify-center p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs border border-emerald-200 transition-colors cursor-pointer"
+                      className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-[11px] font-bold border border-emerald-200 transition-colors cursor-pointer"
                       title="إرسال تقرير الواتساب لولي الأمر"
                     >
-                      <Send className="w-4 h-4 text-emerald-700" />
+                      <Send className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                      <span>تقرير</span>
                     </button>
 
                     <button
@@ -1151,21 +1185,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                         setSelectedNominationStudent(student);
                         setTrackNominationModalOpen(true);
                       }}
-                      className="inline-flex items-center justify-center p-2 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-xl text-xs border border-teal-200 transition-colors cursor-pointer"
+                      className="inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2 px-1 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-xl text-[11px] font-bold border border-teal-200 transition-colors cursor-pointer"
                       title="ترشيح الطالب لاختبار المسار المعتمد"
                     >
-                      <Award className="w-4 h-4 text-teal-700" />
+                      <Award className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                      <span>ترشيح</span>
                     </button>
-
-                    {onSelectStudentProfile && (
-                      <button
-                        onClick={() => onSelectStudentProfile(student.id)}
-                        className="inline-flex items-center justify-center p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs transition-colors cursor-pointer"
-                        title="عرض السجل التاريخي الشامل للطالب"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </button>
-                    )}
                   </div>
                 </div>
               );
