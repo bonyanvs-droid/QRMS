@@ -140,7 +140,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   const teacherHalaqahs = useMemo(() => {
     if (!isTeacher || !currentUser) return tenantHalaqahs;
     const mine = tenantHalaqahs.filter(
-      h => h.teacherId === currentUser.id || h.assistantTeachers?.some(at => at.id === currentUser.id)
+      h =>
+        h.teacherId === currentUser.id ||
+        h.assistantTeachers?.some(at => at.id === currentUser.id) ||
+        currentUser.isAllHalaqahs === true ||
+        currentUser.assignedHalaqahIds?.includes(h.id)
     );
     // Primary halaqahs first — the default view should land on the halaqah
     // he actually leads, with assistant halaqahs listed after.
@@ -275,11 +279,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   }, [halaqahs, effectiveHalaqahId, tenantHalaqahs]);
 
   // Is the signed-in teacher an assistant (not the primary) in the active halaqah?
+  // True via the halaqah's assistant list OR the teacher's scope (assignedHalaqahIds).
   const isAssistantInActiveHalaqah = useMemo(() => {
     if (!isTeacher || !currentUser || !activeHalaqah) return false;
+    if (activeHalaqah.teacherId === currentUser.id) return false;
     return (
-      activeHalaqah.teacherId !== currentUser.id &&
-      !!activeHalaqah.assistantTeachers?.some((at) => at.id === currentUser.id)
+      !!activeHalaqah.assistantTeachers?.some((at) => at.id === currentUser.id) ||
+      !!currentUser.assignedHalaqahIds?.includes(activeHalaqah.id) ||
+      currentUser.isAllHalaqahs === true
     );
   }, [isTeacher, currentUser, activeHalaqah]);
 
@@ -548,7 +555,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                         </span>
                       )}
                       {isTeacher && currentUser && h.teacherId !== currentUser.id &&
-                        h.assistantTeachers?.some((at) => at.id === currentUser.id) && (
+                        (h.assistantTeachers?.some((at) => at.id === currentUser.id) ||
+                          currentUser.assignedHalaqahIds?.includes(h.id) ||
+                          currentUser.isAllHalaqahs === true) && (
                           <span className={`text-[10px] font-bold px-1 py-0.5 rounded-md ${
                             isSelected ? 'bg-sky-200/30 text-sky-100' : 'bg-sky-100 text-sky-700'
                           }`}>

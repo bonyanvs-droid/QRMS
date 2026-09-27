@@ -2415,29 +2415,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateTeacher = useCallback(async (id: string, updates: Partial<Teacher>) => {
     if (guardDemoWrite('تعديل بيانات المعلم')) return;
     setTeachers((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
-    let updatedUser: User | null = null;
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === id) {
-          updatedUser = {
-            ...u,
-            name: updates.name || u.name,
-            fullName: updates.name || u.fullName || u.name,
-            phone: updates.phone || u.phone,
-            halaqahId: updates.halaqahId !== undefined ? updates.halaqahId : u.halaqahId,
-            isAllHalaqahs: updates.isAllHalaqahs !== undefined ? updates.isAllHalaqahs : u.isAllHalaqahs,
-            assignedHalaqahIds: updates.assignedHalaqahIds !== undefined ? updates.assignedHalaqahIds : u.assignedHalaqahIds,
-            isActive: updates.isActive !== undefined ? updates.isActive : u.isActive,
-          };
-          return updatedUser;
-        }
-        return u;
-      })
-    );
-    if (updatedUser) {
+    // Read the user row directly — relying on a setState updater closure can
+    // silently skip the DB write when React defers the updater (batched updates).
+    const existingUser = users.find((u) => u.id === id);
+    if (existingUser) {
+      const updatedUser: User = {
+        ...existingUser,
+        name: updates.name || existingUser.name,
+        fullName: updates.name || existingUser.fullName || existingUser.name,
+        phone: updates.phone || existingUser.phone,
+        halaqahId: updates.halaqahId !== undefined ? updates.halaqahId : existingUser.halaqahId,
+        isAllHalaqahs: updates.isAllHalaqahs !== undefined ? updates.isAllHalaqahs : existingUser.isAllHalaqahs,
+        assignedHalaqahIds: updates.assignedHalaqahIds !== undefined ? updates.assignedHalaqahIds : existingUser.assignedHalaqahIds,
+        isActive: updates.isActive !== undefined ? updates.isActive : existingUser.isActive,
+      };
+      setUsers((prev) => prev.map((u) => (u.id === id ? updatedUser : u)));
       await dbSaveUser(updatedUser, currentActor);
     }
-  }, [currentActor, guardDemoWrite]);
+  }, [currentActor, users, guardDemoWrite]);
 
   const archiveTeacher = useCallback(async (id: string, reason?: string) => {
     if (guardDemoWrite('أرشفة معلم')) return;

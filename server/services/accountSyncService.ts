@@ -454,6 +454,43 @@ export async function syncUserWrite(userRow: any, prevRow: any | null): Promise<
     }
   }
 
+  // 1b. Teacher scope change → halaqahs.assistant_teachers stays consistent.
+  // Halaqahs granted via "نطاق الحلقات" (assigned_halaqah_ids) mean the teacher
+  // is an assistant there; removals detach him again.
+  const isTeacher = role === 'teacher' || staffRole === 'teacher';
+  if (isTeacher && prevRow && tenantId) {
+    const oldScope: string[] = Array.isArray(f(prevRow, 'assigned_halaqah_ids')) ? f(prevRow, 'assigned_halaqah_ids') : [];
+    const newScope: string[] = Array.isArray(f(userRow, 'assigned_halaqah_ids')) ? f(userRow, 'assigned_halaqah_ids') : [];
+    const added = newScope.filter((hid) => !oldScope.includes(hid));
+    const removed = oldScope.filter((hid) => !newScope.includes(hid));
+    const displayName = String(f(userRow, 'full_name', 'fullName') || f(userRow, 'name') || 'معلم');
+
+    for (const hid of added) {
+      await q.query(
+        `UPDATE halaqahs
+            SET assistant_teachers = COALESCE(assistant_teachers, '[]'::jsonb) || $2::jsonb,
+                updated_at = NOW()
+          WHERE tenant_id = $1 AND id = $3
+            AND COALESCE(teacher_id, '') <> $4
+            AND NOT (COALESCE(assistant_teachers, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', $4)))`,
+        [tenantId, JSON.stringify([{ id, name: displayName }]), hid, id]
+      );
+    }
+    for (const hid of removed) {
+      await q.query(
+        `UPDATE halaqahs
+            SET assistant_teachers = COALESCE((
+                  SELECT jsonb_agg(elem) FROM jsonb_array_elements(assistant_teachers) elem
+                  WHERE elem->>'id' <> $3
+                ), '[]'::jsonb),
+                updated_at = NOW()
+          WHERE tenant_id = $1 AND id = $2
+            AND COALESCE(assistant_teachers, '[]'::jsonb)::text LIKE '%' || $3 || '%'`,
+        [tenantId, hid, id]
+      );
+    }
+  }
+
   // 2. Identifier collision warning (non-blocking)
   const ident = String(f(userRow, 'login_identifier', 'loginIdentifier') ?? '').trim();
   const phone = String(f(userRow, 'phone') ?? '').trim();
