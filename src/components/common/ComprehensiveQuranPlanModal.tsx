@@ -242,6 +242,19 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   // Effective plan to display (preview takes precedence, then active)
   const effectivePlan: StudentQuranPlan | undefined = previewPlan || activePlan;
 
+  // Revision path active? A dedicated revision column only exists for combined
+  // plans. 'none'/memorization-only plans hide it, and revision-only plans put
+  // their content in the main target column (labeled "مقرر المراجعة").
+  const revisionOnlyPlan = effectivePlan?.planType === 'revision';
+  const revisionTrackOn = useMemo(() => {
+    if (!effectivePlan) return true;
+    if (effectivePlan.planType === 'revision') return false;
+    if (effectivePlan.revisionMode === 'none' || effectivePlan.revisionSettings?.mode === 'none') {
+      return false;
+    }
+    return true;
+  }, [effectivePlan]);
+
   // Auto-fill setup defaults
   useEffect(() => {
     if (student) {
@@ -1671,14 +1684,16 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     </div>
 
                     {/* Revision */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-400 block">
-                        مقرر المراجعة اليومي
-                      </span>
-                      <span className="font-black text-slate-800">
-                        {currentDayItem.revisionDisplayLabel || '—'}
-                      </span>
-                    </div>
+                    {revisionTrackOn && (
+                      <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block">
+                          مقرر المراجعة اليومي
+                        </span>
+                        <span className="font-black text-slate-800">
+                          {currentDayItem.revisionDisplayLabel || '—'}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Actual Achievement / Recitation */}
                     <div className="bg-white p-2.5 rounded-lg border border-slate-200">
@@ -1769,8 +1784,12 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                 ) : (
                                   <th className="py-2 px-2.5 font-bold">الحصة</th>
                                 )}
-                                <th className="py-2 px-2.5 font-bold">مقرر الحفظ</th>
-                                <th className="py-2 px-2.5 font-bold">مقرر المراجعة</th>
+                                <th className="py-2 px-2.5 font-bold">
+                                  {revisionOnlyPlan ? 'مقرر المراجعة' : 'مقرر الحفظ'}
+                                </th>
+                                {revisionTrackOn && (
+                                  <th className="py-2 px-2.5 font-bold">مقرر المراجعة</th>
+                                )}
                                 {spellingTrackOn && (
                                   <th className="py-2 px-2.5 font-bold">الهجاء</th>
                                 )}
@@ -1791,7 +1810,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                       <td className="py-2 px-2.5">
                                         {fmtDate(day.date)}
                                       </td>
-                                      <td colSpan={spellingTrackOn ? 6 : 5} className="py-2 px-2.5 text-center">
+                                      <td colSpan={(spellingTrackOn ? 6 : 5) - (revisionTrackOn ? 0 : 1)} className="py-2 px-2.5 text-center">
                                         🏖️ إجازة رسمية معتمدة
                                       </td>
                                     </tr>
@@ -1843,11 +1862,13 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     </td>
 
                                     {/* Revision Target */}
-                                    <td className="py-2 px-2.5">
-                                      <div className="text-slate-700">
-                                        {day.revisionDisplayLabel || '—'}
-                                      </div>
-                                    </td>
+                                    {revisionTrackOn && (
+                                      <td className="py-2 px-2.5">
+                                        <div className="text-slate-700">
+                                          {day.revisionDisplayLabel || '—'}
+                                        </div>
+                                      </td>
+                                    )}
 
                                     {/* Spelling */}
                                     {spellingTrackOn && (
