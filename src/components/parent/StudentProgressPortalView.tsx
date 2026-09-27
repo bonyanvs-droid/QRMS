@@ -125,14 +125,17 @@ export const StudentProgressPortalView: React.FC<StudentProgressPortalViewProps>
     return spellingLessons.find((l) => l.order === currentSpellingLesson.order + 1) || null;
   }, [spellingLessons, currentSpellingLesson]);
 
-  // Current Educational Week
+  // Current Educational Week - Prioritizing student's stage
   const currentEduWeek = useMemo(() => {
-    return (
-      educationalPlan.find((w) => w.weekNumber === academicConfig.currentWeek) ||
-      educationalPlan[0] ||
-      null
+    const studentStageId = student.stageId || 'baraem';
+    const weekPlans = (educationalPlan || []).filter(
+      (w) => w.weekNumber === academicConfig.currentWeek && w.isVisible !== false
     );
-  }, [educationalPlan, academicConfig.currentWeek]);
+    const stageMatch = weekPlans.find((w) => w.stageId === studentStageId);
+    if (stageMatch) return stageMatch;
+    const baraemMatch = weekPlans.find((w) => w.stageId === 'baraem');
+    return baraemMatch || weekPlans[0] || educationalPlan[0] || null;
+  }, [educationalPlan, academicConfig.currentWeek, student.stageId]);
 
   // Calculated Progress Metrics for Memorization
   const memMetrics = useMemo(() => {
@@ -1212,14 +1215,22 @@ export const StudentProgressPortalView: React.FC<StudentProgressPortalViewProps>
           <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-amber-900">
-                قيمة وشعار الأسبوع الحالي (الأسبوع {currentEduWeek.weekNumber}):
+                قيمة وشعار الأسبوع الحالي (الأسبوع {currentEduWeek.weekNumber})
+                {currentEduWeek.stageName ? ` - ${currentEduWeek.stageName}` : ''}:
               </span>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-950">
                 {currentEduWeek.motto}
               </span>
             </div>
             <h4 className="font-bold text-slate-900 text-sm">{currentEduWeek.educationalGoal}</h4>
-            <p className="text-xs text-slate-600">{currentEduWeek.activity}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+              <span className="text-slate-600">النشاط العملي: {currentEduWeek.activity}</span>
+              {currentEduWeek.showSupervisorName !== false && currentEduWeek.responsiblePerson && (
+                <span className="text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                  المشرف المسؤول: {currentEduWeek.responsiblePerson}
+                </span>
+              )}
+            </div>
           </div>
         )}
 

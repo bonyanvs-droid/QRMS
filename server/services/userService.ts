@@ -1,5 +1,6 @@
 import { executeQuery, executeQuerySingle } from '../db/query';
 import { User } from '../../src/types';
+import { resolveCanonicalTenantId, getTenantAliases } from './tenantService';
 
 // Fields to select excluding password hashes for safety, with halaqah_name from halaqahs table
 const SAFE_USER_SELECT = `
@@ -21,8 +22,10 @@ export interface UserFilters {
 }
 
 export async function getUsersByTenant(tenantId: string, filters: UserFilters = {}): Promise<User[]> {
-  const conditions: string[] = ['u.tenant_id = $1'];
-  const params: any[] = [tenantId];
+  const canonicalId = (await resolveCanonicalTenantId(tenantId)) || tenantId;
+  const aliases = await getTenantAliases(canonicalId);
+  const conditions: string[] = ['u.tenant_id = ANY($1)'];
+  const params: any[] = [aliases];
 
   if (filters.isArchived === true) {
     conditions.push('(u.is_archived = TRUE OR u.teacher_archived = TRUE OR u.supervisor_archived = TRUE)');
@@ -50,14 +53,16 @@ export async function getUserById(userId: string, tenantId?: string): Promise<Us
   let params: any[];
 
   if (tenantId) {
+    const canonicalId = (await resolveCanonicalTenantId(tenantId)) || tenantId;
+    const aliases = await getTenantAliases(canonicalId);
     query = `
       SELECT ${SAFE_USER_SELECT}
       FROM users u
       LEFT JOIN halaqahs h ON u.halaqah_id = h.id
-      WHERE u.id = $1 AND u.tenant_id = $2
+      WHERE u.id = $1 AND u.tenant_id = ANY($2)
       LIMIT 1
     `;
-    params = [userId, tenantId];
+    params = [userId, aliases];
   } else {
     query = `
       SELECT ${SAFE_USER_SELECT}
@@ -68,6 +73,6 @@ export async function getUserById(userId: string, tenantId?: string): Promise<Us
     `;
     params = [userId];
   }
-
   return executeQuerySingle<User>(query, params);
 }
+

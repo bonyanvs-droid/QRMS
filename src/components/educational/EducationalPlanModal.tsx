@@ -28,6 +28,7 @@ interface EducationalPlanModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedStage?: EducationalStage;
+  stages?: EducationalStage[];
   teachers: Teacher[];
   totalSemesterWeeks: number;
   editingWeek: Partial<EducationalPlanWeek> | null;
@@ -40,6 +41,7 @@ export const EducationalPlanModal: React.FC<EducationalPlanModalProps> = ({
   isOpen,
   onClose,
   selectedStage,
+  stages = [],
   teachers,
   totalSemesterWeeks,
   editingWeek,
@@ -53,17 +55,29 @@ export const EducationalPlanModal: React.FC<EducationalPlanModalProps> = ({
 
   // Single Week Form State
   const [formWeek, setFormWeek] = useState<Partial<EducationalPlanWeek>>(() => {
-    if (editingWeek) return { ...editingWeek };
+    if (editingWeek) {
+      return {
+        showSupervisorName: true,
+        isVisible: true,
+        ...editingWeek,
+      };
+    }
     const nextNum = currentPlanWeeks.length > 0 ? Math.max(...currentPlanWeeks.map((w) => w.weekNumber)) + 1 : 1;
+    const defaultStageId = selectedStage?.id || (stages.length > 0 ? stages[0].id : 'baraem');
+    const defaultStageObj = stages.find((s) => s.id === defaultStageId) || selectedStage;
     return {
       weekNumber: nextNum,
-      stageId: selectedStage?.id,
+      stageId: defaultStageId,
+      stageName: defaultStageObj?.name || 'مرحلة البراعم',
+      targetStageIds: defaultStageId ? [defaultStageId] : ['baraem'],
+      showSupervisorName: true,
+      isVisible: true,
       weekType: 'normal',
       startDate: '',
       endDate: '',
       dayDates: { thursday: '', friday: '', saturday: '' },
-      domain: 'faith',
-      domainLabel: 'إيماني',
+      domain: 'behavioral',
+      domainLabel: 'سلوكي',
       valueTitle: '',
       motto: '',
       educationalGoal: '',
@@ -73,7 +87,7 @@ export const EducationalPlanModal: React.FC<EducationalPlanModalProps> = ({
       activity: '',
       activityPresenter: teachers[1]?.name || teachers[0]?.name || '',
       activityLocation: 'الساحة التفاعلية',
-      responsiblePerson: teachers[0]?.name || 'مشرف المرحلة',
+      responsiblePerson: 'نور إبراهيم',
       quranicProgram: 'مسابقة نحو المعالي',
       budget: 100,
       notes: '',
@@ -392,6 +406,66 @@ export const EducationalPlanModal: React.FC<EducationalPlanModalProps> = ({
           {/* TAB 1: SINGLE WEEK FORM */}
           {activeTab === 'single' && (
             <form onSubmit={handleSingleSubmit} className="space-y-4">
+              {/* Row 0: Target Stage & Public Visibility Controls */}
+              <div className="p-3.5 rounded-2xl bg-teal-50/60 border border-teal-200/80 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-teal-950 mb-1">
+                      المرحلة التعليمية المستهدفة للخطة
+                    </label>
+                    <select
+                      value={formWeek.stageId || 'all'}
+                      onChange={(e) => {
+                        const sid = e.target.value;
+                        const st = stages.find((s) => s.id === sid);
+                        setFormWeek({
+                          ...formWeek,
+                          stageId: sid === 'all' ? undefined : sid,
+                          stageName: st?.name || (sid === 'all' ? 'الخطة العامة لكافة المراحل' : ''),
+                          targetStageIds: sid === 'all' ? [] : [sid],
+                        });
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-teal-300 bg-white font-bold text-slate-800"
+                    >
+                      <option value="all">🌐 الخطة التربوية العامة (لكافة المراحل)</option>
+                      {stages.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          🌱 {st.name} {st.code ? `(${st.code})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col justify-center gap-2 pt-1">
+                    {/* Toggle showSupervisorName */}
+                    <label className="flex items-center gap-2.5 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-teal-200/90 shadow-2xs hover:bg-teal-50/30 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={formWeek.showSupervisorName !== false}
+                        onChange={(e) => setFormWeek({ ...formWeek, showSupervisorName: e.target.checked })}
+                        className="w-4 h-4 rounded text-teal-700 focus:ring-teal-500 accent-teal-700 cursor-pointer"
+                      />
+                      <span className="font-bold text-slate-800 text-[11px]">
+                        إظهار اسم المشرف المسؤول في البوابة والتقارير العامة
+                      </span>
+                    </label>
+
+                    {/* Toggle isVisible */}
+                    <label className="flex items-center gap-2.5 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-teal-200/90 shadow-2xs hover:bg-teal-50/30 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={formWeek.isVisible !== false}
+                        onChange={(e) => setFormWeek({ ...formWeek, isVisible: e.target.checked })}
+                        className="w-4 h-4 rounded text-emerald-700 focus:ring-emerald-500 accent-emerald-700 cursor-pointer"
+                      />
+                      <span className="font-bold text-slate-800 text-[11px]">
+                        تفعيل ظهور الخطة في البوابة العامة وبوابة أولياء الأمور
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               {/* Row 1: Week Number & Type */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
                 <div>

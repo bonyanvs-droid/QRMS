@@ -182,6 +182,25 @@ export function TenantBanners({
     setCurrentIndex((prev) => (prev + 1) % activeBanners.length);
   };
 
+  const touchStartXRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartXRef.current - touchEndX;
+    // In RTL layout: swipe left (diff > 50) goes to next, swipe right (diff < -50) goes to prev
+    if (diff > 50) {
+      handleNext();
+    } else if (diff < -50) {
+      handlePrev();
+    }
+    touchStartXRef.current = null;
+  };
+
   const handleCtaClick = (b: BannerItem | null, e: React.MouseEvent) => {
     if (!b || !b.linkUrl || b.linkUrl === '#' || b.linkUrl.toLowerCase().includes('admission')) {
       if (onOpenAdmission) {
@@ -206,9 +225,11 @@ export function TenantBanners({
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-4 w-full">
       <div
-        className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-800/90 bg-slate-950 text-white group"
+        className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-800/90 bg-slate-950 text-white group select-none"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
         {/* 1. Background Layer (Full Section) */}
         {currentBanner?.imageUrl ? (

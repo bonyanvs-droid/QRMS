@@ -138,6 +138,31 @@ export const Header: React.FC<HeaderProps> = ({
     navigate('/', { replace: true });
   };
 
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (headerRef.current) {
+        const height = headerRef.current.offsetHeight;
+        document.documentElement.style.setProperty('--app-header-height', `${height}px`);
+      }
+    };
+
+    updateHeaderHeight();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && headerRef.current) {
+      resizeObserver = new ResizeObserver(updateHeaderHeight);
+      resizeObserver.observe(headerRef.current);
+    }
+
+    window.addEventListener('resize', updateHeaderHeight);
+    return () => {
+      if (resizeObserver) resizeObserver.disconnect();
+      window.removeEventListener('resize', updateHeaderHeight);
+    };
+  }, [academicOutcome, currentUser]);
+
   const [reportModalData, setReportModalData] = useState({
     title: '',
     content: '',
@@ -189,7 +214,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs">
+      <header ref={headerRef} className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs">
         {/* Top Reference Quranic Outcome Banner (Only for Mosque-level context, hidden for System Admin) */}
         {currentUser?.role !== 'system_admin' && (
           <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-950 text-amber-200 px-2.5 sm:px-4 py-1.5 text-xs font-semibold border-b border-emerald-800/60">

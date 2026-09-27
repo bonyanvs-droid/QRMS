@@ -164,12 +164,15 @@ export function createRemoteForwarder() {
       return next();
     }
 
-    // Fix Root Cause: Skip proxying for auth routes to allow local handling.
-    // This allows the local authRouter to verify credentials and manage sessions.
-    if (req.originalUrl.includes('/api/auth/login') || 
-        req.originalUrl.includes('/api/auth/me') || 
-        req.originalUrl.includes('/api/auth/update-password')) {
-      console.log(`[AUTH-TRACE] Bypassing proxy for: ${req.originalUrl}`);
+    // Fix Root Cause: Skip proxying for auth and tenant stats routes to allow local handling.
+    // This allows local authRouter and tenantRouter to compute and return live stats.
+    if (
+      req.originalUrl.includes('/api/auth/login') || 
+      req.originalUrl.includes('/api/auth/me') || 
+      req.originalUrl.includes('/api/auth/update-password') ||
+      (req.originalUrl.includes('/api/tenants') && req.originalUrl.includes('/stats'))
+    ) {
+      console.log(`[FORWARDER-BYPASS] Bypassing proxy for: ${req.originalUrl}`);
       return next();
     }
 
@@ -178,7 +181,10 @@ export function createRemoteForwarder() {
       const subPath = req.originalUrl.replace(/^\/api(\/|$)/, '/');
       const targetUrlStr = `${targetBase}${subPath}`;
       const targetUrl = new URL(targetUrlStr);
-      console.log(`[Forwarder] Target URL: ${targetUrlStr}`);
+      if (req.tenantId && targetUrl.searchParams.has('tenantId')) {
+        targetUrl.searchParams.set('tenantId', req.tenantId);
+      }
+      console.log(`[Forwarder] Target URL: ${targetUrl.toString()}`);
 
       // Prevent accidental loopback to localhost
       if (
@@ -208,9 +214,10 @@ export function createRemoteForwarder() {
         forwardHeaders['Cookie'] = String(req.headers['cookie']);
       }
 
-      // Forward Tenant Context
-      if (req.headers['x-tenant-id'] || req.tenantId) {
-        forwardHeaders['X-Tenant-Id'] = String(req.headers['x-tenant-id'] || req.tenantId);
+      // Forward Tenant Context with Canonical ID Priority
+      const effectiveTenantId = req.tenantId || (req.headers['x-tenant-id'] as string);
+      if (effectiveTenantId) {
+        forwardHeaders['X-Tenant-Id'] = String(effectiveTenantId);
       }
       if (req.headers['x-organization-id'] || req.organizationId) {
         forwardHeaders['X-Organization-Id'] = String(req.headers['x-organization-id'] || req.organizationId);

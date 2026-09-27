@@ -47,7 +47,8 @@ import {
   ChevronUp,
   Sparkles,
 } from 'lucide-react';
-import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig } from '../../types';
+import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig, AcademicTerm } from '../../types';
+import { generateDefaultAcademicTerms } from '../../lib/academicYearUtils';
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
@@ -161,6 +162,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   const {
     academicConfig,
     updateAcademicConfig,
+    setActiveAcademicTerm,
+    updateAcademicTerm,
     users,
     teachers,
     archivedTeachers,
@@ -535,6 +538,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
     setAcademicForm((prev) => ({ ...prev, ...updates }));
   };
 
+  // Multi-term academic system: terms of the active year (fallback to Saudi defaults)
+  const resolvedTerms: AcademicTerm[] = React.useMemo(() => {
+    return Array.isArray(academicConfig.terms) && academicConfig.terms.length > 0
+      ? academicConfig.terms
+      : generateDefaultAcademicTerms();
+  }, [academicConfig.terms]);
+
+  const activeTermId =
+    academicConfig.activeTermId || resolvedTerms.find((t) => t.isCurrent)?.id || resolvedTerms[0]?.id;
+
+  const [archiveOnSwitch, setArchiveOnSwitch] = useState(false);
+
   // Student Modals
   const [editingStudent, setEditingStudent] = useState<Partial<Student> | null>(null);
   const [isNewStudent, setIsNewStudent] = useState(false);
@@ -616,7 +631,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
     const handleSaveAcademic = (e: React.FormEvent) => {
     e.preventDefault();
     isAcademicFormDirtyRef.current = false;
-    updateAcademicConfig(academicForm);
+    // Year-level fields stay at the year level
+    updateAcademicConfig({
+      name: academicForm.name,
+      systemType: academicConfig.systemType || 'three_terms',
+    });
+    // Editable term fields must persist into the ACTIVE TERM record —
+    // syncAcademicConfigWithActiveTerm derives the top-level mirrors from it
+    if (activeTermId) {
+      updateAcademicTerm(activeTermId, {
+        name: academicForm.semester,
+        startDate: academicForm.startDate,
+        endDate: academicForm.endDate,
+        operationalStartWeek: academicForm.operationalStartWeek,
+        operationalEndWeek: academicForm.operationalEndWeek,
+        totalWeeks: academicForm.totalWeeks,
+        currentWeek: academicForm.currentWeek,
+        manualWeekOverride: academicForm.manualWeekOverride,
+        spellingPassingThreshold: academicForm.spellingPassingThreshold,
+        gradeTargets: academicForm.gradeTargets,
+        holidays: academicForm.holidays,
+        officialHolidays: academicForm.officialHolidays,
+      });
+    }
     setConfigSaved(true);
     setTimeout(() => setConfigSaved(false), 2000);
   };
@@ -984,6 +1021,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
             <Settings className="w-4 h-4 text-emerald-600" />
             <span>ضبط العام الدراسي والأسابيع التشغيلية (12 أسبوعاً)</span>
           </h3>
+
+          {/* Multi-Term System: Active Term Switcher */}
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-emerald-900 text-xs">الفصل الدراسي النشط</h4>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  جميع الحقول أدناه تنطبق على الفصل المحدد — التبديل ينسخ إعداداته للواجهة
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {resolvedTerms.map((t) => {
+                  const isActive = t.id === activeTermId;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        isAcademicFormDirtyRef.current = false;
+                        setActiveAcademicTerm(t.id, archiveOnSwitch);
+                      }}
+                      disabled={isActive}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        isActive
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm cursor-default'
+                          : t.isArchived
+                          ? 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                          : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {t.name}
+                      {isActive && <span className="mr-1.5 text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full">النشط</span>}
+                      {t.isArchived && !isActive && <span className="mr-1.5 text-[10px]">(مؤرشف)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label className="mt-3 flex items-center gap-2 cursor-pointer text-[11px] text-slate-600 font-medium w-fit">
+              <input
+                type="checkbox"
+                checked={archiveOnSwitch}
+                onChange={(e) => setArchiveOnSwitch(e.target.checked)}
+                className="rounded text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>أرشفة الفصل الحالي تلقائياً عند التبديل إلى فصل جديد</span>
+            </label>
+          </div>
 
           <form onSubmit={handleSaveAcademic} className="mt-5 space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

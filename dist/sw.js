@@ -81,22 +81,28 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "revision": "1110d07994af611492abcef2802f573c"
   }, {
     "url": "pwa-512x512.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "68e7ba3ebdb83a60b58c7c3e2e05feb4"
   }, {
     "url": "pwa-192x192.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "6ea64ff4e12182082b3522cd6f81c06d"
+  }, {
+    "url": "mosque-logo.png",
+    "revision": "c7a1104c264655cd1d78a5099e796a64"
   }, {
     "url": "mosque-logo.jpeg",
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
     "url": "index.html",
-    "revision": "3ec6303059f67345209250df2e874b33"
+    "revision": "2bcbb434d41c3c682934733518fa36dc"
+  }, {
+    "url": "favicon.ico",
+    "revision": "8e6ce27415c832a5f5f2d4d742620c8b"
   }, {
     "url": "baraem-logo.png",
     "revision": "4bf6076164ca208370920aac94f60872"
   }, {
     "url": "apple-touch-icon.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "60c4cea4f3ebe63ea825dfb0bb3dcf2d"
   }, {
     "url": "8349e039-325f-4c91-a534-9d77eed414bc.jpeg",
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
@@ -110,7 +116,7 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/vendor-react-Cyw5ihM7.js",
     "revision": null
   }, {
-    "url": "assets/vendor-lucide-DzoGLY6n.js",
+    "url": "assets/vendor-lucide-DTT0ekEP.js",
     "revision": null
   }, {
     "url": "assets/vendor-firebase-DMD9BDTk.js",
@@ -122,29 +128,35 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/vendor-common-C1kVHX9k.js",
     "revision": null
   }, {
-    "url": "assets/index-Dmc8rFL7.css",
+    "url": "assets/quran-json-BXqiKKVS.js",
     "revision": null
   }, {
-    "url": "assets/index-Bbk_rtrM.js",
+    "url": "assets/index-BevL8DQv.js",
+    "revision": null
+  }, {
+    "url": "assets/index-BNdNUGQ-.css",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "60c4cea4f3ebe63ea825dfb0bb3dcf2d"
   }, {
-    "url": "baraem-logo.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "url": "favicon.ico",
+    "revision": "8e6ce27415c832a5f5f2d4d742620c8b"
   }, {
     "url": "mosque-logo.jpeg",
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
+    "url": "mosque-logo.png",
+    "revision": "c7a1104c264655cd1d78a5099e796a64"
+  }, {
     "url": "pwa-192x192.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "6ea64ff4e12182082b3522cd6f81c06d"
   }, {
     "url": "pwa-512x512.png",
-    "revision": "4bf6076164ca208370920aac94f60872"
+    "revision": "68e7ba3ebdb83a60b58c7c3e2e05feb4"
   }, {
     "url": "manifest.webmanifest",
-    "revision": "1807dd2e4bbea785ee14fa2264941031"
+    "revision": "4b99c6e90d360ae4d54582c9c3b8b036"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {

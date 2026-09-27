@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { MosqueComplexTenant, FrontendConfig, SectionVisibility } from '../../types';
 import { getFrontendConfig } from '../../lib/dbService';
+import { TenantRepository } from '../../lib/repositories/tenantRepository';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { getRolePortalRoute } from '../../lib/roleRoutes';
 import { MosqueLogo } from '../common/logos/MosqueLogo';
@@ -124,22 +125,32 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
   }, [isFurqanDemo, propTenant, activeTenant, tenants]);
 
   const [frontConfig, setFrontConfig] = useState<FrontendConfig | null>(null);
+  const [publicStats, setPublicStats] = useState<any | null>(null);
 
   useEffect(() => {
     // For demo tenant, completely freeze config and avoid cloud fetching
     if (isFurqanDemo) {
       setFrontConfig(null);
+      setPublicStats(null);
       return;
     }
-    const tId = tenant.id;
+    const tId = tenant.id || tenantSlug;
     if (tId) {
       getFrontendConfig(tId).then((data) => {
         if (data) {
           setFrontConfig(data);
         }
       }).catch((err) => console.warn('Error fetching frontend config:', err));
+
+      TenantRepository.getTenantStats(tId).then((res) => {
+        if (res && res.data) {
+          setPublicStats(res.data);
+        } else if (res && res.studentsCount !== undefined) {
+          setPublicStats(res);
+        }
+      }).catch((err) => console.warn('Error fetching tenant stats:', err));
     }
-  }, [tenant.id, isFurqanDemo]);
+  }, [tenant.id, tenantSlug, isFurqanDemo]);
 
   // Operational Module Capabilities
   const isAdmissionsModuleActive = isModuleEnabled(tenant, 'admissions');
@@ -205,7 +216,36 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
     return true; // default visible if not configured
   };
 
-  const currentWeekPlan = educationalPlan.find((w) => w.weekNumber === academicConfig.currentWeek);
+  // Filter active and visible educational plans for the current academic week
+  const currentWeekPlans = useMemo(() => {
+    return (educationalPlan || []).filter(
+      (w) => w.weekNumber === academicConfig.currentWeek && w.isVisible !== false
+    );
+  }, [educationalPlan, academicConfig.currentWeek]);
+
+  // Selected stage tab for educational plan (e.g. 'baraem' or first stage)
+  const [activePlanStageId, setActivePlanStageId] = useState<string>('baraem');
+
+  const activePlan = useMemo(() => {
+    if (currentWeekPlans.length === 0) return null;
+    if (activePlanStageId) {
+      const match = currentWeekPlans.find((w) => w.stageId === activePlanStageId);
+      if (match) return match;
+    }
+    const baraemPlan = currentWeekPlans.find((w) => w.stageId === 'baraem');
+    return baraemPlan || currentWeekPlans[0];
+  }, [currentWeekPlans, activePlanStageId]);
+
+  const activePlanStageName = useMemo(() => {
+    if (!activePlan) return 'مرحلة البراعم';
+    if (activePlan.stageName) return activePlan.stageName;
+    const st = stages?.find((s) => s.id === activePlan.stageId);
+    if (st) return st.name;
+    if (activePlan.stageId === 'baraem') return 'مرحلة البراعم';
+    if (activePlan.stageId === 'ashbal') return 'مرحلة الأشبال';
+    if (activePlan.stageId === 'fityan') return 'مرحلة الفتيان';
+    return 'مرحلة البراعم';
+  }, [activePlan, stages]);
 
   // Compute dynamically ordered sections merging custom configuration with defaults
   const orderedSections = useMemo(() => {
@@ -695,7 +735,22 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                 </div>
               );
 
-            case 'stats':
+            case 'stats': {
+              const displayStudentsCount =
+                tenantStudents.length > 0
+                  ? tenantStudents.length
+                  : (publicStats?.studentsCount ?? tenant.stats?.studentsCount ?? 0);
+
+              const displayHalaqahsCount =
+                tenantHalaqahs.length > 0
+                  ? tenantHalaqahs.length
+                  : (publicStats?.halaqahsCount ?? tenant.stats?.halaqahsCount ?? 0);
+
+              const displayStaffCount =
+                tenantTeachers.length > 0
+                  ? tenantTeachers.length + (tenant.supervisorName ? 1 : 0)
+                  : (publicStats?.staffCount ?? publicStats?.teachersCount ?? tenant.stats?.staffCount ?? tenant.stats?.teachersCount ?? 0);
+
               return (
                 <div key="stats" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -704,7 +759,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                         <Users className="w-5 h-5" />
                       </div>
                       <div className="text-2xl sm:text-3xl font-black text-slate-900 font-serif">
-                        {tenantStudents.length}
+                        {displayStudentsCount}
                       </div>
                       <div className="text-xs font-bold text-slate-500">طالب وبُرعم مسجل</div>
                     </div>
@@ -714,7 +769,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                         <BookOpen className="w-5 h-5" />
                       </div>
                       <div className="text-2xl sm:text-3xl font-black text-slate-900 font-serif">
-                        {tenantHalaqahs.length}
+                        {displayHalaqahsCount}
                       </div>
                       <div className="text-xs font-bold text-slate-500">حلقة قرآنية نشطة</div>
                     </div>
@@ -724,7 +779,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                         <ShieldCheck className="w-5 h-5" />
                       </div>
                       <div className="text-2xl sm:text-3xl font-black text-slate-900 font-serif">
-                        {tenantTeachers.length}
+                        {displayStaffCount}
                       </div>
                       <div className="text-xs font-bold text-slate-500">معلم ومشرف معتمد</div>
                     </div>
@@ -741,6 +796,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                   </div>
                 </div>
               );
+            }
 
             case 'programs':
               return (
@@ -881,31 +937,88 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
               );
 
             case 'educational':
-              return isEducationalModuleActive && currentWeekPlan ? (
+              return isEducationalModuleActive && activePlan ? (
                 <div key="educational" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-                  <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-emerald-900 to-teal-950 text-white shadow-lg relative overflow-hidden">
-                    <div className="relative z-10 max-w-3xl">
-                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 text-xs font-bold mb-4 border border-emerald-700">
-                        <Calendar className="w-3.5 h-3.5 text-amber-300" />
-                        <span>الخطة التربوية للأسبوع {academicConfig.currentWeek}</span>
+                  <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-emerald-900 via-teal-950 to-emerald-950 text-white shadow-xl relative overflow-hidden border border-emerald-700/60">
+                    {/* Decorative backdrop glow */}
+                    <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+
+                    <div className="relative z-10 max-w-4xl space-y-4">
+                      {/* Top Bar: Week Badge, Stage Indicator & Multi-Stage Switcher */}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-800/90 text-emerald-200 text-xs font-bold border border-emerald-700">
+                            <Calendar className="w-3.5 h-3.5 text-amber-300" />
+                            <span>الخطة التربوية للأسبوع {academicConfig.currentWeek}</span>
+                          </div>
+
+                          {/* Distinct Stage Badge */}
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-amber-950 text-xs font-black shadow-xs">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-900" />
+                            <span>خطة {activePlanStageName}</span>
+                          </div>
+                        </div>
+
+                        {/* Dynamic Multi-Stage Switcher Tabs (when more than 1 stage has a plan this week) */}
+                        {currentWeekPlans.length > 1 && (
+                          <div className="flex items-center gap-1 bg-black/40 p-1 rounded-2xl border border-emerald-700/60">
+                            <span className="text-[11px] text-emerald-300 font-bold px-2 hidden sm:inline">المرحلة:</span>
+                            {currentWeekPlans.map((p) => {
+                              const stObj = stages?.find((s) => s.id === p.stageId);
+                              const label = p.stageName || (stObj ? stObj.name : p.stageId === 'baraem' ? 'البراعم' : p.stageId === 'ashbal' ? 'الأشبال' : p.stageId === 'fityan' ? 'الفتيان' : 'عامة');
+                              const isSelected = (activePlan.stageId || 'general') === (p.stageId || 'general');
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => setActivePlanStageId(p.stageId || '')}
+                                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-amber-400 text-amber-950 shadow-xs'
+                                      : 'text-emerald-200 hover:text-white hover:bg-white/10'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
 
-                      <h4 className="text-2xl sm:text-3xl font-black font-serif text-white mb-2">
-                        شعار الأسبوع: «{currentWeekPlan.motto}»
-                      </h4>
-
-                      <p className="text-emerald-100 text-sm leading-relaxed mb-4">
-                        {currentWeekPlan.educationalGoal}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-4 text-xs pt-4 border-t border-emerald-800/60">
-                        <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                          <Sparkles className="w-4 h-4" />
-                          <span>النشاط العملي: {currentWeekPlan.activity}</span>
+                      {/* Slogan */}
+                      <div>
+                        <div className="text-xs font-bold text-amber-300/90 mb-1">
+                          شعار الأسبوع الخاص بـ ({activePlanStageName}):
                         </div>
-                        <div className="text-emerald-300">
-                          المشرف المسؤول: {currentWeekPlan.responsiblePerson}
+                        <h4 className="text-2xl sm:text-3xl font-black font-serif text-white tracking-wide">
+                          «{activePlan.motto.replace(/^«+|»+$/g, '')}»
+                        </h4>
+                      </div>
+
+                      {/* Educational Goal Content */}
+                      <div className="bg-white/10 backdrop-blur-xs p-4 rounded-2xl border border-white/10">
+                        <strong className="text-amber-300 text-xs block mb-1 font-bold">
+                          الهدف التربوي والسلوكي المعتمد:
+                        </strong>
+                        <p className="text-emerald-100 text-sm sm:text-base leading-relaxed">
+                          {activePlan.educationalGoal}
+                        </p>
+                      </div>
+
+                      {/* Practical Activity & Responsible Supervisor */}
+                      <div className="flex flex-wrap items-center justify-between gap-4 text-xs pt-3 border-t border-emerald-800/60">
+                        <div className="flex items-center gap-2 text-amber-300 font-bold bg-amber-950/40 px-3 py-1.5 rounded-xl border border-amber-500/30">
+                          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>النشاط العملي: {activePlan.activity}</span>
                         </div>
+
+                        {/* Supervisor Name - Controlled via showSupervisorName */}
+                        {activePlan.showSupervisorName !== false && activePlan.responsiblePerson ? (
+                          <div className="text-emerald-200 bg-emerald-950/50 px-3 py-1.5 rounded-xl border border-emerald-700/50 font-medium">
+                            المشرف المسؤول: <span className="font-bold text-white">{activePlan.responsiblePerson}</span>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>

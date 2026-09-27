@@ -134,6 +134,10 @@ CREATE TABLE IF NOT EXISTS academic_years (
     days_per_week INT DEFAULT 4,
     spelling_passing_threshold NUMERIC(5,2) DEFAULT 85.00,
     grade_targets JSONB DEFAULT '{}'::jsonb,
+    -- نظام الفصول الدراسية المتعددة (ترمين/ثلاثة فصول)
+    system_type VARCHAR(50) DEFAULT 'three_terms',
+    active_term_id VARCHAR(100) DEFAULT 'term_1',
+    terms JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -961,6 +965,18 @@ CREATE TABLE IF NOT EXISTS migration_logs (
 CREATE INDEX IF NOT EXISTS idx_migration_logs_run_id ON migration_logs(migration_run_id);
 CREATE INDEX IF NOT EXISTS idx_migration_logs_col ON migration_logs(collection);
 CREATE INDEX IF NOT EXISTS idx_migration_logs_status ON migration_logs(status);
+
+-- =============================================================================
+-- INCREMENTAL MIGRATIONS (idempotent — safe to re-run on existing databases)
+-- =============================================================================
+
+-- نظام الفصول الدراسية المتعددة: إضافة أعمدة terms/system_type/active_term_id
+-- ملاحظة: CREATE TABLE IF NOT EXISTS أعلاه لا يعدّل الجداول الموجودة، لذا هذه
+-- الجمل مطلوبة لقواعد البيانات المنشأة قبل هذه الميزة.
+ALTER TABLE academic_years
+    ADD COLUMN IF NOT EXISTS system_type VARCHAR(50) DEFAULT 'three_terms',
+    ADD COLUMN IF NOT EXISTS active_term_id VARCHAR(100) DEFAULT 'term_1',
+    ADD COLUMN IF NOT EXISTS terms JSONB DEFAULT '[]'::jsonb;
 
 -- =============================================================================
 -- End of QRMS PostgreSQL Schema
