@@ -318,7 +318,7 @@ export const TemplatePlanPreviewModal: React.FC<TemplatePlanPreviewModalProps> =
     if (dayRows.length === 0) return;
     const lines = [
       `🕋 خطة القالب القرآني: ${config.name} (${config.code})`,
-      `🎯 الاتجاه: ${config.memorization.defaultDirection === 'backward' ? 'تنازلي (من الناس للبقرة)' : 'تصاعدي (من الفاتحة للناس)'}`,
+      `🎯 الاتجاه: ${config.memorization.defaultDirection === 'backward' ? 'تنازلي (الناس ← البقرة)' : 'تصاعدي (البقرة ← الناس)'}`,
       `📊 الإجمالي: ${totalDaysCount} يوماً (${totalWeeksCount} أسبوعاً) | ${totalTargetAyahs} آية | ${totalSurahsCount} سورة`,
       `⏱️ الوتيرة: ${unitLabel} يومياً | ${daysPerWeek} أيام أسبوعياً`,
       `=========================================`,
@@ -482,7 +482,7 @@ export const TemplatePlanPreviewModal: React.FC<TemplatePlanPreviewModalProps> =
       </div>
       <div style="text-align: left; font-size: 11px; color: #475569;">
         <div>تاريخ الاستخراج: ${new Date().toLocaleDateString('ar-EG')}</div>
-        <div>الاتجاه: ${config.memorization.defaultDirection === 'backward' ? 'تنازلي (من الناس للبقرة)' : 'تصاعدي (من الفاتحة للناس)'}</div>
+        <div>الاتجاه: ${config.memorization.defaultDirection === 'backward' ? 'تنازلي (الناس ← البقرة)' : 'تصاعدي (البقرة ← الناس)'}</div>
       </div>
     </div>
     <div class="meta-grid">

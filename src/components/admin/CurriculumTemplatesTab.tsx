@@ -386,7 +386,7 @@ export const CurriculumTemplatesTab: React.FC = () => {
                             : 'bg-blue-50 text-blue-800 border border-blue-200'
                         }`}
                       >
-                        {isBackward ? 'تنازلي (من الناس للبقرة)' : 'تصاعدي (من الفاتحة للناس)'}
+                        {isBackward ? 'تنازلي (الناس ← البقرة)' : 'تصاعدي (البقرة ← الناس)'}
                       </span>
                     </div>
 

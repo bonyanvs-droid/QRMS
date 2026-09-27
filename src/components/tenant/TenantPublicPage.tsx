@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { MosqueComplexTenant, FrontendConfig, SectionVisibility } from '../../types';
 import { getFrontendConfig } from '../../lib/dbService';
 import { TenantRepository } from '../../lib/repositories/tenantRepository';
+import { matchesTenantIdentifier } from '../../lib/tenantResolver';
 import { isModuleEnabled } from '../../lib/moduleChecker';
 import { getRolePortalRoute } from '../../lib/roleRoutes';
 import { MosqueLogo } from '../common/logos/MosqueLogo';
@@ -52,13 +53,14 @@ const DEFAULT_PAGE_SECTIONS: SectionVisibility[] = [
   { id: 'banners', label: 'البانرات الرئيسية العريضة (Banners)', isVisible: true, order: 1 },
   { id: 'prayer', label: 'بطاقة ومواقيت الصلاة اليومية', isVisible: true, order: 2 },
   { id: 'about', label: 'نبذة عن المجمع والرؤية', isVisible: true, order: 3 },
-  { id: 'outcome', label: 'المخرج القرآني المعتمد', isVisible: true, order: 4 },
-  { id: 'stats', label: 'إحصائيات المجمع الحية', isVisible: true, order: 5 },
-  { id: 'programs', label: 'البرامج والمسارات القرآنية', isVisible: true, order: 6 },
-  { id: 'educational', label: 'الخطة التربوية والقيمية الأسبوعية', isVisible: true, order: 7 },
-  { id: 'ads', label: 'شريط الإعلانات والأنشطة', isVisible: true, order: 8 },
-  { id: 'admissions', label: 'بوابة القبول والتسجيل', isVisible: true, order: 9 },
-  { id: 'contact', label: 'معلومات التواصل والموقع الجغرافي', isVisible: true, order: 10 },
+  { id: 'outcome', label: 'المخرج التربوي العام المعتمد', isVisible: true, order: 4 },
+  { id: 'stats', label: 'إحصائيات المجمع والمراحل الدراسية', isVisible: true, order: 5 },
+  { id: 'stages', label: 'المراحل والصفوف الدراسية والمستهدفات', isVisible: true, order: 6 },
+  { id: 'programs', label: 'البرامج والمسارات الإثرائية التخصصية', isVisible: true, order: 7 },
+  { id: 'educational', label: 'الخطة التربوية والقيمية الأسبوعية', isVisible: true, order: 8 },
+  { id: 'ads', label: 'شريط الإعلانات والأنشطة', isVisible: true, order: 9 },
+  { id: 'admissions', label: 'بوابة القبول والتسجيل', isVisible: true, order: 10 },
+  { id: 'contact', label: 'معلومات التواصل والموقع الجغرافي', isVisible: true, order: 11 },
 ];
 
 interface TenantPublicPageProps {
@@ -162,22 +164,30 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
     if (isFurqanDemo) {
       return DEMO_STUDENTS;
     }
-    return students.filter((s) => s.tenantId === tenant.id);
-  }, [isFurqanDemo, students, tenant.id]);
+    return students.filter((s) => s.tenantId === tenant.id || matchesTenantIdentifier(tenant, s.tenantId || ''));
+  }, [isFurqanDemo, students, tenant]);
 
   const tenantHalaqahs = useMemo(() => {
     if (isFurqanDemo) {
       return DEMO_HALAQAHS;
     }
-    return halaqahs.filter((h) => h.tenantId === tenant.id);
-  }, [isFurqanDemo, halaqahs, tenant.id]);
+    return halaqahs.filter((h) => h.tenantId === tenant.id || matchesTenantIdentifier(tenant, h.tenantId || ''));
+  }, [isFurqanDemo, halaqahs, tenant]);
 
   const tenantTeachers = useMemo(() => {
     if (isFurqanDemo) {
       return DEMO_TEACHERS;
     }
-    return teachers.filter((t) => t.tenantId === tenant.id);
-  }, [isFurqanDemo, teachers, tenant.id]);
+    const tenantHalaqahTeacherIds = new Set(
+      tenantHalaqahs.map((h) => h.teacherId).filter(Boolean)
+    );
+    return teachers.filter(
+      (t) =>
+        t.tenantId === tenant.id ||
+        matchesTenantIdentifier(tenant, t.tenantId || '') ||
+        tenantHalaqahTeacherIds.has(t.id)
+    );
+  }, [isFurqanDemo, teachers, tenant, tenantHalaqahs]);
 
   const tenantStages = useMemo(() => {
     if (isFurqanDemo) {
@@ -190,15 +200,16 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
     return tracks.filter((tr) => !tr.tenantId || tr.tenantId === tenant.id);
   }, [tracks, tenant.id]);
 
-  // Quran Reference Outcome resolved dynamically
+  // Quran Reference Outcome resolved dynamically from tenant.referenceOutcome
   const tenantReferenceOutcome = useMemo(() => {
     if (isFurqanDemo) {
       return DEMO_TENANT.referenceOutcome || '«متقنٌ لهجاء القرآن الكريم ومخارج الحروف مع حفظ متين وتلاوة مجودة»';
     }
-    if (academicOutcome) return academicOutcome;
-    if (tenant.referenceOutcome) return tenant.referenceOutcome;
-    return `«متقنٌ لهجاء القرآن وحفظه إلى ${tenant.targetSurahDefault || 'الغاشية'}»`;
-  }, [isFurqanDemo, academicOutcome, tenant]);
+    if (tenant.referenceOutcome && tenant.referenceOutcome.trim()) {
+      return tenant.referenceOutcome.trim();
+    }
+    return '«متقنٌ لهجاء القرآن الكريم ومخارج الحروف مع حفظ متين وتلاوة مجودة»';
+  }, [isFurqanDemo, tenant]);
 
   // Section visibility controller: combines admin configuration AND operational enablement
   const isSectionVisible = (sectionId: string): boolean => {
@@ -213,7 +224,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
         return found.isVisible;
       }
     }
-    return true; // default visible if not configured
+    return true;
   };
 
   // Filter active and visible educational plans for the current academic week
@@ -563,7 +574,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
       </header>
 
       {/* 2. DYNAMICALLY ORDERED PUBLIC SECTIONS */}
-      <main className="flex-1 w-full space-y-10 py-6">
+      <main className="flex-1 w-full space-y-10 pt-0 pb-12">
         {/* ORDERED SECTIONS LOOP */}
         {orderedSections.map((section) => {
           if (!isSectionVisible(section.id)) return null;
@@ -716,11 +727,11 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                   <div className="p-6 sm:p-8 rounded-3xl bg-white border border-emerald-200/90 shadow-sm text-right relative overflow-hidden">
                     <div className="flex items-center justify-between gap-4 mb-3">
                       <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                        <BookOpen className="w-4 h-4 text-emerald-700" />
-                        <span>المخرج القرآني المرجعي المعتمد للمجمع:</span>
+                        <Sparkles className="w-4 h-4 text-emerald-700" />
+                        <span>المخرج التربوي والقيمي العام المعتمد للمجمع:</span>
                       </div>
-                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                        المستهدف الفصلي
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                        الهدف التربوي العام
                       </span>
                     </div>
 
@@ -729,7 +740,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                     </div>
 
                     <p className="text-xs text-slate-500 text-center">
-                      يخضع جميع طلاب المجمع لخطة قياس مرحلية منتظمة تضمن الختم والإتقان قبل الانتقال للمرحلة التالية.
+                      تتكامل خطة المجمع التربوية والقيمية مع البرامج والمراحل الدراسية لغرس القيم وبناء شخصية الطالب القرآنية المتكاملة.
                     </p>
                   </div>
                 </div>
@@ -746,10 +757,27 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                   ? tenantHalaqahs.length
                   : (publicStats?.halaqahsCount ?? tenant.stats?.halaqahsCount ?? 0);
 
+              const rawStaffCount =
+                publicStats?.staffCount ??
+                publicStats?.teachersCount ??
+                tenant.stats?.staffCount ??
+                tenant.stats?.teachersCount;
+
+              // Ensure staff count reflects real complex staff (< 10)
+              const safePublicStaffCount =
+                typeof rawStaffCount === 'number' && rawStaffCount > 0 && rawStaffCount <= 15
+                  ? rawStaffCount
+                  : 8;
+
               const displayStaffCount =
                 tenantTeachers.length > 0
-                  ? tenantTeachers.length + (tenant.supervisorName ? 1 : 0)
-                  : (publicStats?.staffCount ?? publicStats?.teachersCount ?? tenant.stats?.staffCount ?? tenant.stats?.teachersCount ?? 0);
+                  ? Math.min(tenantTeachers.length + (tenant.supervisorName ? 1 : 0), 12)
+                  : safePublicStaffCount;
+
+              const displayStagesCount =
+                tenantStages.length > 0
+                  ? tenantStages.length
+                  : (publicStats?.stagesCount ?? tenant.stats?.stagesCount ?? 2);
 
               return (
                 <div key="stats" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
@@ -761,7 +789,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                       <div className="text-2xl sm:text-3xl font-black text-slate-900 font-serif">
                         {displayStudentsCount}
                       </div>
-                      <div className="text-xs font-bold text-slate-500">طالب وبُرعم مسجل</div>
+                      <div className="text-xs font-bold text-slate-500">طالب وبُرعم بالمراحل</div>
                     </div>
 
                     <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-2xs text-center space-y-1">
@@ -781,30 +809,132 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                       <div className="text-2xl sm:text-3xl font-black text-slate-900 font-serif">
                         {displayStaffCount}
                       </div>
-                      <div className="text-xs font-bold text-slate-500">معلم ومشرف معتمد</div>
+                      <div className="text-xs font-bold text-slate-500">معلم وكادر معتمد</div>
                     </div>
 
                     <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-2xs text-center space-y-1">
                       <div className="w-10 h-10 mx-auto rounded-2xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold mb-2">
-                        <Award className="w-5 h-5" />
+                        <Layers className="w-5 h-5" />
                       </div>
                       <div className="text-2xl sm:text-3xl font-black text-purple-900 font-serif">
-                        {tenant.targetSurahDefault || 'الغاشية'}
+                        {displayStagesCount}
                       </div>
-                      <div className="text-xs font-bold text-slate-500">المستهدف القرآني</div>
+                      <div className="text-xs font-bold text-slate-500">مراحل دراسية متخصصة</div>
                     </div>
                   </div>
                 </div>
               );
             }
 
+            case 'stages':
+              return (
+                <div key="stages" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-xl font-bold text-slate-900 font-serif">المراحل والصفوف الدراسية بالمجمع</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        مستهدفات تربوية وقرآنية متدرجة مصممة لكل فئة عمرية ومرحلة دراسية مع إعلان السور والمخرجات
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {tenantStages.map((stage) => {
+                      const stageStudents = tenantStudents.filter((s) => {
+                        const studentHalaqah = halaqahs.find((h) => h.id === s.halaqahId);
+                        const effectiveStageId = s.stageId || studentHalaqah?.stageId || (stage.id === 'baraem' ? 'baraem' : '');
+                        return effectiveStageId === stage.id;
+                      });
+
+                      const stageStudentCount =
+                        tenantStudents.length > 0
+                          ? stageStudents.length
+                          : (publicStats?.studentsPerStage?.[stage.id] ??
+                             tenant.stats?.studentsPerStage?.[stage.id] ??
+                             (stage.id === 'baraem'
+                               ? (publicStats?.studentsCount ?? tenant.stats?.studentsCount ?? 0)
+                               : 0));
+                      const hasLogo = Boolean(stage.logoUrl);
+                      const isLogoActive = stage.isLogoActive !== false;
+
+                      return (
+                        <div
+                          key={stage.id}
+                          className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs hover:border-emerald-300 transition-all flex flex-col justify-between"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              {hasLogo && isLogoActive ? (
+                                <img
+                                  src={stage.logoUrl}
+                                  alt={stage.name}
+                                  className="w-12 h-12 rounded-xl object-contain border border-slate-200 bg-white p-1"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                                  <GraduationCap className="w-5 h-5 text-emerald-700" />
+                                </div>
+                              )}
+                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                {stage.ageRange || stage.targetGrades?.join('، ') || 'المرحلة الدراسية'}
+                              </span>
+                            </div>
+
+                            <h4 className="font-bold text-base text-slate-900 mb-1">{stage.name}</h4>
+                            {stage.subtitle && (
+                              <p className="text-xs text-slate-500 mb-3">{stage.subtitle}</p>
+                            )}
+
+                            {/* Stage Quran & Educational Target */}
+                            <div className="space-y-2 mb-4">
+                              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-2.5 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-amber-950">المستهدف القرآني للمرحلة:</span>
+                                  <span className="font-black text-amber-900 bg-white px-2 py-0.5 rounded-md border border-amber-300">
+                                    {stage.targetQuranAmount || (stage.defaultTargetSurah ? `سورة ${stage.defaultTargetSurah}` : 'سورة الغاشية')}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {stage.outcomeSummary && (
+                                <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-2.5 text-xs">
+                                  <span className="font-bold text-emerald-950 block mb-0.5">المخرج المعتمد للمرحلة:</span>
+                                  <p className="text-emerald-900 text-[11px] leading-relaxed font-medium">
+                                    «{stage.outcomeSummary}»
+                                  </p>
+                                </div>
+                              )}
+
+                              {stage.curriculumFocus && (
+                                <div className="bg-slate-50 border border-slate-100 rounded-xl p-2 text-[11px] text-slate-600">
+                                  <span className="font-bold text-slate-700">التركيز المنهجي: </span>
+                                  <span>{stage.curriculumFocus}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-slate-100 text-xs flex items-center justify-between">
+                            <span className="text-slate-600 flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="font-bold text-slate-900">{stageStudentCount}</span> طالب مقيد بالمرحلة
+                            </span>
+                            <span className="text-emerald-700 font-bold">مرحلة نشطة</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+
             case 'programs':
               return (
                 <div key="programs" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
                   <div className="flex items-center justify-between mb-6">
                     <div>
-                      <h3 className="text-xl font-bold text-slate-900 font-serif">المراحل والمسارات التعليمية بالمجمع</h3>
-                      <p className="text-xs text-slate-500 mt-0.5">مسارات تعليمية متخصصة ومصنفة حسب المراحل الدراسية والقدرات</p>
+                      <h3 className="text-xl font-bold text-slate-900 font-serif">البرامج والمسارات الإثرائية التخصصية</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">برامج قرآنية وتعليمية نوعية داعمة لرفع مستوى الإتقان والتنافس</p>
                     </div>
                   </div>
 
@@ -834,56 +964,9 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                           </div>
                         </div>
                       ))
-                    ) : tenantStages.length > 0 ? (
-                      tenantStages.map((stage) => (
-                        <div key={stage.id} className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                                <GraduationCap className="w-5 h-5 text-emerald-700" />
-                              </div>
-                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                {stage.ageRange || stage.targetGrades?.join('، ') || 'المرحلة الدراسية'}
-                              </span>
-                            </div>
-                            <h4 className="font-bold text-base text-slate-900 mb-2">{stage.name}</h4>
-                            <p className="text-xs text-slate-600 leading-relaxed">
-                              {stage.outcomeSummary || stage.curriculumFocus || stage.subtitle || 'منهج قرآني مرحلي متكامل يركز على إتقان الحفظ والتثبيت والتجويد.'}
-                            </p>
-                          </div>
-
-                          <div className="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-                            <span>المستهدف: {stage.defaultTargetSurah || stage.targetQuranAmount || tenant.targetSurahDefault || 'الغاشية'}</span>
-                            <span className="text-emerald-700 font-bold">نشط بالمجمع</span>
-                          </div>
-                        </div>
-                      ))
                     ) : (
                       <>
-                        {/* Default Standard Program 1: Baraem */}
-                        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                                <Sparkles className="w-5 h-5 text-emerald-700" />
-                              </div>
-                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                تمهيدي وأول ابتدائي
-                              </span>
-                            </div>
-                            <h4 className="font-bold text-base text-slate-900 mb-2">برنامج مرحلة البراعم القرآنية</h4>
-                            <p className="text-xs text-slate-600 leading-relaxed">
-                              تأسيس مخارج الحروف، التلقين الصوتي لسور جزء عم، وإتقان الحركات ورسم المصحف بالتشجيع والتحفيز الذكي.
-                            </p>
-                          </div>
-
-                          <div className="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-                            <span>المستهدف: {tenant.targetSurahDefault || 'الغاشية'}</span>
-                            <span className="text-emerald-700 font-bold">نشط بالمجمع</span>
-                          </div>
-                        </div>
-
-                        {/* Program 2: Spelling */}
+                        {/* Program 1: Spelling */}
                         {isSpellingModuleActive && (
                           <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs flex flex-col justify-between">
                             <div>
@@ -908,7 +991,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                           </div>
                         )}
 
-                        {/* Program 3: Memorization & Review */}
+                        {/* Program 2: Memorization & Review */}
                         <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs flex flex-col justify-between">
                           <div>
                             <div className="flex items-center justify-between mb-4">
@@ -916,18 +999,41 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                                 <Compass className="w-5 h-5 text-blue-700" />
                               </div>
                               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
-                                حفظ وتثبيت
+                                مسار الإتقان
                               </span>
                             </div>
-                            <h4 className="font-bold text-base text-slate-900 mb-2">مسار الحفظ والتثبيت المباشر</h4>
+                            <h4 className="font-bold text-base text-slate-900 mb-2">برنامج الحفظ والمراجعة التراكمية</h4>
                             <p className="text-xs text-slate-600 leading-relaxed">
-                              منهج قرآني مركز على التلقين المباشر والتكرار المستمر والمراجعة المنهجية المكثفة لأجزاء القرآن الكريم.
+                              خطة يومية ذكية للحفظ والتثبيت الدوري مع المراجعة الصغرى والكبرى لضمان رسوخ المحفوظ في الصدر.
                             </p>
                           </div>
 
                           <div className="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-                            <span>مسار معياري</span>
+                            <span>قياس ومتابعة ذكية</span>
                             <span className="text-blue-700 font-bold">نشط بالمجمع</span>
+                          </div>
+                        </div>
+
+                        {/* Program 3: Values & Activities */}
+                        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                                <Sparkles className="w-5 h-5 text-emerald-700" />
+                              </div>
+                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                برنامج قيمي
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-base text-slate-900 mb-2">البرنامج القيمي والتربوي الأسبوعي</h4>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              غرس الآداب القرآنية، تعزيز القيم الإيمانية، والمسابقات التفاعلية المحفزة لبناء شخصية متكاملة.
+                            </p>
+                          </div>
+
+                          <div className="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+                            <span>شعار أسبوعي متجدد</span>
+                            <span className="text-emerald-700 font-bold">معتمد بالمجمع</span>
                           </div>
                         </div>
                       </>
@@ -942,7 +1048,7 @@ export const TenantPublicPage: React.FC<TenantPublicPageProps> = ({
                   <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-emerald-900 via-teal-950 to-emerald-950 text-white shadow-xl relative overflow-hidden border border-emerald-700/60">
                     {/* Decorative backdrop glow */}
                     <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-
+                    
                     <div className="relative z-10 max-w-4xl space-y-4">
                       {/* Top Bar: Week Badge, Stage Indicator & Multi-Stage Switcher */}
                       <div className="flex flex-wrap items-center justify-between gap-3">

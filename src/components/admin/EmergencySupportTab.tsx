@@ -30,8 +30,14 @@ export const EmergencySupportTab: React.FC = () => {
   } = useApp();
 
   const [supportSessionsHistory, setSupportSessionsHistory] = useState<EmergencySupportSession[]>(() => {
-    const saved = safeStorage.getItem('al_ghazzawi_support_sessions_v1');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = safeStorage.getItem('al_ghazzawi_support_sessions_v1');
+      if (saved && saved !== 'null' && saved !== 'undefined') {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
   });
 
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);

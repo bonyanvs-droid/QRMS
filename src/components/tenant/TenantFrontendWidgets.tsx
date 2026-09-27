@@ -156,13 +156,14 @@ export function TenantBanners({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (activeBanners.length <= 1 || isPaused) return;
 
     timerRef.current = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % activeBanners.length);
-    }, 5000);
+    }, 6000);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -172,18 +173,19 @@ export function TenantBanners({
   // If no banners, still render the unified hero with complex identity
   const currentBanner = activeBanners.length > 0 ? activeBanners[currentIndex] || activeBanners[0] : null;
 
-  const handlePrev = () => {
+  const handlePrev = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (activeBanners.length <= 1) return;
     setCurrentIndex((prev) => (prev === 0 ? activeBanners.length - 1 : prev - 1));
   };
 
-  const handleNext = () => {
+  const handleNext = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (activeBanners.length <= 1) return;
     setCurrentIndex((prev) => (prev + 1) % activeBanners.length);
   };
 
-  const touchStartXRef = useRef<number | null>(null);
-
+  // Touch Swipe Handlers for mobile gestures
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX;
   };
@@ -192,7 +194,7 @@ export function TenantBanners({
     if (touchStartXRef.current === null) return;
     const touchEndX = e.changedTouches[0].clientX;
     const diff = touchStartXRef.current - touchEndX;
-    // In RTL layout: swipe left (diff > 50) goes to next, swipe right (diff < -50) goes to prev
+    // In RTL: swipe left (diff > 50) means next, swipe right (diff < -50) means prev
     if (diff > 50) {
       handleNext();
     } else if (diff < -50) {
@@ -202,6 +204,7 @@ export function TenantBanners({
   };
 
   const handleCtaClick = (b: BannerItem | null, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!b || !b.linkUrl || b.linkUrl === '#' || b.linkUrl.toLowerCase().includes('admission')) {
       if (onOpenAdmission) {
         e.preventDefault();
@@ -210,106 +213,130 @@ export function TenantBanners({
     }
   };
 
-  const displayTitle =
-    currentBanner?.title ||
-    config.name ||
-    tenant?.name ||
-    'مجمع الغزاوي لتحفيظ القرآن الكريم';
+  // Check if banner has custom text
+  const hasCustomTitle = !!currentBanner?.title && currentBanner.title.trim().length > 0;
+  const hasCustomSubtitle = !!currentBanner?.subtitle && currentBanner.subtitle.trim().length > 0;
+  const hasCta = !!currentBanner?.ctaText && currentBanner.ctaText.trim().length > 0;
 
-  const displaySubtitle =
-    currentBanner?.subtitle ||
-    config.description ||
-    tenant?.notes ||
-    'صرح قرآني رائد يُعنى بغرس كتاب الله الكريم في نفوس الناشئة، وتأسيس القراءة القرآنية الصحيحة بالهجاء المتقن والقيم الإسلامية السامية.';
+  // Fallback title only if no banner image exists
+  const displayTitle = hasCustomTitle
+    ? currentBanner!.title
+    : !currentBanner?.imageUrl
+    ? config.name || tenant?.name || 'مجمع الغزاوي لتحفيظ القرآن الكريم'
+    : '';
+
+  const displaySubtitle = hasCustomSubtitle
+    ? currentBanner!.subtitle
+    : !currentBanner?.imageUrl
+    ? config.description || tenant?.notes || 'صرح قرآني رائد يُعنى بغرس كتاب الله الكريم في نفوس الناشئة'
+    : '';
+
+  const showContentCard = displayTitle || displaySubtitle || hasCta;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-4 w-full">
-      <div
-        className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-800/90 bg-slate-950 text-white group select-none"
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => setIsPaused(false)}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        {/* 1. Background Layer (Full Section) */}
-        {currentBanner?.imageUrl ? (
+    <div
+      className="w-full relative overflow-hidden bg-slate-950 text-white min-h-[380px] sm:min-h-[480px] lg:min-h-[540px] flex items-center select-none"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* 1. Full-Bleed Background Layer with Light Green Islamic Transparency */}
+      {currentBanner?.imageUrl ? (
+        <div key={currentBanner.id || currentIndex} className="absolute inset-0 w-full h-full transition-opacity duration-700 ease-in-out">
           <img
             src={currentBanner.imageUrl}
-            alt={displayTitle}
-            key={currentBanner.id}
-            className="absolute inset-0 w-full h-full object-cover object-center opacity-30 lg:opacity-45 transition-opacity duration-700 pointer-events-none"
+            alt={displayTitle || 'بانر المجمع'}
+            className="w-full h-full object-cover object-center opacity-90 transition-all duration-700"
             referrerPolicy="no-referrer"
             onError={(e) => {
               (e.target as HTMLElement).style.display = 'none';
             }}
           />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-950 via-teal-950 to-slate-950 flex items-center justify-center overflow-hidden pointer-events-none">
-            <div className="absolute -right-16 -top-16 w-96 h-96 rounded-full bg-emerald-700/20 blur-3xl" />
-            <div className="absolute -left-16 -bottom-16 w-96 h-96 rounded-full bg-amber-500/15 blur-3xl" />
-            <svg
-              className="absolute right-8 top-1/2 -translate-y-1/2 w-96 h-96 text-emerald-500/10 pointer-events-none"
-              viewBox="0 0 200 200"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            >
-              <circle cx="100" cy="100" r="80" />
-              <circle cx="100" cy="100" r="60" />
-              <path d="M100 20 L180 100 L100 180 L20 100 Z" />
-              <path d="M43.4 43.4 L156.6 43.4 L156.6 156.6 L43.4 156.6 Z" />
-              <circle cx="100" cy="100" r="30" strokeDasharray="3 3" />
-            </svg>
-          </div>
-        )}
+        </div>
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-950 via-teal-950 to-slate-950 flex items-center justify-center overflow-hidden pointer-events-none">
+          <div className="absolute -right-20 -top-20 w-[500px] h-[500px] rounded-full bg-emerald-600/20 blur-3xl" />
+          <div className="absolute -left-20 -bottom-20 w-[500px] h-[500px] rounded-full bg-amber-500/15 blur-3xl" />
+          <svg
+            className="absolute right-12 top-1/2 -translate-y-1/2 w-[500px] h-[500px] text-emerald-500/10 pointer-events-none"
+            viewBox="0 0 200 200"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          >
+            <circle cx="100" cy="100" r="80" />
+            <circle cx="100" cy="100" r="60" />
+            <path d="M100 20 L180 100 L100 180 L20 100 Z" />
+            <path d="M43.4 43.4 L156.6 43.4 L156.6 156.6 L43.4 156.6 Z" />
+            <circle cx="100" cy="100" r="30" strokeDasharray="3 3" />
+          </svg>
+        </div>
+      )}
 
-        {/* 2. Professional Gradient Overlay: Heavier on RIGHT, lighter on LEFT */}
-        <div className="absolute inset-0 bg-gradient-to-t lg:bg-gradient-to-l from-slate-950 via-slate-950/95 lg:via-slate-950/90 to-slate-950/30 pointer-events-none" />
+      {/* 2. Refined Authentic Green Islamic Transparency (الشفافية الخضراء التراثية بنعومة وخفة فائقة) */}
+      <div className="absolute inset-0 bg-gradient-to-t from-emerald-950/30 via-emerald-900/10 to-transparent pointer-events-none" />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'linear-gradient(to left, rgba(6, 95, 70, 0.22) 0%, rgba(16, 185, 129, 0.12) 40%, rgba(5, 150, 105, 0.05) 70%, transparent 100%)',
+        }}
+      />
 
-        {/* 3. Unified Responsive Content Grid */}
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center min-h-[420px] sm:min-h-[460px] lg:min-h-[490px] p-6 sm:p-8 md:p-10 lg:p-12">
-          
-          {/* RIGHT COLUMN (RTL First: Title, Official Badge, Description, CTAs) */}
-          <div className="lg:col-span-7 space-y-4 text-right flex flex-col justify-center">
-            {/* Complex / Official Banner Badge */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-400 text-amber-950 text-xs font-black shadow-xs self-start">
-              <Sparkles className="w-3.5 h-3.5 text-amber-950 shrink-0" />
-              <span>{currentBanner ? 'إعلان وتنويه رسمي للمجمع' : 'البوابة الرسمية للمجمع القرآني المعتمد'}</span>
-            </div>
+      {/* 3. Natural Text & Action Elements */}
+      {showContentCard && (
+        <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-16 text-right pointer-events-none">
+          <div
+            key={`content-${currentIndex}`}
+            className="max-w-xl space-y-2.5 pointer-events-auto"
+          >
+            {/* Tag / Badge - Shown cleanly if title exists */}
+            {displayTitle && (
+              <div className="animate-banner-fade-in inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-amber-950 text-xs font-black shadow-md mb-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-950 shrink-0" />
+                <span>{currentBanner ? 'إعلان وتنويه رسمي للمجمع' : 'البوابة الرسمية للمجمع القرآني المعتمد'}</span>
+              </div>
+            )}
 
-            {/* Main Headline */}
-            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black font-serif text-white leading-tight tracking-tight drop-shadow-md">
-              {displayTitle}
-            </h1>
+            {/* Main Headline with crisp drop shadow directly over graphic */}
+            {displayTitle && (
+              <h1 className="animate-banner-fade-delayed-1 text-2xl sm:text-3xl md:text-4xl font-black font-serif text-white leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                {displayTitle}
+              </h1>
+            )}
 
             {/* Subtitle / Description */}
-            <p className="text-sm sm:text-base lg:text-lg text-emerald-100/90 leading-relaxed font-medium max-w-xl">
-              {displaySubtitle}
-            </p>
+            {displaySubtitle && (
+              <p className="animate-banner-fade-delayed-2 text-xs sm:text-sm md:text-base text-white/95 leading-relaxed font-semibold drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] max-w-lg">
+                {displaySubtitle}
+              </p>
+            )}
 
-            {/* CTA Buttons & Slide Indicators */}
-            <div className="pt-2 flex flex-wrap items-center gap-3">
+            {/* CTA Buttons & Status Row */}
+            <div className="animate-banner-fade-delayed-3 pt-2.5 flex flex-wrap items-center gap-2.5 sm:gap-3">
               {/* Primary Action Button (Admission / Banner Link) */}
-              {currentBanner?.linkUrl && !currentBanner.linkUrl.toLowerCase().includes('admission') ? (
-                <a
-                  href={currentBanner.linkUrl}
-                  target={currentBanner.linkUrl.startsWith('http') ? '_blank' : '_self'}
-                  rel="noreferrer"
-                  onClick={(e) => handleCtaClick(currentBanner, e)}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 active:scale-98 text-amber-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-400/20 transition-all hover:scale-102 cursor-pointer"
-                >
-                  <span>{currentBanner.ctaText || 'سجّل الآن'}</span>
-                  <ExternalLink className="w-4 h-4" />
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  onClick={(e) => handleCtaClick(currentBanner, e)}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 active:scale-98 text-amber-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-400/20 transition-all hover:scale-102 cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4 text-amber-950" />
-                  <span>{currentBanner?.ctaText || 'سجّل الآن'}</span>
-                </button>
+              {(hasCta || (!currentBanner?.imageUrl && onOpenAdmission)) && (
+                currentBanner?.linkUrl && !currentBanner.linkUrl.toLowerCase().includes('admission') ? (
+                  <a
+                    href={currentBanner.linkUrl}
+                    target={currentBanner.linkUrl.startsWith('http') ? '_blank' : '_self'}
+                    rel="noreferrer"
+                    onClick={(e) => handleCtaClick(currentBanner, e)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-98 text-amber-950 font-black text-xs sm:text-sm shadow-md transition-all cursor-pointer"
+                  >
+                    <span>{currentBanner.ctaText || 'المزيد'}</span>
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => handleCtaClick(currentBanner, e)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-98 text-amber-950 font-black text-xs sm:text-sm shadow-md transition-all cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4 text-amber-950" />
+                    <span>{currentBanner?.ctaText || 'المزيد'}</span>
+                  </button>
+                )
               )}
 
               {/* Secondary Action: Login or Return to Portal */}
@@ -317,7 +344,7 @@ export function TenantBanners({
                 <button
                   type="button"
                   onClick={() => onNavigatePortal?.(getRolePortalRoute(effectiveUser.role, effectiveUser.tenantId))}
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-emerald-700/90 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm border border-emerald-500/40 shadow-md transition-all cursor-pointer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-900/85 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm border border-emerald-600/40 shadow-xs transition-all cursor-pointer"
                 >
                   {RoleIcon ? <RoleIcon className="w-4 h-4 text-emerald-200" /> : <LayoutDashboard className="w-4 h-4 text-emerald-200" />}
                   <span>العودة إلى {roleDetails?.portalLabel || 'البوابة'}</span>
@@ -326,90 +353,67 @@ export function TenantBanners({
                 <button
                   type="button"
                   onClick={onOpenLogin}
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-100 font-bold text-xs sm:text-sm border border-slate-700 shadow-sm transition-all cursor-pointer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/85 hover:bg-slate-800 text-slate-100 font-bold text-xs sm:text-sm border border-slate-700/80 shadow-xs transition-all cursor-pointer"
                 >
                   <LogIn className="w-4 h-4 text-emerald-400" />
                   <span>تسجيل الدخول</span>
                 </button>
               )}
 
-              {/* Active Banner Counter Chip */}
+              {/* Numerical Slide Counter Pill */}
               {activeBanners.length > 1 && (
-                <span className="text-xs font-bold text-slate-300 bg-slate-900/90 px-3.5 py-2.5 rounded-xl border border-slate-800">
+                <span className="text-xs font-bold text-slate-300 bg-slate-900/85 px-3 py-2 rounded-xl border border-slate-800/80 select-none">
                   {currentIndex + 1} من {activeBanners.length}
                 </span>
               )}
             </div>
           </div>
-
-          {/* LEFT COLUMN (Desktop Left: Visual Showcase Card & Controls) */}
-          <div className="lg:col-span-5 w-full flex justify-center">
-            <div className="relative w-full max-w-lg lg:max-w-none aspect-[16/10] sm:aspect-[16/9] lg:aspect-[4/3] rounded-2xl overflow-hidden border border-slate-700/70 shadow-2xl bg-slate-900 group/card">
-              {currentBanner?.imageUrl ? (
-                <img
-                  src={currentBanner.imageUrl}
-                  alt={displayTitle}
-                  key={currentBanner.id}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover/card:scale-105"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-emerald-950 via-teal-950 to-slate-950 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
-                  <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-emerald-600/20 blur-xl" />
-                  <div className="absolute -left-8 -bottom-8 w-40 h-40 rounded-full bg-amber-500/15 blur-xl" />
-                  <Building2 className="w-12 h-12 text-emerald-400 mb-2 relative z-10" />
-                  <div className="text-sm font-black text-emerald-200 relative z-10">{displayTitle}</div>
-                  <div className="text-xs text-slate-300 mt-1 relative z-10">صرح قرآني رائد ومعتمد</div>
-                </div>
-              )}
-
-              {/* Bottom Subtle Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent pointer-events-none" />
-
-              {/* Slider Arrows */}
-              {activeBanners.length > 1 && (
-                <>
-                  <button
-                    onClick={handlePrev}
-                    aria-label="البانر السابق"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/80 hover:bg-emerald-700 text-white flex items-center justify-center backdrop-blur-md border border-slate-700/80 transition-all cursor-pointer z-20 hover:scale-110 shadow-lg"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={handleNext}
-                    aria-label="البانر التالي"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/80 hover:bg-emerald-700 text-white flex items-center justify-center backdrop-blur-md border border-slate-700/80 transition-all cursor-pointer z-20 hover:scale-110 shadow-lg"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-
-                  {/* Indicator Dots */}
-                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
-                    {activeBanners.map((b, idx) => (
-                      <button
-                        key={b.id}
-                        onClick={() => setCurrentIndex(idx)}
-                        className={`h-2 rounded-full transition-all cursor-pointer ${
-                          currentIndex === idx
-                            ? 'w-6 bg-amber-400 shadow-sm'
-                            : 'w-2 bg-white/40 hover:bg-white/80'
-                        }`}
-                        aria-label={`الانتقال إلى الشريحة ${idx + 1}`}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
         </div>
-      </div>
+      )}
+
+      {/* 4. Slide Navigation Controls (Side Arrows & Center Dots) */}
+      {activeBanners.length > 1 && (
+        <>
+          {/* Previous Slide Button (Left Arrow) */}
+          <button
+            onClick={handlePrev}
+            aria-label="البانر السابق"
+            className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-slate-950/70 hover:bg-emerald-800 text-white flex items-center justify-center backdrop-blur-md border border-white/10 transition-all cursor-pointer z-20 hover:scale-105 active:scale-95 shadow-xl"
+            title="السابق"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+
+          {/* Next Slide Button (Right Arrow) */}
+          <button
+            onClick={handleNext}
+            aria-label="البانر التالي"
+            className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-slate-950/70 hover:bg-emerald-800 text-white flex items-center justify-center backdrop-blur-md border border-white/10 transition-all cursor-pointer z-20 hover:scale-105 active:scale-95 shadow-xl"
+            title="التالي"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+
+          {/* Center Indicator Dots */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
+            {activeBanners.map((b, idx) => (
+              <button
+                key={b.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCurrentIndex(idx);
+                }}
+                className={`h-2 rounded-full transition-all cursor-pointer ${
+                  currentIndex === idx
+                    ? 'w-7 bg-amber-400 shadow-sm'
+                    : 'w-2 bg-white/35 hover:bg-white/70'
+                }`}
+                aria-label={`الانتقال إلى الشريحة ${idx + 1}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

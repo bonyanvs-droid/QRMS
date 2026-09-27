@@ -612,7 +612,7 @@ export const StudentPlanDashboard: React.FC<StudentPlanDashboardProps> = ({
                 {formatQuranTextExpression(termPlan.displayLabel)}
               </div>
               <div className="text-xs text-emerald-700 mt-1">
-                الاتجاه: {termPlan.direction === 'backward' ? 'تنازلي (من الناس نحو البقرة)' : 'تصاعدي'}
+                الاتجاه: {termPlan.direction === 'backward' ? 'تنازلي (الناس ← البقرة)' : 'تصاعدي (البقرة ← الناس)'}
               </div>
             </div>
 

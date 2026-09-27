@@ -36,13 +36,14 @@ const DEFAULT_SECTIONS: SectionVisibility[] = [
   { id: 'banners', label: 'البانرات الرئيسية العريضة (Banners)', isVisible: true, order: 1 },
   { id: 'prayer', label: 'بطاقة ومواقيت الصلاة اليومية', isVisible: true, order: 2 },
   { id: 'about', label: 'نبذة عن المجمع والرؤية', isVisible: true, order: 3 },
-  { id: 'outcome', label: 'المخرج القرآني المعتمد', isVisible: true, order: 4 },
-  { id: 'stats', label: 'إحصائيات المجمع الحية', isVisible: true, order: 5 },
-  { id: 'programs', label: 'البرامج والمسارات القرآنية', isVisible: true, order: 6 },
-  { id: 'educational', label: 'الخطة التربوية والقيمية الأسبوعية', isVisible: true, order: 7 },
-  { id: 'ads', label: 'شريط الإعلانات والأنشطة', isVisible: true, order: 8 },
-  { id: 'admissions', label: 'بوابة القبول والتسجيل', isVisible: true, order: 9 },
-  { id: 'contact', label: 'معلومات التواصل والموقع الجغرافي', isVisible: true, order: 10 },
+  { id: 'outcome', label: 'المخرج التربوي العام المعتمد', isVisible: true, order: 4 },
+  { id: 'stats', label: 'إحصائيات المجمع والمراحل الدراسية', isVisible: true, order: 5 },
+  { id: 'stages', label: 'المراحل والصفوف الدراسية والمستهدفات', isVisible: true, order: 6 },
+  { id: 'programs', label: 'البرامج والمسارات الإثرائية التخصصية', isVisible: true, order: 7 },
+  { id: 'educational', label: 'الخطة التربوية والقيمية الأسبوعية', isVisible: true, order: 8 },
+  { id: 'ads', label: 'شريط الإعلانات والأنشطة', isVisible: true, order: 9 },
+  { id: 'admissions', label: 'بوابة القبول والتسجيل', isVisible: true, order: 10 },
+  { id: 'contact', label: 'معلومات التواصل والموقع الجغرافي', isVisible: true, order: 11 },
 ];
 
 export default function FrontendManagementTab() {
