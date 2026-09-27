@@ -216,7 +216,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [gradeFilter, setGradeFilter] = useState<string>('all');
+  // Roster halaqah filter: '' = follow the active halaqah, 'all' = every
+  // halaqah in the teacher's scope (primary + assistant).
+  const [rosterHalaqahFilter, setRosterHalaqahFilter] = useState<string>('');
 
   // Active selected student for Quick Record
   const [activeStudentRecord, setActiveStudentRecord] = useState<Student | null>(null);
@@ -312,8 +314,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   // Filter students for current halaqah
   const halaqahStudents = students.filter((s) => s.halaqahId === activeHalaqah?.id);
 
+  // Roster scope: halaqahs this teacher may view (primary + assistant + scope)
+  const rosterScopeIds = useMemo(() => {
+    const list = isTeacher ? teacherHalaqahs : visibleHalaqahs;
+    return new Set(list.map((h) => h.id));
+  }, [isTeacher, teacherHalaqahs, visibleHalaqahs]);
+
+  // The student roster follows the dropdown: a specific halaqah, all scope
+  // halaqahs ('all'), or the currently active halaqah when unset.
+  const rosterStudents = useMemo(() => {
+    if (rosterHalaqahFilter === 'all') {
+      return students.filter((s) => s.halaqahId && rosterScopeIds.has(s.halaqahId));
+    }
+    const targetId = rosterHalaqahFilter || activeHalaqah?.id;
+    return students.filter((s) => s.halaqahId === targetId);
+  }, [students, rosterHalaqahFilter, rosterScopeIds, activeHalaqah]);
+
   // Evaluated student list
-  const evaluatedStudents = halaqahStudents.map((s) => ({
+  const evaluatedStudents = rosterStudents.map((s) => ({
     student: s,
     eval: evaluateStudentStatus(s, sessionRecords, spellingLessons, academicConfig),
   }));
@@ -335,8 +353,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       student.fullName.includes(searchTerm) ||
       student.currentSurah.includes(searchTerm);
     const matchesStatus = statusFilter === 'all' || ev.status === statusFilter;
-    const matchesGrade = gradeFilter === 'all' || student.grade === gradeFilter;
-    return matchesSearch && matchesStatus && matchesGrade;
+    return matchesSearch && matchesStatus;
   });
 
   // Cycle attendance status: present -> late -> absent -> present
@@ -536,6 +553,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                       key={h.id}
                       onClick={() => {
                         setSelectedHalaqahId(h.id);
+                        setRosterHalaqahFilter(h.id);
                         setViewMode('single_halaqah');
                       }}
                       className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
@@ -739,6 +757,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                     <button
                       onClick={() => {
                         setSelectedHalaqahId(h.id);
+                        setRosterHalaqahFilter(h.id);
                         setViewMode('single_halaqah');
                       }}
                       className="flex-1 py-2 px-3 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
@@ -957,14 +976,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
               </select>
 
               <select
-                value={gradeFilter}
-                onChange={(e) => setGradeFilter(e.target.value)}
+                value={rosterHalaqahFilter || effectiveHalaqahId || 'all'}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRosterHalaqahFilter(v);
+                  if (v !== 'all') setSelectedHalaqahId(v);
+                }}
                 className="text-xs px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 font-medium"
               >
-                <option value="all">جميع الصفوف</option>
-                <option value="تمهيدي">تمهيدي</option>
-                <option value="صف أول">صف أول</option>
-                <option value="صف ثاني">صف ثاني</option>
+                <option value="all">جميع الطلاب</option>
+                {(isTeacher ? teacherHalaqahs : visibleHalaqahs).map((h) => {
+                  const isPrimary = isTeacher && currentUser && h.teacherId === currentUser.id;
+                  return (
+                    <option key={h.id} value={h.id}>
+                      {h.name}{isTeacher ? (isPrimary ? ' (أساسية)' : ' (مساعد)') : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
