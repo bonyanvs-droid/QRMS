@@ -91,12 +91,17 @@ export function usePwaBranding(
     ];
 
     if (tenantLogo && tenantLogo !== DEFAULT_ICON_192 && tenantLogo !== DEFAULT_ICON_512) {
+      const isLogoEndpoint = tenantLogo.includes('/api/tenants/');
       const absLogo = /^https?:\/\//.test(tenantLogo)
         ? tenantLogo
         : origin + (tenantLogo.startsWith('/') ? tenantLogo : '/' + tenantLogo);
+      // The logo endpoint normalizes to an exact square PNG — request matching sizes
+      // so Chrome accepts the icons instead of falling back to the defaults
+      const icon512 = isLogoEndpoint ? `${absLogo}?size=512` : absLogo;
+      const icon192 = isLogoEndpoint ? `${absLogo}?size=192` : absLogo;
       icons.unshift(
-        { src: absLogo, sizes: isSvgLogo ? 'any' : '512x512', type: iconMime(tenantLogo), purpose: 'any' },
-        { src: absLogo, sizes: isSvgLogo ? 'any' : '192x192', type: iconMime(tenantLogo), purpose: 'any' }
+        { src: icon512, sizes: isSvgLogo ? 'any' : '512x512', type: isLogoEndpoint ? 'image/png' : iconMime(tenantLogo), purpose: 'any' },
+        { src: icon192, sizes: isSvgLogo ? 'any' : '192x192', type: isLogoEndpoint ? 'image/png' : iconMime(tenantLogo), purpose: 'any' }
       );
     }
 

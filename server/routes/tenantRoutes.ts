@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import sharp from 'sharp';
 import { getPublicTenants, getTenantByIdOrSlug, getTenantPublicStats } from '../services/tenantService';
 import { upsert, deleteRecord } from '../services/entityService';
 
@@ -69,16 +70,23 @@ tenantRouter.get('/:idOrSlug/logo', async (req, res, next) => {
       res.status(404).json({ ok: false, error: 'Tenant logo not found' });
       return;
     }
-    // data:image/<type>;base64,<payload> → decode and stream
+    // data:image/<type>;base64,<payload> → normalize to a square PNG icon
+    // (PWA manifests reject icons whose declared sizes mismatch the real ones;
+    // tenant logos are often stored as non-square webp data URIs)
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl);
     if (match) {
+      const size = Math.min(1024, Math.max(16, parseInt(String(req.query.size || '512'), 10) || 512));
       const buffer = Buffer.from(match[2], 'base64');
+      const png = await sharp(buffer)
+        .resize(size, size, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .png()
+        .toBuffer();
       res.set({
-        'Content-Type': match[1],
-        'Content-Length': String(buffer.length),
+        'Content-Type': 'image/png',
+        'Content-Length': String(png.length),
         'Cache-Control': 'public, max-age=86400',
       });
-      res.send(buffer);
+      res.send(png);
       return;
     }
     // HTTP/absolute or site-relative path → redirect

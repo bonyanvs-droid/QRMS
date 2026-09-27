@@ -1106,6 +1106,7 @@ healthRouter.get("/", async (req, res, next) => {
 
 // server/routes/tenantRoutes.ts
 var import_express3 = require("express");
+var import_sharp = __toESM(require("sharp"), 1);
 
 // server/services/entityService.ts
 var JSONB_PAYLOAD_COLUMNS = {
@@ -2657,13 +2658,15 @@ tenantRouter.get("/:idOrSlug/logo", async (req, res, next) => {
     }
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(logoUrl);
     if (match) {
+      const size = Math.min(1024, Math.max(16, parseInt(String(req.query.size || "512"), 10) || 512));
       const buffer = Buffer.from(match[2], "base64");
+      const png = await (0, import_sharp.default)(buffer).resize(size, size, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
       res.set({
-        "Content-Type": match[1],
-        "Content-Length": String(buffer.length),
+        "Content-Type": "image/png",
+        "Content-Length": String(png.length),
         "Cache-Control": "public, max-age=86400"
       });
-      res.send(buffer);
+      res.send(png);
       return;
     }
     if (/^https?:\/\//.test(logoUrl) || logoUrl.startsWith("/")) {
