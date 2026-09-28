@@ -34,6 +34,7 @@ import { LoginModal } from '../auth/LoginModal';
 import { ReportDispatchModal } from './ReportDispatchModal';
 import { MosqueLogo } from './logos/MosqueLogo';
 import { LogoManagerModal } from './logos/LogoManagerModal';
+import { UserProfileModal } from './UserProfileModal';
 import { TenantSwitcher } from './TenantSwitcher';
 import { resolveContextIdentity } from '../../lib/identityResolver';
 import { generateGeneralParentsGroupReport } from '../../utils/reportGenerator';
@@ -102,6 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showLogoModal, setShowLogoModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return safeStorage.getItem('school_screen_dark_mode') === 'true';
@@ -508,6 +510,7 @@ export const Header: React.FC<HeaderProps> = ({
         reportType={reportModalData.reportType}
       />
 
+      <UserProfileModal isOpen={showProfileModal} onClose={() => setShowProfileModal(false)} />
       {currentUser?.role === 'campus_admin' && (
         <LogoManagerModal isOpen={showLogoModal} onClose={() => setShowLogoModal(false)} />
       )}

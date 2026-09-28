@@ -2769,6 +2769,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
     if (updatedUser) {
+      setCurrentUser((prev) => (prev && prev.id === id ? { ...prev, ...updates } : prev));
       await dbSaveUser(updatedUser, currentActor);
     }
   }, [currentActor, guardDemoWrite]);
