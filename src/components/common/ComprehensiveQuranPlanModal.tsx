@@ -105,6 +105,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   } = useApp();
 
   const printRef = useRef<HTMLDivElement>(null);
+  const studentDisplayName = student.name || student.fullName || 'الطالب';
 
   // Active persisted plan
   const activePlan: StudentQuranPlan | undefined = useMemo(
@@ -538,8 +539,8 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     if (!printRef.current || !effectivePlan) return;
     setIsPrinting(true);
     try {
-      const fileName = `الخطة_القرآنية_${student.name.replace(/\s+/g, '_')}`;
-      const title = `الخطة القرآنية المعتمدة — ${student.name}`;
+      const fileName = `الخطة_القرآنية_${studentDisplayName.replace(/\s+/g, '_')}`;
+      const title = `الخطة القرآنية المعتمدة — ${studentDisplayName}`;
       await executePrintOrPdfFallback(printRef.current, { fileName, title });
     } catch (err) {
       console.error('Print generation failed:', err);
@@ -563,7 +564,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               <h3 className="text-base sm:text-lg font-black truncate flex items-center gap-2">
                 <span>الخطة القرآنية المعتمدة</span>
                 <span className="text-xs font-normal text-emerald-200 truncate">
-                  — {student.name}
+                  — {studentDisplayName}
                 </span>
                 {previewPlan && (
                   <span className="text-[10px] bg-amber-400 text-amber-950 px-2 py-0.5 rounded-full font-black animate-pulse">
@@ -1186,7 +1187,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               </div>
 
               <div className="text-left text-xs font-bold space-y-0.5">
-                <div className="text-emerald-800 font-black text-sm">{student.name}</div>
+                <div className="text-emerald-800 font-black text-sm">{studentDisplayName}</div>
                 <div className="text-slate-500">المعلم: {teacherName}</div>
                 <div className="text-slate-400 text-[10px]">
                   {effectivePlan?.startDate && fmtDate(effectivePlan.startDate)} — {effectivePlan?.endDate && fmtDate(effectivePlan.endDate)}
@@ -1474,7 +1475,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               <span>تأكيد أرشفة الخطة الحالية</span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              هل أنت متأكد من رغبتك في أرشفة الخطة النشطة الحالية للطالب (<strong>{student.name}</strong>)؟
+              هل أنت متأكد من رغبتك في أرشفة الخطة النشطة الحالية للطالب (<strong>{studentDisplayName}</strong>)؟
               سيتم نقل الخطة للأرشيف التاريخي مع الاحتفاظ بسجلات الإنجاز السابقة كاملة.
             </p>
             <div className="flex justify-end gap-2 pt-2 border-t">

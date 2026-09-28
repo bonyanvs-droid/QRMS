@@ -628,12 +628,11 @@ export class RangeCalculator {
 
       // Surah memorization + its consolidation cycle are done → its verses are
       // now revision-eligible and join the rolling pool in learning order.
+      // The rolling offset continues untouched — the just-consolidated surah
+      // was already repeated by its own consolidation days, so it waits for
+      // its natural turn in the cycle instead of being re-revised next day.
       if (pendingEligibleVerses.length > 0) {
         memorizedVersesAccumulator.push(...pendingEligibleVerses.splice(0));
-        // Auto Minor: the just-eligible surah anchors the next revision window
-        // — the cycle rebuilds from the newest eligible content rather than
-        // continuing from a stale offset that reaches it days later.
-        if (autoMinorRevisionMode) pendingCycleAnchor = surahEntry.number;
       }
     }
 
