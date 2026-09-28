@@ -154,7 +154,7 @@ export function partitionVersesByLines(
       const est = estimateAyahLineWeight(v);
       for (let f = 0; f < est; f++) groupLineKeys.add(`est:${v.globalIndex}:${f}`);
     }
-    const accumulatedLines = groupLineKeys.size;
+    let accumulatedLines = groupLineKeys.size;
 
     // Surah boundary protection: if the next verse belongs to a DIFFERENT surah,
     // snap and close the current chunk at the end of the surah!
@@ -165,6 +165,7 @@ export function partitionVersesByLines(
     // Check if we reached the line threshold, surah boundary, or at the last verse.
     const isLast = i === verses.length - 1;
     let reachedThreshold = accumulatedLines >= targetLines;
+    let snapClose = false;
 
     // Surah-completion overflow (MakeenCore rule): if the threshold was just
     // reached but the remaining same-surah tail needs at most
@@ -186,7 +187,52 @@ export function partitionVersesByLines(
       }
     }
 
-    if (reachedThreshold || isSurahBoundary || isLast) {
+    // Surah-boundary snapping (crossSurah revision windows): when the target
+    // lands mid-surah, snap the window end to the NEAREST surah boundary.
+    // - Tail ≤ snap range → keep accumulating so the surah completes here.
+    // - Head-sliver ≤ snap range and smaller than the tail → drop it: the
+    //   window ends at the previous surah boundary and the surah starts whole
+    //   in the next window. A tail like "الشرح (1)" (four words) is never
+    //   emitted — windows always end at a surah boundary or a substantial cut.
+    if (reachedThreshold && !isLast && options?.crossSurah && nextVerse && nextVerse.surahNumber === v.surahNumber) {
+      const SNAP_LINES = Math.max(3, Math.round(targetLines * 0.2));
+      const tailKeys = new Set<string>();
+      let j = i + 1;
+      while (j < verses.length && verses[j].surahNumber === v.surahNumber) {
+        for (const k of ayahLineKeys(verses[j].surahNumber, verses[j].ayahNumber)) tailKeys.add(k);
+        j++;
+      }
+      const headKeys = new Set<string>();
+      for (const gv of currentGroup) {
+        if (gv.surahNumber === v.surahNumber) {
+          for (const k of ayahLineKeys(gv.surahNumber, gv.ayahNumber)) headKeys.add(k);
+        }
+      }
+      const canComplete = tailKeys.size <= SNAP_LINES;
+      const isMultiSurah = currentGroup[0].surahNumber !== v.surahNumber;
+      const canDrop = isMultiSurah && headKeys.size <= SNAP_LINES;
+      const dropIsNearer = headKeys.size < tailKeys.size;
+      if (canComplete && (!canDrop || !dropIsNearer)) {
+        reachedThreshold = false; // complete the surah tail inside this window
+      } else if (canDrop && dropIsNearer) {
+        let dropped = 0;
+        while (currentGroup.length > 0 && currentGroup[currentGroup.length - 1].surahNumber === v.surahNumber) {
+          currentGroup.pop();
+          dropped++;
+        }
+        if (dropped > 0 && currentGroup.length > 0) {
+          groupLineKeys = new Set<string>();
+          for (const gv of currentGroup) {
+            for (const k of ayahLineKeys(gv.surahNumber, gv.ayahNumber)) groupLineKeys.add(k);
+          }
+          accumulatedLines = groupLineKeys.size;
+          i -= dropped; // the dropped head-sliver opens the next chunk
+          snapClose = true;
+        }
+      }
+    }
+
+    if (reachedThreshold || isSurahBoundary || isLast || snapClose) {
       const first = currentGroup[0];
       const last = currentGroup[currentGroup.length - 1];
       
@@ -203,9 +249,7 @@ export function partitionVersesByLines(
       }
       // Explainable capacity: surface why the chunk exceeded the requested target.
       if (accumulatedLines > targetLines) {
-        displayLabel += options?.crossSurah
-          ? ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية)`
-          : ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية/إتمام السورة)`;
+        displayLabel += ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية/إتمام السورة)`;
       }
 
       chunks.push({
