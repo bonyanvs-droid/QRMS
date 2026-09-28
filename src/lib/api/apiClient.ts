@@ -246,6 +246,37 @@ class ApiClient {
   }
 
   /**
+   * Delivers a fetched payload to a listener key's callbacks ONLY when the
+   * data actually changed. Background polls and post-write refreshes become
+   * no-ops when the payload is identical to the last delivered snapshot —
+   * subscribers re-render only when needed.
+   */
+  private deliverIfChanged<T>(listenerKey: string, data: T): boolean {
+    const prev = this.cache.get(listenerKey);
+    if (prev !== undefined) {
+      try {
+        if (JSON.stringify(prev) === JSON.stringify(data)) {
+          return false;
+        }
+      } catch {
+        // Non-serializable payload — fall through and deliver.
+      }
+    }
+    this.cache.set(listenerKey, data);
+    const set = this.listeners.get(listenerKey);
+    if (set) {
+      for (const cb of set) {
+        try {
+          cb(data);
+        } catch (err) {
+          console.warn('[ApiClient] Listener callback error:', err);
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
    * Reactive subscription with immediate fetch and reactive event notifications
    */
   subscribe<T = any[]>(
@@ -255,11 +286,18 @@ class ApiClient {
     pollIntervalMs: number = 60000
   ): Unsubscribe {
     const listenerKey = `${collection}_${JSON.stringify(filterParams || {})}`;
-    
+
     if (!this.listeners.has(listenerKey)) {
       this.listeners.set(listenerKey, new Set());
     }
     this.listeners.get(listenerKey)!.add(callback);
+
+    // A late subscriber receives the freshest cached snapshot immediately —
+    // the change-guard would otherwise suppress its first delivery forever.
+    if (this.cache.has(listenerKey)) {
+      const cached = this.cache.get(listenerKey) as T;
+      queueMicrotask(() => callback(cached));
+    }
 
     const fetchLatest = async () => {
       // Skip background polling if tab is hidden
@@ -268,15 +306,17 @@ class ApiClient {
       }
       try {
         const data = await this.get<T>(`/${collection}`, filterParams);
-        this.cache.set(listenerKey, data);
-        callback(data);
+        this.deliverIfChanged(listenerKey, data);
       } catch (err) {
         console.warn(`[ApiClient] Subscription fetch for ${collection} encountered:`, err);
       }
     };
 
-    // Initial fetch
-    fetchLatest();
+    // Initial fetch — skipped when a snapshot already exists (delivered above)
+    // or a shared poll for this key is already in flight/ticking.
+    if (!this.cache.has(listenerKey)) {
+      fetchLatest();
+    }
 
     // Start background polling if not already running
     if (!this.pollIntervals.has(listenerKey) && pollIntervalMs > 0) {
@@ -317,6 +357,18 @@ class ApiClient {
 
         this.get(`/${collection}`, params)
           .then((data) => {
+            // Same change-guard: a write that ultimately changes nothing for
+            // this filtered view must not re-render its subscribers.
+            if (this.cache.get(key) !== undefined) {
+              try {
+                if (JSON.stringify(this.cache.get(key)) === JSON.stringify(data)) {
+                  return;
+                }
+              } catch {
+                // fall through
+              }
+            }
+            this.cache.set(key, data);
             for (const cb of callbacks) {
               cb(data);
             }
