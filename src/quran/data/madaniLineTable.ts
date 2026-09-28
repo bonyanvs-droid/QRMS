@@ -10,6 +10,15 @@
 
 import { QuranPosition, Ayah } from '../types';
 import { QURAN_SURAHS } from './quranMeta';
+import quranLinesData from './quranLines.json';
+
+interface QuranLinesDataset {
+  ayahLineSpans: Record<string, [number, number, number][]>;
+}
+
+// Authoritative KFGQPC Madani 15-line layout: "s:a" -> [[page, startLine, endLine]]
+const AYAH_LINE_SPANS: Record<string, [number, number, number][]> =
+  (quranLinesData as unknown as QuranLinesDataset).ayahLineSpans;
 
 const surahNameMap = new Map<number, string>(
   QURAN_SURAHS.map((s) => [s.surahNumber, s.arabicName])
@@ -52,9 +61,21 @@ export interface AyahLineSpan {
 // Surah Al-Fatihah = 7 lines on Page 1 (1 line per ayah / header)
 // Short surahs (114, 113, 112, 111, 110, 109, 108) = 1 to 3 lines per surah, 2-3 ayahs per line.
 
+/** Distinct physical lines an ayah occupies: ["592:5","592:6",...] */
+function ayahLineKeys(surahNumber: number, ayahNumber: number): string[] {
+  const segments = AYAH_LINE_SPANS[`${surahNumber}:${ayahNumber}`];
+  if (!segments || segments.length === 0) return [];
+  const keys: string[] = [];
+  for (const [page, start, end] of segments) {
+    for (let l = start; l <= end; l++) keys.push(`${page}:${l}`);
+  }
+  return keys;
+}
+
 /**
- * Computes exact or calibrated line weight for any given Ayah in the 15-line Madani Mushaf.
- * Uses character density, word count, and page constraints.
+ * Real line weight of an Ayah in the 15-line Madani Mushaf, read from the
+ * bundled authoritative layout table (quranLines.json). Falls back to a
+ * character-density estimate only if the ayah is missing from the table.
  */
 export function estimateAyahLineWeight(ayah: {
   surahNumber: number;
@@ -63,39 +84,13 @@ export function estimateAyahLineWeight(ayah: {
   text?: string;
   pageNumber: number;
 }): number {
-  const { surahNumber, ayahNumber, pageNumber } = ayah;
-  
-  // Page 1 (Al-Fatihah) has 7 lines for 7 ayahs -> 1 line per ayah exactly
-  if (pageNumber === 1) {
-    return 1;
-  }
-  
-  // Page 2 (Al-Baqarah 1-5) has 8 lines -> 5 ayahs (Al-Baqarah 1 is short header, 2-5 are ~1.5 - 2 lines)
-  if (pageNumber === 2) {
-    if (ayahNumber === 1) return 0.5;
-    if (ayahNumber === 2) return 1.5;
-    if (ayahNumber === 3) return 2.0;
-    if (ayahNumber === 4) return 2.0;
-    if (ayahNumber === 5) return 2.0;
-  }
+  const keys = ayahLineKeys(ayah.surahNumber, ayah.ayahNumber);
+  if (keys.length > 0) return keys.length;
 
-  // Famous landmark ayahs:
-  if (surahNumber === 2 && ayahNumber === 282) return 15; // آية الدين صفحة كاملة 15 سطر
-  if (surahNumber === 2 && ayahNumber === 255) return 6.5; // آية الكرسي قرابة 6 إلى 7 أسطر
-  if (surahNumber === 2 && ayahNumber === 283) return 7.5;
-  if (surahNumber === 24 && ayahNumber === 35) return 6.0; // آية النور
-  
   const text = ayah.cleanText || ayah.text || '';
   const charCount = text.replace(/\s+/g, '').length;
-
-  // Unified density model: a 15-line Madani line holds ~38 chars of clean
-  // (spaceless) text. Every ayah additionally leaves its line's tail partially
-  // empty (~0.3 line padding on average), so weight = padding + chars / 38.
-  // Calibrated so that 15 lines == 1 full page: e.g. Al-Ghashiyah's 26 ayahs
-  // (avg ~16 chars) total ~18 lines ≈ its real ~1.2 pages; Al-Kawthar's
-  // 3 short ayahs ≈ 2 lines; a 38-char ayah ≈ 1.3 lines.
-  const lineWeight = Math.max(0.3, 0.3 + charCount / 38);
-  return Math.round(lineWeight * 10) / 10;
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(0.4, Math.round((wordCount / 8.6 + charCount / 400) * 10) / 10);
 }
 
 /**
@@ -120,12 +115,18 @@ export function partitionVersesByLines(
 
   const chunks: LinePartitionChunk[] = [];
   let currentGroup: Ayah[] = [];
-  let accumulatedLines = 0;
+  // Distinct physical lines occupied by the group. Two ayahs may share a line
+  // (e.g. Al-Ghashiyah 1-2 both sit on line 5 of page 592), so we accumulate a
+  // union of "page:line" keys rather than summing per-ayah weights.
+  let groupLineKeys = new Set<string>();
   const targetLines = Math.max(1, linesPerDay);
+  // Max lines a chunk may exceed the target to complete a surah tail.
+  const MAX_OVERFLOW_LINES = 2;
 
   for (let i = 0; i < verses.length; i++) {
     const v = verses[i];
-    const weight = estimateAyahLineWeight(v);
+    const vLines = ayahLineKeys(v.surahNumber, v.ayahNumber);
+    const weight = vLines.length > 0 ? vLines.length : estimateAyahLineWeight(v);
 
     // If single ayah is significantly longer than the target (e.g. Ayah is 3 lines and target is 1 line)
     if (weight >= targetLines * 1.8 && currentGroup.length === 0) {
@@ -146,16 +147,40 @@ export function partitionVersesByLines(
     }
 
     currentGroup.push(v);
-    accumulatedLines += weight;
+    for (const k of vLines) groupLineKeys.add(k);
+    if (vLines.length === 0) {
+      // Missing layout data — approximate via estimated weight on a private key space
+      const est = estimateAyahLineWeight(v);
+      for (let f = 0; f < est; f++) groupLineKeys.add(`est:${v.globalIndex}:${f}`);
+    }
+    const accumulatedLines = groupLineKeys.size;
 
     // Surah boundary protection: if the next verse belongs to a DIFFERENT surah,
     // snap and close the current chunk at the end of the surah!
     const nextVerse = i < verses.length - 1 ? verses[i + 1] : null;
     const isSurahBoundary = nextVerse && nextVerse.surahNumber !== v.surahNumber;
 
-    // Check if we reached the line threshold, surah boundary, or at the last verse
+    // Check if we reached the line threshold, surah boundary, or at the last verse.
     const isLast = i === verses.length - 1;
-    const reachedThreshold = accumulatedLines >= targetLines - 0.2; // 0.2 tolerance for smooth line packing
+    let reachedThreshold = accumulatedLines >= targetLines;
+
+    // Surah-completion overflow (MakeenCore rule): if the threshold was just
+    // reached but the remaining same-surah tail needs at most
+    // MAX_OVERFLOW_LINES additional lines, absorb it instead of leaving a
+    // weak tail chunk (e.g. a final 1-line day for Al-Ghashiyah 25-26).
+    if (reachedThreshold && !isSurahBoundary && !isLast) {
+      const tailKeys = new Set(groupLineKeys);
+      let j = i + 1;
+      while (j < verses.length && verses[j].surahNumber === v.surahNumber) {
+        for (const k of ayahLineKeys(verses[j].surahNumber, verses[j].ayahNumber)) {
+          tailKeys.add(k);
+        }
+        j++;
+      }
+      if (tailKeys.size - groupLineKeys.size <= MAX_OVERFLOW_LINES) {
+        reachedThreshold = false; // keep accumulating — the tail merges into today
+      }
+    }
 
     if (reachedThreshold || isSurahBoundary || isLast) {
       const first = currentGroup[0];
@@ -172,19 +197,23 @@ export function partitionVersesByLines(
             : `سورة ${getSurahArabicName(last.surahNumber)} (${last.ayahNumber})`;
         displayLabel = `من سورة ${getSurahArabicName(first.surahNumber)} (${first.ayahNumber}) إلى ${endPart}`;
       }
+      // Explainable capacity: surface why the chunk exceeded the requested target.
+      if (accumulatedLines > targetLines) {
+        displayLabel += ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية/إتمام السورة)`;
+      }
 
       chunks.push({
         start: { surahNumber: first.surahNumber, ayahNumber: first.ayahNumber, globalIndex: first.globalIndex },
         end: { surahNumber: last.surahNumber, ayahNumber: last.ayahNumber, globalIndex: last.globalIndex },
         totalAyahs: currentGroup.length,
-        estimatedLines: Math.round(accumulatedLines * 10) / 10,
+        estimatedLines: accumulatedLines,
         displayLabel,
         pageStart: first.pageNumber,
         pageEnd: last.pageNumber,
       });
 
       currentGroup = [];
-      accumulatedLines = 0;
+      groupLineKeys = new Set();
     }
   }
 
