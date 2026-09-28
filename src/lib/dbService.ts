@@ -993,22 +993,12 @@ export async function saveOnlineSession(sessionId: string, sessionData: any): Pr
 
 export function subscribeToOnlineSession(sessionId: string, callback: (data: any) => void): Unsubscribe {
   let isSubscribed = true;
-  let lastJson: string | undefined;
   const poll = async () => {
     try {
       const data = await getOnlineSession(sessionId);
-      if (!isSubscribed) return;
-      // Deliver only when the session payload actually changed — a 3s poll
-      // must not re-render the widget on every tick.
-      let json: string | undefined;
-      try {
-        json = JSON.stringify(data);
-      } catch {
-        // fall through — deliver
+      if (isSubscribed) {
+        callback(data);
       }
-      if (json !== undefined && json === lastJson) return;
-      lastJson = json;
-      callback(data);
     } catch {
       // Ignored
     }
