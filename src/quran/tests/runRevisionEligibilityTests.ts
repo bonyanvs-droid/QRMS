@@ -919,13 +919,18 @@ async function main() {
       'TEST18d: اليوم 1 = الـpool كاملة كـ3 صفحات حقيقية (603,604,1)',
       `${revLabel(p1)} p${p1.revisionPageStart}-${p1.revisionPageEnd}`
     );
-    // Once الكوثر becomes eligible its lines join the pool → anchored
-    // 45-line window (3 pages × 15) must include الكوثر.
+    // Once الكوثر becomes eligible the cycle is rebuilt with her first —
+    // her consolidation counted as her first turn, so she leads the cycle
+    // when it wraps (consumed anchor): the first window showing الكوثر must
+    // START at her (newest memorized first in backward traversal).
     const anchorDay = pDays.find((d) => hasSurah(revLabel(d), 'الكوثر'));
+    const anchorLabel = anchorDay ? revLabel(anchorDay) : '';
     assert(
-      !!anchorDay && anchorDay.revisionPageEnd === 602,
-      'TEST18e: أول يوم بعد أهلية الكوثر = نافذة 45 سطرًا تصل صفحة الكوثر (602)',
-      anchorDay ? `${revLabel(anchorDay)} p${anchorDay.revisionPageStart}-${anchorDay.revisionPageEnd}` : 'not found'
+      !!anchorDay &&
+        (anchorLabel.startsWith('مراجعة: من سورة الكوثر') ||
+          anchorLabel.startsWith('مراجعة: سورة الكوثر')),
+      'TEST18e: أول ظهور للكوثر في صدارة نافذة (الدورة المعاد بناؤها)',
+      anchorDay ? `${anchorLabel} p${anchorDay.revisionPageStart}-${anchorDay.revisionPageEnd}` : 'not found'
     );
     const afterAnchor = anchorDay ? pDays[pDays.indexOf(anchorDay) + 1] : undefined;
     assert(

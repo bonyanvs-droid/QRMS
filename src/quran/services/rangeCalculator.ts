@@ -636,30 +636,53 @@ export class RangeCalculator {
       const unitsCount = Math.max(1, Math.round(unitsPerWindow ?? revisionDailyPages ?? 1));
       const targetLines = unitsCount * linesPerUnit;
       // Revision windows are contiguous spans — they may cross surah
-      // boundaries exactly like a real mushaf page does.
-      const lineChunks = partitionVersesByLines(memorizedVerses, targetLines, { crossSurah: true });
+      // boundaries exactly like a real mushaf page does. Backward traversal
+      // reverses SURAH BLOCKS only (newest memorized surah first, ayahs
+      // ascending within each surah) — chunking in traversal order makes
+      // every window a full target and the lone partial chunk lands at the
+      // cycle end (oldest content), not the first day.
+      let traversalVerses = memorizedVerses;
+      if (revisionDirection === 'backward') {
+        const blocks: Ayah[][] = [];
+        for (const v of memorizedVerses) {
+          const last = blocks[blocks.length - 1];
+          if (last && last[0].surahNumber === v.surahNumber) last.push(v);
+          else blocks.push([v]);
+        }
+        traversalVerses = blocks.reverse().flat();
+      }
+      const lineChunks = partitionVersesByLines(traversalVerses, targetLines, { crossSurah: true });
       if (lineChunks.length === 0) {
         return { displayLabel: 'مراجعة: ما تم حفظه', nextOffset: 0 };
       }
-      const orderedChunks = revisionDirection === 'backward' ? [...lineChunks].reverse() : lineChunks;
+      const orderedChunks = lineChunks;
       let safeOffset = currentOffset % orderedChunks.length;
       if (restartAtSurah !== undefined) {
         const anchorVerse = memorizedVerses.find((v) => v.surahNumber === restartAtSurah);
-        if (anchorVerse) {
-          const anchored = orderedChunks.findIndex(
-            (c) =>
-              (anchorVerse.globalIndex ?? -1) >= (c.start.globalIndex ?? -1) &&
-              (anchorVerse.globalIndex ?? -1) <= (c.end.globalIndex ?? -1)
-          );
+        if (anchorVerse?.globalIndex !== undefined) {
+          const gi = anchorVerse.globalIndex;
+          const anchored = orderedChunks.findIndex((c) => {
+            const lo = Math.min(c.start.globalIndex ?? gi, c.end.globalIndex ?? gi);
+            const hi = Math.max(c.start.globalIndex ?? gi, c.end.globalIndex ?? gi);
+            return gi >= lo && gi <= hi;
+          });
           if (anchored >= 0) {
             safeOffset = anchored;
             if (skipAnchoredSurah) {
-              // Chunks are contiguous spans: a chunk holds verses of the
-              // anchored surah when its number lies inside [start,end] surahs.
+              // Chunks are contiguous spans — a chunk holds verses of the
+              // anchored surah when its number lies inside the chunk's surah
+              // range (ranges may be descending in backward traversal).
               while (
                 safeOffset < orderedChunks.length &&
-                orderedChunks[safeOffset].start.surahNumber <= restartAtSurah &&
-                restartAtSurah <= orderedChunks[safeOffset].end.surahNumber
+                Math.min(
+                  orderedChunks[safeOffset].start.surahNumber,
+                  orderedChunks[safeOffset].end.surahNumber
+                ) <= restartAtSurah &&
+                restartAtSurah <=
+                  Math.max(
+                    orderedChunks[safeOffset].start.surahNumber,
+                    orderedChunks[safeOffset].end.surahNumber
+                  )
               ) {
                 safeOffset++;
               }
