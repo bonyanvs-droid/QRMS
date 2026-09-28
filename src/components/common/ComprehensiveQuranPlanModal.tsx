@@ -205,8 +205,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
   const [setupRevStartSurah, setSetupRevStartSurah] = useState<string>('الفاتحة');
   const [setupRevStartAyah, setSetupRevStartAyah] = useState<number>(1);
-  const [setupRevEndSurah, setSetupRevEndSurah] = useState<string>('الناس');
-  const [setupRevEndAyah, setSetupRevEndAyah] = useState<number>(6);
+  // Manual revision starts from setupRevStartSurah/Ayah and proceeds according to setupRevisionDirection
 
   // Offsets (Mutual Exclusivity)
   const [setupSavingOffset, setSetupSavingOffset] = useState<number>(0);
@@ -303,7 +302,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
     const startSurahMeta = findSurahMetadata(setupStartSurah);
     const revStartMeta = findSurahMetadata(setupRevStartSurah);
-    const revEndMeta = findSurahMetadata(setupRevEndSurah);
+    
 
     if (!startSurahMeta && setupPlanType !== 'revision') {
       setIsGenerating(false);
@@ -312,10 +311,13 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
     try {
       const manualRevisionRange =
-        setupPlanType !== 'memorization' && !setupAutoMinorRevision && revStartMeta && revEndMeta
+        setupPlanType !== "memorization" && !setupAutoMinorRevision && revStartMeta
           ? {
               start: { surahNumber: revStartMeta.number, ayahNumber: setupRevStartAyah },
-              end: { surahNumber: revEndMeta.number, ayahNumber: setupRevEndAyah },
+              end:
+                setupRevisionDirection === "forward"
+                  ? { surahNumber: 114, ayahNumber: 6 }
+                  : { surahNumber: 1, ayahNumber: 1 },
             }
           : undefined;
 
@@ -379,8 +381,6 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     setupAutoMinorRevision,
     setupRevStartSurah,
     setupRevStartAyah,
-    setupRevEndSurah,
-    setupRevEndAyah,
     useStageTemplate,
     selectedStageConfigId,
     student,
@@ -1021,32 +1021,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                           />
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                          نهاية نطاق المراجعة:
-                        </label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <select
-                            value={setupRevEndSurah}
-                            onChange={(e) => {
-                              setSetupRevEndSurah(e.target.value);
-                              setSetupRevEndAyah(1);
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
-                          >
-                            {ALL_114_SURAHS.map((s) => (
-                              <option key={s.number} value={s.name}>
-                                {s.number}. {s.name}
-                              </option>
-                            ))}
-                          </select>
-                          <QuranAyahSelect
-                            surah={setupRevEndSurah}
-                            value={setupRevEndAyah}
-                            onChange={setSetupRevEndAyah}
-                          />
-                        </div>
-                      </div>
+
                       <div>
                         <label className="block text-[11px] font-bold text-slate-700 mb-1">
                           اتجاه المراجعة:

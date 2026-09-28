@@ -26,6 +26,7 @@ export function createApp() {
 
   // 1. Core API Routes (Absolute Priority)
   app.use('/api/health', healthRouter);
+  app.use('/health', healthRouter);
 
   // 2. Tenant Isolation Context
   app.use('/api', extractTenantContext);

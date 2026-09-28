@@ -1150,11 +1150,22 @@ async function getSystemHealth() {
 var healthRouter = (0, import_express2.Router)();
 healthRouter.get("/", async (req, res, next) => {
   try {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
     const health = await getSystemHealth();
     const statusCode = health.ok ? 200 : health.database.configured ? 503 : 200;
     res.status(statusCode).json(health);
   } catch (err) {
-    next(err);
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.status(500).json({
+        ok: false,
+        status: "unhealthy",
+        error: err?.message || "Health check error",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } else {
+      next(err);
+    }
   }
 });
 
@@ -8721,6 +8732,7 @@ function createApp() {
   app.use(import_express9.default.urlencoded({ extended: true, limit: "50mb" }));
   app.use("/api/auth", authRouter);
   app.use("/api/health", healthRouter);
+  app.use("/health", healthRouter);
   app.use("/api", extractTenantContext);
   app.use("/api", createRemoteForwarder());
   app.use("/api/tenants", tenantRouter);
