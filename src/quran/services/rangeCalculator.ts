@@ -13,6 +13,7 @@ import {
   getSurahsByDirection,
   getSurahAyahsCount,
   getSurahArabicName,
+  formatSurahAyahSpan,
 } from '../../utils/quranMetadata';
 
 /**
@@ -429,7 +430,8 @@ export class RangeCalculator {
     revisionUnitKind: 'page' | 'surah' | 'line' = 'page',
     revisionUnitsPerWindow?: number,
     autoMinorRevisionMode = true,
-    cycleAnchorSurah?: number
+    cycleAnchorSurah?: number,
+    outRevisionState?: { memorizedPool: Ayah[]; revisionWindowOffset: number }
   ): Promise<PlanningUnit[]> {
     const surahs = getSurahsInRangeByDirection(start.surahNumber, end.surahNumber, direction);
     if (!surahs || surahs.length === 0) return [];
@@ -562,7 +564,7 @@ export class RangeCalculator {
         revisionWindowOffset = revisionInfo.nextOffset;
 
         const totalAyahs = currEndAyah;
-        const displayLabel = `${surahEntry.arabicName} 1 - ${currEndAyah}`;
+        const displayLabel = formatSurahAyahSpan(surahEntry.number, 1, currEndAyah);
 
         units.push({
           type: unitType,
@@ -633,6 +635,11 @@ export class RangeCalculator {
         // continuing from a stale offset that reaches it days later.
         if (autoMinorRevisionMode) pendingCycleAnchor = surahEntry.number;
       }
+    }
+
+    if (outRevisionState) {
+      outRevisionState.memorizedPool = memorizedVersesAccumulator;
+      outRevisionState.revisionWindowOffset = revisionWindowOffset;
     }
 
     return units;
@@ -858,12 +865,7 @@ export class RangeCalculator {
       let runStart: Ayah = firstVerse;
       let prev: Ayah = firstVerse;
       const flush = () => {
-        const name = getSurahArabicName(runStart.surahNumber);
-        segments.push(
-          runStart.ayahNumber === prev.ayahNumber
-            ? `${name} (${runStart.ayahNumber})`
-            : `${name} (${runStart.ayahNumber} - ${prev.ayahNumber})`
-        );
+        segments.push(formatSurahAyahSpan(runStart.surahNumber, runStart.ayahNumber, prev.ayahNumber));
       };
       for (const v of orderedVerses) {
         if (v.surahNumber !== runStart.surahNumber) {
@@ -877,12 +879,13 @@ export class RangeCalculator {
     }
 
     if (firstVerse.surahNumber === lastVerse.surahNumber) {
-      const sName = getSurahArabicName(firstVerse.surahNumber);
-      return firstVerse.ayahNumber === lastVerse.ayahNumber
-        ? `مراجعة: ${sName} (${firstVerse.ayahNumber})`
-        : `مراجعة: ${sName} (${firstVerse.ayahNumber} - ${lastVerse.ayahNumber})`;
+      return `مراجعة: ${formatSurahAyahSpan(firstVerse.surahNumber, firstVerse.ayahNumber, lastVerse.ayahNumber)}`;
     }
-    return `مراجعة: من ${getSurahArabicName(firstVerse.surahNumber)} (${firstVerse.ayahNumber}) إلى ${getSurahArabicName(lastVerse.surahNumber)} (${lastVerse.ayahNumber})`;
+    const endIsSurahTail = lastVerse.ayahNumber >= getSurahAyahsCount(lastVerse.surahNumber);
+    const endPart = endIsSurahTail
+      ? `سورة ${getSurahArabicName(lastVerse.surahNumber)} إلى آخرها`
+      : `سورة ${getSurahArabicName(lastVerse.surahNumber)} (${lastVerse.ayahNumber})`;
+    return `مراجعة: من سورة ${getSurahArabicName(firstVerse.surahNumber)} (${firstVerse.ayahNumber}) إلى ${endPart}`;
   }
 
   /**

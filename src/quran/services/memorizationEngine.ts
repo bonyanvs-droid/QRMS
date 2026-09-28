@@ -123,6 +123,7 @@ export class QuranMemorizationPlanningEngine {
     }
 
     // 2. Partition into discrete planning units using Surah-isolated cumulative pacing + 3-day consolidation
+    const revisionRollState = { memorizedPool: [] as Ayah[], revisionWindowOffset: 0 };
     const units = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
       params.targetStart,
       params.targetEnd,
@@ -135,7 +136,9 @@ export class QuranMemorizationPlanningEngine {
       revisionDirection,
       revisionUnitKind,
       params.revisionUnitsPerWindow,
-      autoMinorRevision
+      autoMinorRevision,
+      undefined,
+      revisionRollState
     );
 
     if (units.length === 0) {
@@ -199,14 +202,18 @@ export class QuranMemorizationPlanningEngine {
       };
     }
 
-    // Format revision helper
-    const formatRevisionLabel = (pages: number): string => {
-      if (pages === 0.5) return 'مراجعة: نصف صفحة';
-      if (pages === 1) return 'مراجعة: صفحة واحدة';
-      if (pages === 2) return 'مراجعة: صفحتان';
-      return `مراجعة: ${pages} صفحات`;
+    // Format revision helper (unit-aware; used only when the rolling pool is empty)
+    const formatRevisionLabel = (amount: number): string => {
+      if (revisionUnitKind === 'line') return `مراجعة: ${amount} أسطر`;
+      if (revisionUnitKind === 'surah') return `مراجعة: ${amount} سور`;
+      if (amount === 0.5) return 'مراجعة: نصف صفحة';
+      if (amount === 1) return 'مراجعة: صفحة واحدة';
+      if (amount === 2) return 'مراجعة: صفحتان';
+      return `مراجعة: ${amount} صفحات`;
     };
-    const defaultRevDisplay = formatRevisionLabel(revisionDailyPages);
+    const defaultRevDisplay = formatRevisionLabel(
+      revisionUnitKind === 'page' ? revisionDailyPages : params.revisionUnitsPerWindow ?? 1
+    );
 
     const savingOffset = Math.max(0, params.savingOffset || 0);
     const revisionOffset = Math.max(0, params.revisionOffset || 0);
@@ -216,6 +223,10 @@ export class QuranMemorizationPlanningEngine {
     const scheduleDates = generateScheduleDates(params.startDate, params.endDate, params.schedule);
     const dailyPlans: DailyPlanItem[] = [];
     let studyDayCounter = 0;
+    // Rolling revision continues past the end of memorization units so filler
+    // days keep cycling the memorized pool instead of a static fallback label.
+    let delayedRevOffset = 0;
+    let overflowRevOffset = revisionRollState.revisionWindowOffset;
 
     for (let i = 0; i < scheduleDates.length; i++) {
       const { date: dateStr, isHoliday } = scheduleDates[i];
@@ -266,6 +277,17 @@ export class QuranMemorizationPlanningEngine {
 
       let unitForDay: PlanningUnit;
       if (isSavingDelayed) {
+        const fillerRev = isRevisionDisabled
+          ? undefined
+          : this.rangeCalculator.computeRollingRevision(
+              priorMemorizedVerses,
+              revisionDailyPages,
+              delayedRevOffset,
+              revisionDirection,
+              revisionUnitKind,
+              params.revisionUnitsPerWindow
+            );
+        if (fillerRev) delayedRevOffset = fillerRev.nextOffset;
         unitForDay = {
           type: params.unitType,
           start: params.targetStart,
@@ -274,11 +296,28 @@ export class QuranMemorizationPlanningEngine {
           displayLabel: `تمهيد وتلقين ومراجعة (حصة ${studyDayIndex + 1} من ${savingOffset})`,
           isConsolidation: false,
           revisionPages: isRevisionDisabled ? 0 : revisionDailyPages,
-          revisionDisplay: isRevisionDisabled ? undefined : defaultRevDisplay,
+          revisionDisplay: isRevisionDisabled ? undefined : (fillerRev?.displayLabel || defaultRevDisplay),
+          revisionPageStart: fillerRev?.pageStart,
+          revisionPageEnd: fillerRev?.pageEnd,
         };
       } else if (hasUnit) {
         unitForDay = units[effectiveUnitIndex];
       } else {
+        const pool =
+          revisionRollState.memorizedPool.length > 0
+            ? revisionRollState.memorizedPool
+            : priorMemorizedVerses;
+        const fillerRev = isRevisionDisabled
+          ? undefined
+          : this.rangeCalculator.computeRollingRevision(
+              pool,
+              revisionDailyPages,
+              overflowRevOffset,
+              revisionDirection,
+              revisionUnitKind,
+              params.revisionUnitsPerWindow
+            );
+        if (fillerRev) overflowRevOffset = fillerRev.nextOffset;
         unitForDay = {
           type: params.unitType,
           start: units[units.length - 1].end,
@@ -287,7 +326,9 @@ export class QuranMemorizationPlanningEngine {
           displayLabel: 'يوم تثبيت ومراجعة عامة (تم إنجاز المقرر)',
           isConsolidation: false,
           revisionPages: isRevisionDisabled ? 0 : revisionDailyPages,
-          revisionDisplay: isRevisionDisabled ? undefined : defaultRevDisplay,
+          revisionDisplay: isRevisionDisabled ? undefined : (fillerRev?.displayLabel || defaultRevDisplay),
+          revisionPageStart: fillerRev?.pageStart,
+          revisionPageEnd: fillerRev?.pageEnd,
         };
       }
 

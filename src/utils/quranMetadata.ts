@@ -246,6 +246,23 @@ export function formatQuranRangeLabel(
 }
 
 /**
+ * Formats an ayah span inside a single surah. When the end ayah is the
+ * surah's last ayah the end number is replaced by «كاملة» (whole surah when
+ * starting at 1) or «إلى آخرها» (partial tail) instead of the raw number.
+ */
+export function formatSurahAyahSpan(
+  surahNumber: number,
+  startAyah: number,
+  endAyah: number
+): string {
+  const name = getSurahArabicName(surahNumber);
+  const count = getSurahAyahsCount(surahNumber);
+  if (startAyah <= 1 && endAyah >= count) return `سورة ${name} كاملة`;
+  if (startAyah === endAyah) return `سورة ${name} (آية ${startAyah})`;
+  return `سورة ${name} (الآيات ${startAyah} - ${endAyah >= count ? 'إلى آخرها' : endAyah})`;
+}
+
+/**
  * Canonical 114 Surahs ordered in Backward Direction (المسار التنازلي التأسيسي المحكم):
  * Starting with Al-Fatihah (1) at the top, followed by An-Nas (114) down to Al-Baqarah (2).
  * Sequence: [1. الفاتحة, 114. الناس, 113. الفلق, ..., 3. آل عمران, 2. البقرة]

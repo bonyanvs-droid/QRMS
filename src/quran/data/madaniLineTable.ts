@@ -14,6 +14,17 @@ import { QURAN_SURAHS } from './quranMeta';
 const surahNameMap = new Map<number, string>(
   QURAN_SURAHS.map((s) => [s.surahNumber, s.arabicName])
 );
+const surahAyahCountMap = new Map<number, number>(
+  QURAN_SURAHS.map((s) => [s.surahNumber, s.ayahCount])
+);
+
+function surahAyahSpanLabel(surahNumber: number, startAyah: number, endAyah: number): string {
+  const name = surahNameMap.get(surahNumber) || `السورة ${surahNumber}`;
+  const count = surahAyahCountMap.get(surahNumber) || endAyah;
+  if (startAyah <= 1 && endAyah >= count) return `سورة ${name} كاملة`;
+  if (startAyah === endAyah) return `سورة ${name} (آية ${startAyah})`;
+  return `سورة ${name} (الآيات ${startAyah} - ${endAyah >= count ? 'إلى آخرها' : endAyah})`;
+}
 
 export function getSurahArabicName(surahNumber: number): string {
   return surahNameMap.get(surahNumber) || `السورة ${surahNumber}`;
@@ -158,13 +169,14 @@ export function partitionVersesByLines(
       
       let displayLabel = '';
       if (first.surahNumber === last.surahNumber) {
-        if (first.ayahNumber === last.ayahNumber) {
-          displayLabel = `سورة ${getSurahArabicName(first.surahNumber)} (آية ${first.ayahNumber})`;
-        } else {
-          displayLabel = `سورة ${getSurahArabicName(first.surahNumber)} (الآيات ${first.ayahNumber} - ${last.ayahNumber})`;
-        }
+        displayLabel = surahAyahSpanLabel(first.surahNumber, first.ayahNumber, last.ayahNumber);
       } else {
-        displayLabel = `من سورة ${getSurahArabicName(first.surahNumber)} (${first.ayahNumber}) إلى سورة ${getSurahArabicName(last.surahNumber)} (${last.ayahNumber})`;
+        const endCount = surahAyahCountMap.get(last.surahNumber) || last.ayahNumber;
+        const endPart =
+          last.ayahNumber >= endCount
+            ? `سورة ${getSurahArabicName(last.surahNumber)} إلى آخرها`
+            : `سورة ${getSurahArabicName(last.surahNumber)} (${last.ayahNumber})`;
+        displayLabel = `من سورة ${getSurahArabicName(first.surahNumber)} (${first.ayahNumber}) إلى ${endPart}`;
       }
 
       chunks.push({
