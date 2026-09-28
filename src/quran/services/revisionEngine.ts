@@ -3,6 +3,8 @@ import {
   PlanningUnitType,
   PlanningUnit,
   Surah,
+  StudentPlanRevisionMode,
+  REVISION_MODE_UNIT,
 } from '../types';
 import {
   StudentQuranPlan,
@@ -33,7 +35,7 @@ export interface CreateRevisionPlanParams {
   targetStart: QuranPosition;
   targetEnd: QuranPosition;
   direction: 'forward' | 'backward';
-  mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom';
+  mode: Exclude<StudentPlanRevisionMode, 'none'>;
   dailyAmount: number; // e.g., 2 pages, or 2 surahs, or 1 quarter
   schedule: WorkingDaysSchedule;
   surahList?: number[]; // Specific surah numbers when revising custom surah set
@@ -69,25 +71,9 @@ export class QuranRevisionPlanningEngine {
         params.surahList
       );
     } else {
-      // Maps mode to unitType
-      switch (params.mode) {
-        case 'lines':
-          unitType = 'line';
-          break;
-        case 'quarters':
-          unitType = 'quarter';
-          break;
-        case 'hizb':
-          unitType = 'hizb';
-          break;
-        case 'juz':
-          unitType = 'juz';
-          break;
-        case 'pages':
-        default:
-          unitType = 'page';
-          break;
-      }
+      // Atomic unit = real Madani line. Page-derived modes resolve to their
+      // line multiplier; structural modes keep real mushaf boundaries.
+      unitType = REVISION_MODE_UNIT[params.mode] ?? 'page';
 
       units = await this.rangeCalculator.partitionRangeIntoUnits(
         params.targetStart,
@@ -121,16 +107,19 @@ export class QuranRevisionPlanningEngine {
     const startSurah = await this.provider.getSurah(firstUnit.start.surahNumber);
     const endSurah = await this.provider.getSurah(lastUnit.end.surahNumber);
 
-    const modeArabic =
-      params.mode === 'surahs'
-        ? 'مراجعة بالسور'
-        : params.mode === 'pages'
-          ? 'مراجعة بالصفحات'
-          : params.mode === 'lines'
-            ? 'مراجعة بالأسطر (مصحف المدينة)'
-            : params.mode === 'quarters'
-              ? 'مراجعة بالأرباع'
-              : 'مراجعة بالأجزاء والأحزاب';
+    const modeArabicMap: Record<string, string> = {
+      surahs: 'مراجعة بالسور',
+      pages: 'مراجعة بالصفحات (15 سطراً/صفحة)',
+      half_pages: 'مراجعة بأنصاف الصفحات (8 أسطر)',
+      third_pages: 'مراجعة بأثلاث الصفحات (5 أسطر)',
+      quarter_pages: 'مراجعة بأرباع الصفحات (4 أسطر)',
+      rub_pages: 'مراجعة بأثمان الصفحات (سطران)',
+      lines: 'مراجعة بالأسطر (مصحف المدينة)',
+      quarters: 'مراجعة بالأرباع',
+      hizb: 'مراجعة بالأحزاب',
+      juz: 'مراجعة بالأجزاء',
+    };
+    const modeArabic = modeArabicMap[params.mode] ?? 'مراجعة بالأجزاء والأحزاب';
 
     const startName = startSurah?.arabicName || getSurahArabicName(firstUnit.start.surahNumber);
     const endName = endSurah?.arabicName || getSurahArabicName(lastUnit.end.surahNumber);

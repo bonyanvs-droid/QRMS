@@ -109,7 +109,8 @@ export interface LinePartitionChunk {
 
 export function partitionVersesByLines(
   verses: Ayah[],
-  linesPerDay: number = 1
+  linesPerDay: number = 1,
+  options?: { crossSurah?: boolean }
 ): LinePartitionChunk[] {
   if (verses.length === 0) return [];
 
@@ -158,7 +159,8 @@ export function partitionVersesByLines(
     // Surah boundary protection: if the next verse belongs to a DIFFERENT surah,
     // snap and close the current chunk at the end of the surah!
     const nextVerse = i < verses.length - 1 ? verses[i + 1] : null;
-    const isSurahBoundary = nextVerse && nextVerse.surahNumber !== v.surahNumber;
+    const isSurahBoundary =
+      !options?.crossSurah && nextVerse && nextVerse.surahNumber !== v.surahNumber;
 
     // Check if we reached the line threshold, surah boundary, or at the last verse.
     const isLast = i === verses.length - 1;
@@ -168,7 +170,9 @@ export function partitionVersesByLines(
     // reached but the remaining same-surah tail needs at most
     // MAX_OVERFLOW_LINES additional lines, absorb it instead of leaving a
     // weak tail chunk (e.g. a final 1-line day for Al-Ghashiyah 25-26).
-    if (reachedThreshold && !isSurahBoundary && !isLast) {
+    // Skipped for crossSurah (revision windows) — there is no weak tail when
+    // the window simply continues into the next surah like a real page.
+    if (reachedThreshold && !isSurahBoundary && !isLast && !options?.crossSurah) {
       const tailKeys = new Set(groupLineKeys);
       let j = i + 1;
       while (j < verses.length && verses[j].surahNumber === v.surahNumber) {
@@ -199,7 +203,9 @@ export function partitionVersesByLines(
       }
       // Explainable capacity: surface why the chunk exceeded the requested target.
       if (accumulatedLines > targetLines) {
-        displayLabel += ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية/إتمام السورة)`;
+        displayLabel += options?.crossSurah
+          ? ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية)`
+          : ` (+${accumulatedLines - targetLines} سطر — لسلامة الآية/إتمام السورة)`;
       }
 
       chunks.push({

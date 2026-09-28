@@ -1,5 +1,12 @@
-import { QuranPosition, PlanningUnit, PlanningUnitType, QuranRangeMetrics } from './index';
-export type { PlanningUnitType };
+import {
+  QuranPosition,
+  PlanningUnit,
+  PlanningUnitType,
+  QuranRangeMetrics,
+  RevisionUnitKind,
+  StudentPlanRevisionMode,
+} from './index';
+export type { PlanningUnitType, RevisionUnitKind, StudentPlanRevisionMode };
 
 export type PlanDirection = 'forward' | 'backward';
 
@@ -278,7 +285,7 @@ export interface StudentQuranPlan {
   revisionDailyPages?: number;
   consolidationDaysPerSurah?: number;
   /** Backwards compatibility alias for revisionSettings.mode */
-  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: StudentPlanRevisionMode;
   /** Backwards compatibility alias for revisionDailyPages */
   dailyRevisionPages?: number;
   /** Backwards compatibility alias for consolidationDaysPerSurah */
@@ -359,11 +366,11 @@ export interface StudentQuranPlan {
 
   // Specific for Revision (e.g. revision by surahs)
   revisionSettings?: {
-    mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+    mode: StudentPlanRevisionMode;
     surahList?: number[]; // Specific surah numbers when revising by surah
     surahsPerDay?: number;
     /** Rolling-window granularity actually used by the engine */
-    unitType?: 'page' | 'surah' | 'line';
+    unitType?: RevisionUnitKind;
     /** Independent revision direction snapshot persisted with the plan */
     direction?: PlanDirection;
   };

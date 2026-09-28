@@ -1,4 +1,4 @@
-import { PlanningUnitType, QuranPosition } from '../types';
+import { PlanningUnitType, QuranPosition, StudentPlanRevisionMode } from '../types';
 import { WorkingDaysSchedule } from '../types/plan';
 
 /**
@@ -27,7 +27,7 @@ export interface StageQuranConfig {
 
   // Default Revision Settings
   revision: {
-    mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+    mode: StudentPlanRevisionMode;
     unitType: PlanningUnitType;
     defaultDailyAmount: number;
     defaultDailyPages?: number; // Independent daily revision in pages (starts from 0.5, 1, 2, 3...)

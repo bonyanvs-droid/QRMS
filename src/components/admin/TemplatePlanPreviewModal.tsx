@@ -301,8 +301,14 @@ export const TemplatePlanPreviewModal: React.FC<TemplatePlanPreviewModalProps> =
       case 'ayah':
       case 'ayahs':
         return simDailyAmount === 1 ? 'آية' : `${simDailyAmount} آيات`;
+      case 'rub':
+        return 'ثمن صفحة (سطران)';
+      case 'quarter_page':
+        return 'ربع صفحة (4 أسطر)';
+      case 'third_page':
+        return 'ثلث صفحة (5 أسطر)';
       case 'half_page':
-        return 'نصف صفحة';
+        return 'نصف صفحة (8 أسطر)';
       case 'page':
       case 'pages':
         return 'صفحة كاملة';

@@ -128,18 +128,19 @@ async function runPlanValidation() {
   // 6. Unit Partition: Half-Page chunking
   // -------------------------------------------------------------
   const halfPageUnits = await rangeCalc.partitionRangeIntoUnits(
-    { surahNumber: 1, ayahNumber: 1 },
-    { surahNumber: 1, ayahNumber: 7 },
+    { surahNumber: 2, ayahNumber: 1 },
+    { surahNumber: 2, ayahNumber: 40 },
     'half_page',
     1
   );
+  // Line-atomic model: half_page = 8 real Madani lines/day.
   assert(
-    halfPageUnits.length === 2 &&
-      halfPageUnits[0].type === 'half_page' &&
-      halfPageUnits[0].displayLabel.includes('النصف الأول') &&
-      halfPageUnits[1].displayLabel.includes('النصف الثاني'),
+    halfPageUnits.length > 1 &&
+      halfPageUnits.every((u) => u.type === 'half_page') &&
+      (halfPageUnits[0].estimatedLines ?? 0) >= 7 &&
+      (halfPageUnits[0].estimatedLines ?? 0) <= 10,
     6,
-    'تقسيم النصف صفحة الموثوق (Reliable Half-Page Partitioning - بدون أسطر وهمية)'
+    'تقسيم النصف صفحة السطري (8 أسطر حقيقية/وحدة - مصحف المدينة)'
   );
 
   // -------------------------------------------------------------

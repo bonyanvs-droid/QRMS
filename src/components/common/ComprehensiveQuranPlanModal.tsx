@@ -33,6 +33,7 @@ import {
   DailyPlanItem,
   PlanDirection,
   PlanningUnitType,
+  StudentPlanRevisionMode,
 } from '../../quran/types/plan';
 import {
   formatHijriDate,
@@ -201,7 +202,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
   // Revision parameters (Cumulative toggle FIRST)
   const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
-  const [setupRevisionMode, setSetupRevisionMode] = useState<'pages' | 'surahs' | 'lines' | 'none'>('pages');
+  const [setupRevisionMode, setSetupRevisionMode] = useState<StudentPlanRevisionMode>('pages');
   const [setupRevisionDailyPages, setSetupRevisionDailyPages] = useState<number>(1);
   const [setupRevisionUnitsPerWindow, setSetupRevisionUnitsPerWindow] = useState<number>(2);
   const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
@@ -348,7 +349,9 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         customRevisionDailyPages:
           setupPlanType === 'memorization' ? 0 : setupRevisionDailyPages,
         customRevisionUnitsPerWindow:
-          setupPlanType === 'memorization' ? undefined : (setupRevisionMode === 'surahs' || setupRevisionMode === 'lines' ? setupRevisionUnitsPerWindow : undefined),
+          setupPlanType === 'memorization' ? undefined
+            : setupRevisionMode === 'pages' ? undefined
+            : setupRevisionUnitsPerWindow,
         revisionMode: setupPlanType === 'memorization' ? 'none' : setupRevisionMode,
         savingOffset: setupPlanType === 'revision' ? 0 : setupSavingOffset,
         revisionOffset: setupPlanType === 'memorization' ? 0 : setupRevisionOffset,
@@ -879,12 +882,15 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                         onChange={(e) => setSetupUnitType(e.target.value as PlanningUnitType)}
                         className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                       >
-                        <option value="page">صفحة مصحف كاملة</option>
-                        <option value="line">أسطر مصحف المدينة (15 سطر/صفحة)</option>
+                        <option value="line">أسطر مصحف المدينة (الوحدة الذرية)</option>
+                        <option value="rub">ثمن صفحة (سطران)</option>
+                        <option value="quarter_page">ربع صفحة (4 أسطر)</option>
+                        <option value="third_page">ثلث صفحة (5 أسطر)</option>
+                        <option value="half_page">نصف صفحة (8 أسطر)</option>
+                        <option value="page">صفحة كاملة (15 سطراً)</option>
                         <option value="ayah">آيات محددة</option>
                         <option value="surah">سورة كاملة</option>
                         <option value="quarter">ربع حزب</option>
-                        <option value="rub">ثمن</option>
                         <option value="hizb">نصف جزء (حزب)</option>
                         <option value="juz">جزء كامل</option>
                       </select>
@@ -970,9 +976,16 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                           onChange={(e) => setSetupRevisionMode(e.target.value as any)}
                           className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         >
-                          <option value="pages">صفحات مصحف المدينة</option>
-                          <option value="lines">أسطر مصحف المدينة (15 سطر/صفحة)</option>
+                          <option value="lines">أسطر مصحف المدينة</option>
+                          <option value="rub_pages">ثمن صفحة (سطران)</option>
+                          <option value="quarter_pages">ربع صفحة (4 أسطر)</option>
+                          <option value="third_pages">ثلث صفحة (5 أسطر)</option>
+                          <option value="half_pages">نصف صفحة (8 أسطر)</option>
+                          <option value="pages">صفحات (15 سطراً/صفحة)</option>
                           <option value="surahs">سور كاملة</option>
+                          <option value="quarters">أرباع الأحزاب</option>
+                          <option value="hizb">أحزاب</option>
+                          <option value="juz">أجزاء</option>
                         </select>
                       </div>
 
@@ -980,27 +993,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                         <label className="block text-[11px] font-bold text-slate-700 mb-1">
                           مقدار الورد اليومي:
                         </label>
-                        {setupRevisionMode === 'surahs' ? (
-                          <input
-                            type="number"
-                            min="1"
-                            max="30"
-                            value={setupRevisionUnitsPerWindow}
-                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
-                            placeholder="عدد السور يومياً"
-                          />
-                        ) : setupRevisionMode === 'lines' ? (
-                          <input
-                            type="number"
-                            min="1"
-                            max="45"
-                            value={setupRevisionUnitsPerWindow}
-                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
-                            placeholder="عدد الأسطر يومياً (مثال: 5، 7، 8)"
-                          />
-                        ) : (
+                        {setupRevisionMode === 'pages' ? (
                           <input
                             type="number"
                             min="0.5"
@@ -1009,6 +1002,21 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                             onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
                             className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                             placeholder="عدد الصفحات"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            min="1"
+                            value={setupRevisionUnitsPerWindow}
+                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                            placeholder={
+                              setupRevisionMode === 'lines'
+                                ? 'عدد الأسطر يومياً (مثال: 5، 7، 8)'
+                                : setupRevisionMode === 'surahs'
+                                  ? 'عدد السور يومياً'
+                                  : 'عدد الوحدات يومياً'
+                            }
                           />
                         )}
                       </div>

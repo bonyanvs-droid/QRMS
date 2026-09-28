@@ -47,13 +47,57 @@ export type PlanningUnitType =
   | 'line'
   | 'ayah'
   | 'verse_range'
+  | 'rub'
   | 'quarter_page'
+  | 'third_page'
   | 'half_page'
   | 'page'
   | 'quarter'
   | 'hizb'
   | 'juz'
   | 'surah';
+
+/** Revision window unit kind — same line-atomic model as planning units. */
+export type RevisionUnitKind = PlanningUnitType;
+
+/** UI-facing revision modes (page-derived modes resolve to line multipliers). */
+export type StudentPlanRevisionMode =
+  | 'pages'
+  | 'half_pages'
+  | 'third_pages'
+  | 'quarter_pages'
+  | 'rub_pages'
+  | 'lines'
+  | 'surahs'
+  | 'quarters'
+  | 'hizb'
+  | 'juz'
+  | 'custom'
+  | 'none';
+
+/** Maps a UI revision mode to its unit kind (undefined → caller fallback). */
+export const REVISION_MODE_UNIT: Partial<Record<StudentPlanRevisionMode, RevisionUnitKind>> = {
+  pages: 'page',
+  half_pages: 'half_page',
+  third_pages: 'third_page',
+  quarter_pages: 'quarter_page',
+  rub_pages: 'rub',
+  lines: 'line',
+  surahs: 'surah',
+  quarters: 'quarter',
+  hizb: 'hizb',
+  juz: 'juz',
+};
+
+/** Real Madani lines per page-derived planning unit (atomic unit = the line). */
+export const LINES_PER_UNIT: Partial<Record<PlanningUnitType, number>> = {
+  line: 1,
+  rub: 2,          // ثمن صفحة ≈ 15/8
+  quarter_page: 4, // ربع صفحة ≈ 15/4
+  third_page: 5,   // ثلث صفحة = 15/3
+  half_page: 8,    // نصف صفحة ≈ 15/2 (7.5 → 8)
+  page: 15,
+};
 
 export interface PlanningUnit {
   type: PlanningUnitType;

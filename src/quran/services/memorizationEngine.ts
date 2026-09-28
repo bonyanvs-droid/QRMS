@@ -2,6 +2,8 @@ import {
   QuranPosition,
   PlanningUnitType,
   PlanningUnit,
+  RevisionUnitKind,
+  StudentPlanRevisionMode,
 } from '../types';
 import {
   StudentQuranPlan,
@@ -54,12 +56,12 @@ export interface CreateMemorizationPlanParams {
    * so recalculation keeps the same direction.
    */
   revisionDirection?: 'forward' | 'backward';
-  /** Rolling-window granularity: 'page' (default) or 'surah' (surah-mode revision) */
-  revisionUnitKind?: 'page' | 'surah' | 'line';
-  /** Units per rolling window when revisionUnitKind = 'surah' (template surahsPerDay) */
+  /** Rolling-window granularity — page-derived kinds resolve to real line counts */
+  revisionUnitKind?: RevisionUnitKind;
+  /** Units per rolling window (surahs/day, lines/day, units of the kind/day) */
   revisionUnitsPerWindow?: number;
   /** Template revision mode persisted into plan.revisionSettings */
-  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: StudentPlanRevisionMode;
   /** Delay starting memorization by N sessions */
   savingOffset?: number;
   /** Delay starting revision by N sessions */
@@ -84,7 +86,7 @@ export class QuranMemorizationPlanningEngine {
     const revisionDailyPages = params.revisionDailyPages !== undefined ? params.revisionDailyPages : 1;
     const autoMinorRevision = params.autoMinorRevisionMode !== false; // ON by default for newly created plans
     const revisionDirection: 'forward' | 'backward' = params.revisionDirection || 'backward';
-    const revisionUnitKind: 'page' | 'surah' | 'line' = params.revisionUnitKind || 'page';
+    const revisionUnitKind: RevisionUnitKind = params.revisionUnitKind || 'page';
 
     // Seed the revision pool with prior memorization (before plan start) when Auto Minor
     // Revision is enabled — prior + new memorization form one revision set.
@@ -225,6 +227,13 @@ export class QuranMemorizationPlanningEngine {
     const formatRevisionLabel = (amount: number): string => {
       if (revisionUnitKind === 'line') return `مراجعة: ${amount} أسطر`;
       if (revisionUnitKind === 'surah') return `مراجعة: ${amount} سور`;
+      if (revisionUnitKind === 'quarter') return `مراجعة: ${amount} أرباع حزب`;
+      if (revisionUnitKind === 'hizb') return `مراجعة: ${amount} أحزاب`;
+      if (revisionUnitKind === 'juz') return `مراجعة: ${amount} أجزاء`;
+      if (revisionUnitKind === 'rub') return `مراجعة: ${amount} × ثمن صفحة`;
+      if (revisionUnitKind === 'quarter_page') return `مراجعة: ${amount} × ربع صفحة`;
+      if (revisionUnitKind === 'third_page') return `مراجعة: ${amount} × ثلث صفحة`;
+      if (revisionUnitKind === 'half_page') return `مراجعة: ${amount} × نصف صفحة`;
       if (amount === 0.5) return 'مراجعة: نصف صفحة';
       if (amount === 1) return 'مراجعة: صفحة واحدة';
       if (amount === 2) return 'مراجعة: صفحتان';

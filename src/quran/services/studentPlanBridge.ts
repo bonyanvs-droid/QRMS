@@ -21,6 +21,12 @@ import {
   AcademicTargetSource,
   WorkingDaysSchedule,
 } from '../types/plan';
+import {
+  RevisionUnitKind,
+  StudentPlanRevisionMode,
+  REVISION_MODE_UNIT,
+  LINES_PER_UNIT,
+} from '../types';
 import { StageQuranConfig, findStageConfigForStudent } from '../models/stageConfig';
 import { QuranMemorizationPlanningEngine } from './memorizationEngine';
 import { QuranRevisionPlanningEngine } from './revisionEngine';
@@ -99,7 +105,7 @@ export interface CreateRealStudentPlanParams {
   /** Explicit revision direction override (independent of memorization direction) */
   customRevisionDirection?: PlanDirection;
   /** Explicit revision mode override (e.g. 'pages', 'surahs', or 'none' to disable) */
-  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: StudentPlanRevisionMode;
   /** Delay starting memorization by N sessions (focus on revision/prep) */
   savingOffset?: number;
   /** Delay starting revision by N sessions */
@@ -329,8 +335,8 @@ export interface ResolvedPlanConfiguration {
   /** The academic-year grade target when it exists (for warnings/preview) */
   academicTarget?: QuranPosition;
   // Revision (independent configuration)
-  revisionMode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
-  revisionUnitKind: 'page' | 'surah' | 'line';
+  revisionMode: StudentPlanRevisionMode;
+  revisionUnitKind: RevisionUnitKind;
   revisionDailyPages: number;
   revisionUnitsPerWindow?: number;
   revisionDirection: PlanDirection;
@@ -502,10 +508,12 @@ export function resolveQuranPlanConfiguration(
   //    'surahs' → surah units, everything else → real mushaf pages.
   //    'none' disables revision completely.
   const revCfg = stageConfig.revision || ({} as StageQuranConfig['revision']);
-  const revisionMode = params.revisionMode || revCfg.mode || 'pages';
+  const revisionMode = (params.revisionMode || revCfg.mode || 'pages') as StudentPlanRevisionMode;
   const isRevisionDisabled = revisionMode === 'none';
-  const revisionUnitKind: 'page' | 'surah' | 'line' =
-    revisionMode === 'surahs' ? 'surah' : revisionMode === 'lines' || (revisionMode as any) === 'line' ? 'line' : 'page';
+  // Line-atomic resolution: pages=15 lines, half=8, third=5, quarter=4,
+  // rub=2 — same multipliers as memorization. Structural modes (surah /
+  // quarter / hizb / juz) keep real mushaf boundaries.
+  const revisionUnitKind: RevisionUnitKind = REVISION_MODE_UNIT[revisionMode] ?? 'page';
   if (
     !isRevisionDisabled &&
     revCfg.unitType &&
@@ -522,17 +530,13 @@ export function resolveQuranPlanConfiguration(
       : revCfg.defaultDailyPages ?? revCfg.defaultDailyAmount ?? 1;
   const revisionUnitsPerWindow = isRevisionDisabled
     ? undefined
-    : revisionUnitKind === 'surah'
-      ? params.customRevisionUnitsPerWindow ??
+    : revisionUnitKind === 'page'
+      ? undefined // page count comes from revisionDailyPages below
+      : params.customRevisionUnitsPerWindow ??
         revCfg.surahsPerDay ??
         revCfg.defaultDailyAmount ??
-        1
-      : revisionUnitKind === 'line'
-        ? params.customRevisionUnitsPerWindow ??
-          revCfg.defaultDailyAmount ??
-          5
-        : undefined;
-  if (!isRevisionDisabled && revisionMode !== 'pages' && revisionMode !== 'surahs' && revisionMode !== 'lines') {
+        (revisionUnitKind === 'line' ? 5 : 1);
+  if (!isRevisionDisabled && REVISION_MODE_UNIT[revisionMode] === undefined) {
     warnings.push(
       `نمط المراجعة "${revisionMode}" في النموذج غير مدعوم بعد — طُبّقت مراجعة الصفحات المتدحرجة.`
     );
@@ -657,8 +661,9 @@ export async function createRealStudentPlan(
   let basePlan: StudentQuranPlan;
   if (params.planType === 'revision') {
     const revEngine = params.revisionEngine || new QuranRevisionPlanningEngine(provider);
-    const revMode: 'pages' | 'surahs' | 'lines' =
-      resolved.revisionMode === 'surahs' ? 'surahs' : resolved.revisionMode === 'lines' ? 'lines' : 'pages';
+    const revMode = REVISION_MODE_UNIT[resolved.revisionMode]
+      ? (resolved.revisionMode as Exclude<StudentPlanRevisionMode, 'none' | 'custom'>)
+      : 'pages';
     basePlan = await revEngine.createPlan({
       studentId: student.id,
       startDate: resolved.startDate,
@@ -667,7 +672,10 @@ export async function createRealStudentPlan(
       targetEnd: resolved.targetEnd,
       direction: resolved.revisionDirection || resolved.direction,
       mode: revMode,
-      dailyAmount: revMode === 'pages' ? (resolved.revisionDailyPages || 1) : (resolved.revisionUnitsPerWindow || 1),
+      dailyAmount:
+        revMode === 'pages'
+          ? resolved.revisionDailyPages || 1
+          : resolved.revisionUnitsPerWindow || 1,
       schedule: resolved.schedule,
     });
   } else {

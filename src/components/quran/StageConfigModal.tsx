@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { StageQuranConfig } from '../../quran/models/stageConfig';
+import { REVISION_MODE_UNIT, StudentPlanRevisionMode } from '../../quran/types';
 import {
   X,
   Save,
@@ -485,13 +486,19 @@ export const StageConfigModal: React.FC<StageConfigModalProps> = ({
                         mode: e.target.value as any,
                         // Keep unitType consistent with mode so stored templates
                         // never carry the pages/surah contradiction again
-                        unitType: e.target.value === 'surahs' ? 'surah' : 'page',
+                        unitType:
+                          REVISION_MODE_UNIT[e.target.value as StudentPlanRevisionMode] ?? 'page',
                       },
                     })
                   }
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 font-bold"
                 >
-                  <option value="pages">مراجعة بالصفحات (نظام معتمد)</option>
+                  <option value="pages">مراجعة بالصفحات (15 سطراً/صفحة)</option>
+                  <option value="half_pages">نصف صفحة (8 أسطر)</option>
+                  <option value="third_pages">ثلث صفحة (5 أسطر)</option>
+                  <option value="quarter_pages">ربع صفحة (4 أسطر)</option>
+                  <option value="rub_pages">ثمن صفحة (سطران)</option>
+                  <option value="lines">مراجعة بالأسطر</option>
                   <option value="surahs">مراجعة بالسور (مثل سورتين يومياً)</option>
                   <option value="quarters">مراجعة بالأرباع</option>
                   <option value="hizb">مراجعة بالأحزاب</option>
@@ -522,6 +529,31 @@ export const StageConfigModal: React.FC<StageConfigModalProps> = ({
                     <option value="3">3 سور</option>
                     <option value="4">4 سور</option>
                     <option value="5">5 سور</option>
+                  </select>
+                </div>
+              ) : editingConfig.revision.mode !== 'pages' ? (
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    مقدار المراجعة اليومية (وحدات):
+                  </label>
+                  <select
+                    value={editingConfig.revision.surahsPerDay ?? 1}
+                    onChange={(e) =>
+                      setEditingConfig({
+                        ...editingConfig,
+                        revision: {
+                          ...editingConfig.revision,
+                          surahsPerDay: parseInt(e.target.value, 10) || 1,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-300 text-slate-900 font-black"
+                  >
+                    {[1, 2, 3, 4, 5, 10, 15, 20, 30].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
                   </select>
                 </div>
               ) : (

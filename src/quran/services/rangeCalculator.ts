@@ -4,6 +4,8 @@ import {
   PlanningUnit,
   QuranRangeMetrics,
   Ayah,
+  LINES_PER_UNIT,
+  RevisionUnitKind,
 } from '../types';
 import { IQuranDataProvider } from '../providers/IQuranDataProvider';
 import { formatQuranPosition, formatQuranRange } from '../utils/positionFormatter';
@@ -63,54 +65,28 @@ export class RangeCalculator {
 
     const units: PlanningUnit[] = [];
 
+    // Atomic unit is always the physical Madani line. Page-derived units are
+    // just multiples of it: page = 15 lines, half = 8, third = 5,
+    // quarter_page = 4, rub = 2. `amount` multiplies the unit (2 pages = 30 lines).
+    const linesPerUnit = LINES_PER_UNIT[unitType];
+    if (linesPerUnit !== undefined) {
+      const lineChunks = partitionVersesByLines(verses, Math.max(1, amount) * linesPerUnit);
+      for (const lc of lineChunks) {
+        units.push({
+          type: unitType,
+          start: lc.start,
+          end: lc.end,
+          totalAyahs: lc.totalAyahs,
+          displayLabel: lc.displayLabel,
+          pageStart: lc.pageStart,
+          pageEnd: lc.pageEnd,
+          estimatedLines: lc.estimatedLines,
+        });
+      }
+      return units;
+    }
+
     switch (unitType) {
-      case 'line': {
-        const lineChunks = partitionVersesByLines(verses, amount);
-        for (const lc of lineChunks) {
-          units.push({
-            type: 'line',
-            start: lc.start,
-            end: lc.end,
-            totalAyahs: lc.totalAyahs,
-            displayLabel: lc.displayLabel,
-            pageStart: lc.pageStart,
-            pageEnd: lc.pageEnd,
-            estimatedLines: lc.estimatedLines,
-          });
-        }
-        break;
-      }
-
-      case 'quarter_page': {
-        // Group by page, then split into 4 quarters
-        const pagesMap = new Map<number, Ayah[]>();
-        for (const v of verses) {
-          const list = pagesMap.get(v.pageNumber) || [];
-          list.push(v);
-          pagesMap.set(v.pageNumber, list);
-        }
-
-        for (const [pageNum, pageVerses] of pagesMap.entries()) {
-          const qSize = Math.max(1, Math.ceil(pageVerses.length / 4));
-          for (let q = 0; q < pageVerses.length; q += qSize) {
-            const qChunk = pageVerses.slice(q, q + qSize);
-            const first = qChunk[0];
-            const last = qChunk[qChunk.length - 1];
-            const qNum = Math.floor(q / qSize) + 1;
-            units.push({
-              type: 'quarter_page',
-              start: { surahNumber: first.surahNumber, ayahNumber: first.ayahNumber, globalIndex: first.globalIndex },
-              end: { surahNumber: last.surahNumber, ayahNumber: last.ayahNumber, globalIndex: last.globalIndex },
-              totalAyahs: qChunk.length,
-              displayLabel: `صفحة ${pageNum} (الربع ${qNum})`,
-              pageStart: pageNum,
-              pageEnd: pageNum,
-            });
-          }
-        }
-        break;
-      }
-
       case 'ayah': {
         const chunkSize = Math.max(1, amount);
         let currentChunk: Ayah[] = [];
@@ -139,99 +115,6 @@ export class RangeCalculator {
               pageEnd: last.pageNumber,
             });
             currentChunk = [];
-          }
-        }
-        break;
-      }
-
-      case 'page': {
-        // Group by page
-        const pagesMap = new Map<number, Ayah[]>();
-        for (const v of verses) {
-          const list = pagesMap.get(v.pageNumber) || [];
-          list.push(v);
-          pagesMap.set(v.pageNumber, list);
-        }
-
-        const pageEntries = Array.from(pagesMap.entries());
-        const chunkSize = Math.max(1, amount);
-
-        for (let i = 0; i < pageEntries.length; i += chunkSize) {
-          const chunk = pageEntries.slice(i, i + chunkSize);
-          const allChunkVerses = chunk.flatMap(([, vList]) => vList);
-          const first = allChunkVerses[0];
-          const last = allChunkVerses[allChunkVerses.length - 1];
-          const pageNumbers = chunk.map(([pNum]) => pNum);
-
-          const displayLabel =
-            pageNumbers.length === 1
-              ? `صفحة ${pageNumbers[0]}`
-              : `صفحة ${pageNumbers[0]} - ${pageNumbers[pageNumbers.length - 1]} (${pageNumbers.length} صفحات)`;
-
-          units.push({
-            type: 'page',
-            start: { surahNumber: first.surahNumber, ayahNumber: first.ayahNumber, globalIndex: first.globalIndex },
-            end: { surahNumber: last.surahNumber, ayahNumber: last.ayahNumber, globalIndex: last.globalIndex },
-            totalAyahs: allChunkVerses.length,
-            displayLabel,
-            pageStart: Math.min(...pageNumbers),
-            pageEnd: Math.max(...pageNumbers),
-          });
-        }
-        break;
-      }
-
-      case 'half_page': {
-        // Group by page, then split each page into top and bottom halves
-        const pagesMap = new Map<number, Ayah[]>();
-        for (const v of verses) {
-          const list = pagesMap.get(v.pageNumber) || [];
-          list.push(v);
-          pagesMap.set(v.pageNumber, list);
-        }
-
-        for (const [pageNum, pageVerses] of pagesMap.entries()) {
-          if (pageVerses.length <= 1) {
-            const only = pageVerses[0];
-            units.push({
-              type: 'half_page',
-              start: { surahNumber: only.surahNumber, ayahNumber: only.ayahNumber, globalIndex: only.globalIndex },
-              end: { surahNumber: only.surahNumber, ayahNumber: only.ayahNumber, globalIndex: only.globalIndex },
-              totalAyahs: 1,
-              displayLabel: `صفحة ${pageNum} (كاملة)`,
-              pageStart: pageNum,
-              pageEnd: pageNum,
-            });
-          } else {
-            const mid = Math.ceil(pageVerses.length / 2);
-            const firstHalf = pageVerses.slice(0, mid);
-            const secondHalf = pageVerses.slice(mid);
-
-            const f1 = firstHalf[0];
-            const l1 = firstHalf[firstHalf.length - 1];
-            units.push({
-              type: 'half_page',
-              start: { surahNumber: f1.surahNumber, ayahNumber: f1.ayahNumber, globalIndex: f1.globalIndex },
-              end: { surahNumber: l1.surahNumber, ayahNumber: l1.ayahNumber, globalIndex: l1.globalIndex },
-              totalAyahs: firstHalf.length,
-              displayLabel: `صفحة ${pageNum} (النصف الأول)`,
-              pageStart: pageNum,
-              pageEnd: pageNum,
-            });
-
-            if (secondHalf.length > 0) {
-              const f2 = secondHalf[0];
-              const l2 = secondHalf[secondHalf.length - 1];
-              units.push({
-                type: 'half_page',
-                start: { surahNumber: f2.surahNumber, ayahNumber: f2.ayahNumber, globalIndex: f2.globalIndex },
-                end: { surahNumber: l2.surahNumber, ayahNumber: l2.ayahNumber, globalIndex: l2.globalIndex },
-                totalAyahs: secondHalf.length,
-                displayLabel: `صفحة ${pageNum} (النصف الثاني)`,
-                pageStart: pageNum,
-                pageEnd: pageNum,
-              });
-            }
           }
         }
         break;
@@ -427,7 +310,7 @@ export class RangeCalculator {
     revisionDailyPages = 1,
     initialMemorizedVerses: Ayah[] = [],
     revisionDirection: 'forward' | 'backward' = 'backward',
-    revisionUnitKind: 'page' | 'surah' | 'line' = 'page',
+    revisionUnitKind: RevisionUnitKind = 'page',
     revisionUnitsPerWindow?: number,
     autoMinorRevisionMode = true,
     cycleAnchorSurah?: number,
@@ -494,42 +377,42 @@ export class RangeCalculator {
           endAyahCheckpoints.push(a);
         }
         endAyahCheckpoints.push(surahEndAyah);
-      } else if (unitType === 'line') {
-        const lineChunks = partitionVersesByLines(surahVerses, Math.max(1, dailyAmount));
+      } else if (LINES_PER_UNIT[unitType] !== undefined) {
+        // Atomic unit is always the real Madani line: page = 15 lines,
+        // half = 8, third = 5, quarter_page = 4, rub = 2. Daily amount
+        // multiplies the unit (2 pages/day = 30 lines, etc.).
+        const targetLinesPerDay = Math.max(1, dailyAmount) * (LINES_PER_UNIT[unitType] as number);
+        const lineChunks = partitionVersesByLines(surahVerses, targetLinesPerDay);
         for (const lc of lineChunks) {
           endAyahCheckpoints.push(lc.end.ayahNumber);
         }
         if (endAyahCheckpoints.length === 0 || endAyahCheckpoints[endAyahCheckpoints.length - 1] < surahEndAyah) {
           endAyahCheckpoints.push(surahEndAyah);
         }
-      } else if (unitType === 'half_page' || unitType === 'page' || unitType === 'quarter_page') {
-        const pagesMap = new Map<number, Ayah[]>();
+      } else if (
+        unitType === 'quarter' ||
+        unitType === 'hizb' ||
+        unitType === 'juz'
+      ) {
+        // Structural units (quarter / hizb / juz): checkpoint at every real
+        // mushaf boundary inside the surah, then group `dailyAmount` units/day.
+        const field = unitType === 'quarter' ? 'quarter' : unitType === 'hizb' ? 'hizbNumber' : 'juzNumber';
+        const boundaries: number[] = [];
+        let prev = surahVerses[0]?.[field];
         for (const v of surahVerses) {
-          const list = pagesMap.get(v.pageNumber) || [];
-          list.push(v);
-          pagesMap.set(v.pageNumber, list);
+          if (v[field] !== prev) {
+            boundaries.push(v.ayahNumber - 1);
+            prev = v[field];
+          }
         }
-
-        if (unitType === 'half_page') {
-          for (const [, pVerses] of pagesMap.entries()) {
-            if (pVerses.length <= 1) {
-              endAyahCheckpoints.push(pVerses[0].ayahNumber);
-            } else {
-              const mid = Math.ceil(pVerses.length / 2);
-              endAyahCheckpoints.push(pVerses[mid - 1].ayahNumber);
-              endAyahCheckpoints.push(pVerses[pVerses.length - 1].ayahNumber);
-            }
-          }
-        } else {
-          for (const [, pVerses] of pagesMap.entries()) {
-            endAyahCheckpoints.push(pVerses[pVerses.length - 1].ayahNumber);
-          }
+        boundaries.push(surahEndAyah);
+        const step = Math.max(1, Math.round(dailyAmount));
+        for (let b = step - 1; b < boundaries.length; b += step) {
+          endAyahCheckpoints.push(boundaries[b]);
         }
         if (endAyahCheckpoints.length === 0 || endAyahCheckpoints[endAyahCheckpoints.length - 1] < surahEndAyah) {
           endAyahCheckpoints.push(surahEndAyah);
         }
-      } else {
-        endAyahCheckpoints.push(surahEndAyah);
       }
 
       endAyahCheckpoints = Array.from(new Set(endAyahCheckpoints)).sort((a, b) => a - b);
@@ -693,7 +576,7 @@ export class RangeCalculator {
     revisionDailyPages: number,
     currentOffset: number,
     revisionDirection: 'forward' | 'backward' = 'forward',
-    unitKind: 'page' | 'surah' | 'line' = 'page',
+    unitKind: RevisionUnitKind = 'page',
     unitsPerWindow?: number,
     restartAtSurah?: number
   ): {
@@ -709,14 +592,29 @@ export class RangeCalculator {
       };
     }
 
-    if (unitKind === 'line') {
-      const targetLines = Math.max(1, Math.round(unitsPerWindow ?? revisionDailyPages ?? 5));
-      const lineChunks = partitionVersesByLines(memorizedVerses, targetLines);
+    // Line-atomic revision units: page = 15 real lines, half = 8, third = 5,
+    // quarter_page = 4, rub = 2 — the same normalization as memorization.
+    const linesPerUnit = LINES_PER_UNIT[unitKind];
+    if (linesPerUnit !== undefined) {
+      const unitsCount = Math.max(1, Math.round(unitsPerWindow ?? revisionDailyPages ?? 1));
+      const targetLines = unitsCount * linesPerUnit;
+      // Revision windows are contiguous spans — they may cross surah
+      // boundaries exactly like a real mushaf page does.
+      const lineChunks = partitionVersesByLines(memorizedVerses, targetLines, { crossSurah: true });
       if (lineChunks.length === 0) {
         return { displayLabel: 'مراجعة: ما تم حفظه', nextOffset: 0 };
       }
       const orderedChunks = revisionDirection === 'backward' ? [...lineChunks].reverse() : lineChunks;
-      const safeOffset = currentOffset % orderedChunks.length;
+      let safeOffset = currentOffset % orderedChunks.length;
+      if (restartAtSurah !== undefined) {
+        const anchorVerse = memorizedVerses.find((v) => v.surahNumber === restartAtSurah);
+        if (anchorVerse) {
+          const anchored = orderedChunks.findIndex(
+            (c) => anchorVerse.globalIndex >= c.start.globalIndex && anchorVerse.globalIndex <= c.end.globalIndex
+          );
+          if (anchored >= 0) safeOffset = anchored;
+        }
+      }
       const chosen = orderedChunks[safeOffset];
       return {
         displayLabel: `مراجعة: ${chosen.displayLabel}`,
@@ -726,11 +624,20 @@ export class RangeCalculator {
       };
     }
 
+    // Structural revision units: real mushaf boundaries for quarter/hizb/juz,
+    // whole surahs for 'surah'.
+    const structuralKeyOf = (v: Ayah): number =>
+      unitKind === 'surah' ? v.surahNumber
+        : unitKind === 'quarter' ? v.quarter
+        : unitKind === 'hizb' ? v.hizbNumber
+        : unitKind === 'juz' ? v.juzNumber
+        : v.surahNumber;
+
     // Extract unique window units in learning (insertion) order — page numbers
     // for page-mode windows, surah numbers for surah-mode windows.
     const learningOrderedKeys: number[] = [];
     for (const v of memorizedVerses) {
-      const key = unitKind === 'surah' ? v.surahNumber : v.pageNumber;
+      const key = structuralKeyOf(v);
       if (!learningOrderedKeys.includes(key)) {
         learningOrderedKeys.push(key);
       }
@@ -788,7 +695,7 @@ export class RangeCalculator {
     // Find verses matching these window units to format detailed label
     const windowKeySet = new Set(windowKeys);
     const windowVerses = memorizedVerses.filter((v) =>
-      windowKeySet.has(unitKind === 'surah' ? v.surahNumber : v.pageNumber)
+      windowKeySet.has(structuralKeyOf(v))
     );
     // Order the window's verses along the actual revision traversal
     // (windowKeys sequence, then surah learning rank, then ayah) so the
@@ -825,7 +732,7 @@ export class RangeCalculator {
   private orderVersesByRevisionTraversal(
     verses: Ayah[],
     keySequence: number[],
-    unitKind: 'page' | 'surah',
+    unitKind: RevisionUnitKind,
     revisionDirection: 'forward' | 'backward'
   ): Ayah[] {
     const keyOrder = new Map<number, number>();
@@ -836,7 +743,11 @@ export class RangeCalculator {
     verses.forEach((v, i) => {
       if (!surahLearnRank.has(v.surahNumber)) surahLearnRank.set(v.surahNumber, i);
     });
-    const keyOf = (v: Ayah): number => (unitKind === 'surah' ? v.surahNumber : v.pageNumber);
+    const keyOf = (v: Ayah): number =>
+      unitKind === 'quarter' ? v.quarter
+        : unitKind === 'hizb' ? v.hizbNumber
+        : unitKind === 'juz' ? v.juzNumber
+        : v.surahNumber;
     return [...verses].sort((a, b) => {
       const keyDiff = (keyOrder.get(keyOf(a)) ?? 0) - (keyOrder.get(keyOf(b)) ?? 0);
       if (keyDiff !== 0) return keyDiff;
@@ -854,7 +765,7 @@ export class RangeCalculator {
    * - 'page' windows are physically contiguous mushaf page content → the
    *   "من X إلى Y" range label is truthful there.
    */
-  private buildRevisionDisplayLabel(orderedVerses: Ayah[], unitKind: 'page' | 'surah'): string {
+  private buildRevisionDisplayLabel(orderedVerses: Ayah[], unitKind: RevisionUnitKind): string {
     const firstVerse = orderedVerses[0];
     const lastVerse = orderedVerses[orderedVerses.length - 1];
     if (!firstVerse || !lastVerse) return 'مراجعة: ما تم حفظه';
@@ -896,14 +807,16 @@ export class RangeCalculator {
     orderedKeys: number[],
     memorizedVerses: Ayah[],
     surahNumber: number,
-    unitKind: 'page' | 'surah'
+    unitKind: RevisionUnitKind
   ): number {
     if (unitKind === 'surah') return orderedKeys.indexOf(surahNumber);
-    const surahPages = new Set(
-      memorizedVerses
-        .filter((v) => v.surahNumber === surahNumber)
-        .map((v) => v.pageNumber)
-    );
-    return orderedKeys.findIndex((k) => surahPages.has(k));
+    const anchorVerse = memorizedVerses.find((v) => v.surahNumber === surahNumber);
+    if (!anchorVerse) return -1;
+    const anchorKey =
+      unitKind === 'quarter' ? anchorVerse.quarter
+        : unitKind === 'hizb' ? anchorVerse.hizbNumber
+        : unitKind === 'juz' ? anchorVerse.juzNumber
+        : anchorVerse.surahNumber;
+    return orderedKeys.findIndex((k) => k === anchorKey);
   }
 }
