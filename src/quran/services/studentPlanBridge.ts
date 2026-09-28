@@ -527,8 +527,12 @@ export function resolveQuranPlanConfiguration(
         revCfg.surahsPerDay ??
         revCfg.defaultDailyAmount ??
         1
-      : undefined;
-  if (!isRevisionDisabled && revisionMode !== 'pages' && revisionMode !== 'surahs') {
+      : revisionUnitKind === 'line'
+        ? params.customRevisionUnitsPerWindow ??
+          revCfg.defaultDailyAmount ??
+          5
+        : undefined;
+  if (!isRevisionDisabled && revisionMode !== 'pages' && revisionMode !== 'surahs' && revisionMode !== 'lines') {
     warnings.push(
       `نمط المراجعة "${revisionMode}" في النموذج غير مدعوم بعد — طُبّقت مراجعة الصفحات المتدحرجة.`
     );
@@ -653,7 +657,8 @@ export async function createRealStudentPlan(
   let basePlan: StudentQuranPlan;
   if (params.planType === 'revision') {
     const revEngine = params.revisionEngine || new QuranRevisionPlanningEngine(provider);
-    const revMode = resolved.revisionMode === 'surahs' ? 'surahs' : 'pages';
+    const revMode: 'pages' | 'surahs' | 'lines' =
+      resolved.revisionMode === 'surahs' ? 'surahs' : resolved.revisionMode === 'lines' ? 'lines' : 'pages';
     basePlan = await revEngine.createPlan({
       studentId: student.id,
       startDate: resolved.startDate,
@@ -662,7 +667,7 @@ export async function createRealStudentPlan(
       targetEnd: resolved.targetEnd,
       direction: resolved.revisionDirection || resolved.direction,
       mode: revMode,
-      dailyAmount: revMode === 'surahs' ? (resolved.revisionUnitsPerWindow || 1) : (resolved.revisionDailyPages || 1),
+      dailyAmount: revMode === 'pages' ? (resolved.revisionDailyPages || 1) : (resolved.revisionUnitsPerWindow || 1),
       schedule: resolved.schedule,
     });
   } else {

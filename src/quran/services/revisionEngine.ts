@@ -33,7 +33,7 @@ export interface CreateRevisionPlanParams {
   targetStart: QuranPosition;
   targetEnd: QuranPosition;
   direction: 'forward' | 'backward';
-  mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+  mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom';
   dailyAmount: number; // e.g., 2 pages, or 2 surahs, or 1 quarter
   schedule: WorkingDaysSchedule;
   surahList?: number[]; // Specific surah numbers when revising custom surah set
@@ -71,6 +71,9 @@ export class QuranRevisionPlanningEngine {
     } else {
       // Maps mode to unitType
       switch (params.mode) {
+        case 'lines':
+          unitType = 'line';
+          break;
         case 'quarters':
           unitType = 'quarter';
           break;
@@ -123,9 +126,11 @@ export class QuranRevisionPlanningEngine {
         ? 'مراجعة بالسور'
         : params.mode === 'pages'
           ? 'مراجعة بالصفحات'
-          : params.mode === 'quarters'
-            ? 'مراجعة بالأرباع'
-            : 'مراجعة بالأجزاء والأحزاب';
+          : params.mode === 'lines'
+            ? 'مراجعة بالأسطر (مصحف المدينة)'
+            : params.mode === 'quarters'
+              ? 'مراجعة بالأرباع'
+              : 'مراجعة بالأجزاء والأحزاب';
 
     const startName = startSurah?.arabicName || getSurahArabicName(firstUnit.start.surahNumber);
     const endName = endSurah?.arabicName || getSurahArabicName(lastUnit.end.surahNumber);

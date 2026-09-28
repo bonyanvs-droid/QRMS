@@ -347,7 +347,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         customRevisionDailyPages:
           setupPlanType === 'memorization' ? 0 : setupRevisionDailyPages,
         customRevisionUnitsPerWindow:
-          setupPlanType === 'memorization' ? undefined : (setupRevisionMode === 'surahs' ? setupRevisionUnitsPerWindow : undefined),
+          setupPlanType === 'memorization' ? undefined : (setupRevisionMode === 'surahs' || setupRevisionMode === 'lines' ? setupRevisionUnitsPerWindow : undefined),
         revisionMode: setupPlanType === 'memorization' ? 'none' : setupRevisionMode,
         savingOffset: setupPlanType === 'revision' ? 0 : setupSavingOffset,
         revisionOffset: setupPlanType === 'memorization' ? 0 : setupRevisionOffset,
@@ -988,6 +988,16 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                             onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
                             className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                             placeholder="عدد السور يومياً"
+                          />
+                        ) : setupRevisionMode === 'lines' ? (
+                          <input
+                            type="number"
+                            min="1"
+                            max="45"
+                            value={setupRevisionUnitsPerWindow}
+                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                            placeholder="عدد الأسطر يومياً (مثال: 5، 7، 8)"
                           />
                         ) : (
                           <input
