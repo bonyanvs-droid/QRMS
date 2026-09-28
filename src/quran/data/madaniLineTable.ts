@@ -182,7 +182,12 @@ export function partitionVersesByLines(
         }
         j++;
       }
-      if (tailKeys.size - groupLineKeys.size <= MAX_OVERFLOW_LINES) {
+      // Merge the tail only when it is a genuine leftover: at most
+      // MAX_OVERFLOW_LINES extra lines AND no larger than what the day
+      // already accumulated — so a 1-line daily target never swallows a
+      // whole 3-line surah into a single day.
+      const tailGrowth = tailKeys.size - groupLineKeys.size;
+      if (tailGrowth <= MAX_OVERFLOW_LINES && tailGrowth <= accumulatedLines) {
         reachedThreshold = false; // keep accumulating — the tail merges into today
       }
     }
