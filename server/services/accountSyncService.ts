@@ -342,8 +342,19 @@ export async function syncStudentDeleted(q: Queryable | undefined, deletedRow: a
   const tenantId = String(f(deletedRow, 'tenant_id', 'tenantId') ?? '');
   if (!tenantId) return;
 
+  // 1. Delete student user account(s)
   const nationalId = String(f(deletedRow, 'national_id', 'nationalId') ?? '').trim();
   await deleteStudentUsers(client, tenantId, sid, nationalId);
+
+  // 2. Cascade delete operational child rows to prevent orphaned database records
+  try {
+    await client.query('DELETE FROM quran_plans WHERE tenant_id = $1 AND student_id = $2', [tenantId, sid]);
+    await client.query('DELETE FROM student_points WHERE tenant_id = $1 AND student_id = $2', [tenantId, sid]);
+    await client.query('DELETE FROM student_badges WHERE tenant_id = $1 AND student_id = $2', [tenantId, sid]);
+    await client.query('DELETE FROM daily_session_records WHERE tenant_id = $1 AND student_id = $2', [tenantId, sid]);
+  } catch (cascadeErr) {
+    console.warn('[SYNC] Operational cascade cleanup warning on student delete:', cascadeErr);
+  }
 
   const phones = [
     guardianPhoneOf(deletedRow),

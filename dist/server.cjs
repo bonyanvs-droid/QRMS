@@ -1425,6 +1425,14 @@ async function syncStudentDeleted(q, deletedRow) {
   if (!tenantId) return;
   const nationalId = String(f(deletedRow, "national_id", "nationalId") ?? "").trim();
   await deleteStudentUsers(client, tenantId, sid, nationalId);
+  try {
+    await client.query("DELETE FROM quran_plans WHERE tenant_id = $1 AND student_id = $2", [tenantId, sid]);
+    await client.query("DELETE FROM student_points WHERE tenant_id = $1 AND student_id = $2", [tenantId, sid]);
+    await client.query("DELETE FROM student_badges WHERE tenant_id = $1 AND student_id = $2", [tenantId, sid]);
+    await client.query("DELETE FROM daily_session_records WHERE tenant_id = $1 AND student_id = $2", [tenantId, sid]);
+  } catch (cascadeErr) {
+    console.warn("[SYNC] Operational cascade cleanup warning on student delete:", cascadeErr);
+  }
   const phones = [
     guardianPhoneOf(deletedRow),
     String(f(deletedRow, "parent_phone", "parentPhone") ?? ""),
@@ -3094,7 +3102,7 @@ async function deleteRecord(collectionName, id, tenantId) {
     );
   }
   if (config2.tableName === "users") {
-    const target = await executeQuerySingle(`SELECT role, student_id, tenant_id, is_active FROM users WHERE id = $1`, [id]);
+    const target = await executeQuerySingle(`SELECT role, student_id, student_ids, phone, tenant_id, is_active FROM users WHERE id = $1`, [id]);
     if (target && target.role === "student" && target.student_id) {
       const linked = await executeQuerySingle(
         `SELECT id FROM students WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE AND COALESCE(is_archived, FALSE) = FALSE`,
@@ -3104,6 +3112,39 @@ async function deleteRecord(collectionName, id, tenantId) {
         const err = new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u062D\u0633\u0627\u0628 \u0637\u0627\u0644\u0628 \u0645\u0627 \u062F\u0627\u0645 \u0633\u062C\u0644 \u0627\u0644\u0637\u0627\u0644\u0628 \u0646\u0634\u0637\u0627\u064B \u2014 \u0627\u062D\u0630\u0641 \u0623\u0648 \u0623\u0631\u0634\u0641 \u0627\u0644\u0637\u0627\u0644\u0628 \u0623\u0648\u0644\u0627\u064B.");
         err.statusCode = 409;
         throw err;
+      }
+    }
+    if (target && target.role === "parent") {
+      const sIds = Array.isArray(target.student_ids) ? target.student_ids : [];
+      const pPhone = target.phone || "";
+      const linkedCount = await executeQuerySingle(
+        `SELECT COUNT(*)::int AS c FROM students 
+          WHERE tenant_id = $1 
+            AND COALESCE(is_active, TRUE) = TRUE 
+            AND COALESCE(is_archived, FALSE) = FALSE 
+            AND (id = ANY($2) OR (parent_phone <> '' AND parent_phone = $3) OR (mother_phone <> '' AND mother_phone = $3))`,
+        [target.tenant_id, sIds, pPhone]
+      );
+      if (linkedCount && linkedCount.c > 0) {
+        const err = new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u062D\u0633\u0627\u0628 \u0648\u0644\u064A \u0627\u0644\u0623\u0645\u0631 \u0644\u0648\u062C\u0648\u062F \u0637\u0644\u0627\u0628 \u0646\u0634\u0637\u064A\u0646 \u0645\u0631\u062A\u0628\u0637\u064A\u0646 \u0628\u0647 \u2014 \u0642\u0645 \u0628\u0623\u0631\u0634\u0641\u0629 \u0623\u0648 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0637\u0644\u0627\u0628 \u0623\u0648\u0644\u0627\u064B.");
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+    if (target && target.role === "teacher") {
+      try {
+        await executeQuery(`UPDATE halaqahs SET teacher_id = NULL, teacher_name = NULL WHERE tenant_id = $1 AND teacher_id = $2`, [target.tenant_id, id]);
+        await executeQuery(
+          `UPDATE halaqahs 
+            SET assistant_teachers = COALESCE((
+              SELECT jsonb_agg(elem) FROM jsonb_array_elements(assistant_teachers) elem 
+              WHERE elem->>'id' <> $2
+            ), '[]'::jsonb) 
+            WHERE tenant_id = $1 AND COALESCE(assistant_teachers, '[]'::jsonb)::text LIKE '%' || $2 || '%'`,
+          [target.tenant_id, id]
+        );
+      } catch (detachErr) {
+        console.warn("[SYNC] Teacher detachment warning on user delete:", detachErr);
       }
     }
   }

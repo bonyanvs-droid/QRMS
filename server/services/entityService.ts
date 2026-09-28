@@ -1243,10 +1243,11 @@ export async function deleteRecord(
     );
   }
 
-  // Guard: a student login account cannot be deleted while its student record
-  // is still active — delete/archive the student record instead.
+  // Lifecycle & Integrity Guards: prevent deleting accounts that break relational integrity
   if (config.tableName === 'users') {
-    const target = await executeQuerySingle(`SELECT role, student_id, tenant_id, is_active FROM users WHERE id = $1`, [id]);
+    const target = await executeQuerySingle(`SELECT role, student_id, student_ids, phone, tenant_id, is_active FROM users WHERE id = $1`, [id]);
+    
+    // 1. Student User Guard
     if (target && target.role === 'student' && target.student_id) {
       const linked = await executeQuerySingle(
         `SELECT id FROM students WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE AND COALESCE(is_archived, FALSE) = FALSE`,
@@ -1256,6 +1257,43 @@ export async function deleteRecord(
         const err: any = new Error('لا يمكن حذف حساب طالب ما دام سجل الطالب نشطاً — احذف أو أرشف الطالب أولاً.');
         err.statusCode = 409;
         throw err;
+      }
+    }
+
+    // 2. Parent User Guard: prevent deleting parent account if active children exist
+    if (target && target.role === 'parent') {
+      const sIds: string[] = Array.isArray(target.student_ids) ? target.student_ids : [];
+      const pPhone = target.phone || '';
+      const linkedCount = await executeQuerySingle(
+        `SELECT COUNT(*)::int AS c FROM students 
+          WHERE tenant_id = $1 
+            AND COALESCE(is_active, TRUE) = TRUE 
+            AND COALESCE(is_archived, FALSE) = FALSE 
+            AND (id = ANY($2) OR (parent_phone <> '' AND parent_phone = $3) OR (mother_phone <> '' AND mother_phone = $3))`,
+        [target.tenant_id, sIds, pPhone]
+      );
+      if (linkedCount && linkedCount.c > 0) {
+        const err: any = new Error('لا يمكن حذف حساب ولي الأمر لوجود طلاب نشطين مرتبطين به — قم بأرشفة أو تعديل بيانات الطلاب أولاً.');
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+
+    // 3. Teacher Clean-up Detachments
+    if (target && target.role === 'teacher') {
+      try {
+        await executeQuery(`UPDATE halaqahs SET teacher_id = NULL, teacher_name = NULL WHERE tenant_id = $1 AND teacher_id = $2`, [target.tenant_id, id]);
+        await executeQuery(
+          `UPDATE halaqahs 
+            SET assistant_teachers = COALESCE((
+              SELECT jsonb_agg(elem) FROM jsonb_array_elements(assistant_teachers) elem 
+              WHERE elem->>'id' <> $2
+            ), '[]'::jsonb) 
+            WHERE tenant_id = $1 AND COALESCE(assistant_teachers, '[]'::jsonb)::text LIKE '%' || $2 || '%'`,
+          [target.tenant_id, id]
+        );
+      } catch (detachErr) {
+        console.warn('[SYNC] Teacher detachment warning on user delete:', detachErr);
       }
     }
   }
