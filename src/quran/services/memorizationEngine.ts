@@ -26,6 +26,7 @@ import {
   computeMonthNumber,
 } from '../utils/dateUtils';
 import { formatQuranRange } from '../utils/positionFormatter';
+import { getSurahsByDirection } from '../../utils/quranMetadata';
 
 export interface CreateMemorizationPlanParams {
   studentId: string;
@@ -123,23 +124,25 @@ export class QuranMemorizationPlanningEngine {
     }
 
     // 2. Partition into discrete planning units using Surah-isolated cumulative pacing + 3-day consolidation
+    const partitionArgs = (endPos: QuranPosition) =>
+      this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
+        params.targetStart,
+        endPos,
+        params.unitType,
+        params.dailyAmount,
+        params.direction,
+        consolidationDays,
+        revisionDailyPages,
+        priorMemorizedVerses,
+        revisionDirection,
+        revisionUnitKind,
+        params.revisionUnitsPerWindow,
+        autoMinorRevision,
+        undefined,
+        revisionRollState
+      );
     const revisionRollState = { memorizedPool: [] as Ayah[], revisionWindowOffset: 0 };
-    const units = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
-      params.targetStart,
-      params.targetEnd,
-      params.unitType,
-      params.dailyAmount,
-      params.direction,
-      consolidationDays,
-      revisionDailyPages,
-      priorMemorizedVerses,
-      revisionDirection,
-      revisionUnitKind,
-      params.revisionUnitsPerWindow,
-      autoMinorRevision,
-      undefined,
-      revisionRollState
-    );
+    let units = await partitionArgs(params.targetEnd);
 
     if (units.length === 0) {
       throw new Error('فشل تقسيم النطاق القرآني إلى وحدات حفظ.');
@@ -151,8 +154,24 @@ export class QuranMemorizationPlanningEngine {
       throw new Error('لا توجد أيام عمل في النطاق الزمني المحدد وفق جدول الأيام.');
     }
 
-    // 4. Calculate pace and check if target is at risk
-    const totalUnits = units.length;
+    // The academic target (e.g. سورة الغاشية) is the stage GOAL, not a stop:
+    // when it completes before the term ends, memorization continues into the
+    // following surahs in the plan direction until all study days are covered.
+    const targetUnitsCount = units.length;
+    const dirSurahs = getSurahsByDirection(params.direction);
+    let extendedEnd = params.targetEnd;
+    let extIdx = dirSurahs.findIndex((s) => s.number === extendedEnd.surahNumber);
+    while (units.length < workingDates.length && extIdx >= 0 && extIdx < dirSurahs.length - 1) {
+      // Extend by a few surahs per iteration to bound repartition cost
+      extIdx = Math.min(extIdx + 4, dirSurahs.length - 1);
+      const nxt = dirSurahs[extIdx];
+      extendedEnd = { surahNumber: nxt.number, ayahNumber: nxt.ayahsCount };
+      units = await partitionArgs(extendedEnd);
+    }
+
+    // 4. Calculate pace and check if the ACADEMIC target is at risk
+    // (risk is measured against the target units, not the extended filler range)
+    const totalUnits = targetUnitsCount;
     const availableWorkingDays = workingDates.length;
     const isAtRisk = totalUnits > availableWorkingDays;
     let targetAtRiskDiagnostic: TargetAtRiskDiagnostic | undefined = undefined;

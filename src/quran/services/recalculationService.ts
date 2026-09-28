@@ -19,6 +19,7 @@ import { IQuranDataProvider } from '../providers/IQuranDataProvider';
 import { RangeCalculator } from './rangeCalculator';
 import {
   getSurahsInRangeByDirection,
+  getSurahsByDirection,
   getSurahAyahsCount,
   getSurahSequenceIndex,
   getSurahArabicName,
@@ -209,6 +210,23 @@ export class PlanRecalculationService {
     let remainingUnits: PlanningUnit[] = [];
     let repartitionDone = false;
 
+    const futureDaysNeeded = dailyPlans.filter(
+      (d) => d.date > dayDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
+    ).length;
+
+    if (isTargetComplete && futureDaysNeeded > 0) {
+      // Academic target achieved — memorization continues into the next surah
+      // in the plan direction instead of stalling on filler days.
+      const continueStart =
+        (planClone.targetEnd
+          ? await this.nextPositionAfter(planClone.targetEnd, planClone)
+          : null) || nextFutureStart;
+      if (continueStart) {
+        nextFutureStart = continueStart;
+        isTargetComplete = false;
+      }
+    }
+
     if (nextFutureStart && !isTargetComplete) {
       remainingUnits = await this.buildRemainingUnits(
         planClone,
@@ -216,7 +234,8 @@ export class PlanRecalculationService {
         newCurrentPosition,
         status === 'absent' || status === 'excused' || status === 'unrecited'
           ? null
-          : achievedEnd
+          : achievedEnd,
+        futureDaysNeeded
       );
       repartitionDone = true;
     } else if (isTargetComplete) {
@@ -408,7 +427,10 @@ export class PlanRecalculationService {
       planClone,
       startForRemaining,
       lastAchievedPosition,
-      null
+      null,
+      dailyPlans.filter(
+        (d) => d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
+      ).length
     );
 
     let cursor = 0;
@@ -493,7 +515,8 @@ export class PlanRecalculationService {
     plan: StudentQuranPlan,
     startPos: QuranPosition,
     achievedPositionForSeed: QuranPosition,
-    justCompletedEnd: QuranPosition | null
+    justCompletedEnd: QuranPosition | null,
+    neededUnits = 0
   ): Promise<PlanningUnit[]> {
     const revisionDirection = this.resolveRevisionDirection(plan);
     const revisionPages = plan.revisionDailyPages ?? 1;
@@ -501,20 +524,34 @@ export class PlanRecalculationService {
     const revisionUnitsPerWindow = plan.revisionSettings?.surahsPerDay;
 
     const seed = await this.buildRevisionSeed(plan, achievedPositionForSeed);
-    const rawUnits = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
-      startPos,
-      plan.targetEnd,
-      plan.unitType,
-      plan.dailyAmount,
-      plan.direction,
-      plan.consolidationDaysPerSurah,
-      revisionPages,
-      seed,
-      revisionDirection,
-      revisionUnitKind,
-      revisionUnitsPerWindow,
-      plan.autoMinorRevisionMode
-    );
+    const repartition = (endPos: QuranPosition) =>
+      this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
+        startPos,
+        endPos,
+        plan.unitType,
+        plan.dailyAmount,
+        plan.direction,
+        plan.consolidationDaysPerSurah,
+        revisionPages,
+        seed,
+        revisionDirection,
+        revisionUnitKind,
+        revisionUnitsPerWindow,
+        plan.autoMinorRevisionMode
+      );
+    let rawUnits = await repartition(plan.targetEnd);
+
+    // Continue memorization past the academic target when days remain —
+    // the target is the stage goal, not a hard stop.
+    const dirSurahs = getSurahsByDirection(plan.direction);
+    let extIdx = dirSurahs.findIndex((s) => s.number === plan.targetEnd.surahNumber);
+    let extEnd = plan.targetEnd;
+    while (rawUnits.length < neededUnits && extIdx >= 0 && extIdx < dirSurahs.length - 1) {
+      extIdx = Math.min(extIdx + 4, dirSurahs.length - 1);
+      const nxt = dirSurahs[extIdx];
+      extEnd = { surahNumber: nxt.number, ayahNumber: nxt.ayahsCount };
+      rawUnits = await repartition(extEnd);
+    }
 
     if (justCompletedEnd) {
       return await this.prependCompletedSurahConsolidation(
@@ -615,7 +652,10 @@ export class PlanRecalculationService {
         : null;
     }
 
-    const seq = getSurahsInRangeByDirection(pos.surahNumber, plan.targetEnd.surahNumber, 'backward');
+    // Traversal continues past the academic target to the direction boundary
+    // (البقرة for backward) — the target is a goal, not a stop.
+    const boundarySurah = getSurahsByDirection(plan.direction)[113]?.number ?? 2;
+    const seq = getSurahsInRangeByDirection(pos.surahNumber, boundarySurah, 'backward');
     const idx = seq.findIndex((s) => s.number === pos.surahNumber);
     if (idx !== -1 && idx + 1 < seq.length) {
       const next = await this.provider.getAyah(seq[idx + 1].number, 1);
