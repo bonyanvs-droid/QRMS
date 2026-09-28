@@ -108,7 +108,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
       await updateStudent(selectedStudentForAction.id, {
         totalPoints: currentPts + pts,
       } as any);
-      setActionSuccessMsg(`تم إضافة +${pts} نقطة بنجاح للطالب ${selectedStudentForAction.name} 🌟`);
+      setActionSuccessMsg(`تم إضافة +${pts} نقطة بنجاح للطالب ${displayName(selectedStudentForAction)} 🌟`);
       setTimeout(() => {
         setActionSuccessMsg(null);
         setSelectedStudentForAction(null);
@@ -120,7 +120,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
 
   const handleAwardBadge = async () => {
     if (!selectedStudentForAction) return;
-    setActionSuccessMsg(`تم منح وسام التميز القرآني للطالب ${selectedStudentForAction.name} 🎖️`);
+    setActionSuccessMsg(`تم منح وسام التميز القرآني للطالب ${displayName(selectedStudentForAction)} 🎖️`);
     setTimeout(() => {
       setActionSuccessMsg(null);
       setSelectedStudentForAction(null);
@@ -134,7 +134,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
       await updateStudent(selectedStudentForAction.id, {
         totalPoints: currentPts + 50,
       } as any);
-      setActionSuccessMsg(`تم تتويج الطالب ${selectedStudentForAction.name} فارساً للمرحلة 👑`);
+      setActionSuccessMsg(`تم تتويج الطالب ${displayName(selectedStudentForAction)} فارساً للمرحلة 👑`);
       setTimeout(() => {
         setActionSuccessMsg(null);
         setSelectedStudentForAction(null);
@@ -144,10 +144,13 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
     }
   };
 
+  const displayName = (s: Student) => s.name || s.fullName || "—";
+
   // Helper avatar
   const getAvatarUrl = (s: Student, idx: number) => {
     if (s.avatarUrl) return s.avatarUrl;
-    const isFemale = (s as any).gender === "female" || s.name.includes("فاطمة") || s.name.includes("مريم") || s.name.includes("عائشة") || s.name.includes("نورة");
+    const nm = displayName(s);
+    const isFemale = (s as any).gender === "female" || nm.includes("فاطمة") || nm.includes("مريم") || nm.includes("عائشة") || nm.includes("نورة");
     if (isFemale) {
       return "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200";
     }
@@ -293,7 +296,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
                   <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-amber-300 p-0.5 shadow-inner mt-1">
                     <img
                       src={getAvatarUrl(k, idx)}
-                      alt={k.name}
+                      alt={displayName(k)}
                       className="w-full h-full rounded-full object-cover"
                     />
                     <div className="absolute -bottom-1 -left-1 bg-amber-400 text-slate-950 p-1 rounded-full shadow-sm">
@@ -303,7 +306,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
 
                   {/* Name & Title */}
                   <span className="font-black text-xs sm:text-sm text-white mt-2.5 truncate max-w-full text-center">
-                    {k.name}
+                    {displayName(k)}
                   </span>
                   <span className="text-[10px] text-amber-300/90 font-bold">
                     {idx === 0 ? "وسام الإتقان" : "سليم المبتدي"}
@@ -362,7 +365,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
                 <div className="relative w-12 h-12 rounded-full border border-amber-400/80 p-0.5">
                   <img
                     src={getAvatarUrl(s, idx + 2)}
-                    alt={s.name}
+                    alt={displayName(s)}
                     className="w-full h-full rounded-full object-cover"
                   />
                   <div className="absolute -top-1 -left-1 bg-amber-400 text-slate-950 rounded-full p-0.5 shadow-xs">
@@ -370,7 +373,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
                   </div>
                 </div>
                 <span className="font-black text-xs text-white mt-1.5 truncate max-w-full text-center">
-                  {s.name}
+                  {displayName(s)}
                 </span>
                 <span className="text-[9px] text-amber-300/80 font-bold">
                   {idx === 0 ? "وسام الإتقان" : "منير العالمي"}
@@ -408,7 +411,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
                 <div className="relative w-11 h-11 rounded-full border border-emerald-400/80 p-0.5">
                   <img
                     src={getAvatarUrl(s, idx + 4)}
-                    alt={s.name}
+                    alt={displayName(s)}
                     className="w-full h-full rounded-full object-cover"
                   />
                   <div className="absolute -bottom-1 -left-1 bg-emerald-400 text-slate-950 rounded-full p-0.5 shadow-xs">
@@ -417,7 +420,7 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
                 </div>
 
                 <span className="font-black text-[11px] text-white mt-1.5 truncate max-w-full text-center">
-                  {s.name}
+                  {displayName(s)}
                 </span>
                 <span className="text-[9px] text-emerald-300/80 font-bold truncate max-w-full">
                   {idx === 0 ? "الحضور التنمية" : idx === 1 ? "مهند الحمان" : idx === 2 ? "فريد قريعي" : "وسام الصوت الندي"}
@@ -443,12 +446,12 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
               <div className="w-9 h-9 rounded-full border border-slate-600 p-0.5">
                 <img
                   src={getAvatarUrl(s, idx + 8)}
-                  alt={s.name}
+                  alt={displayName(s)}
                   className="w-full h-full rounded-full object-cover"
                 />
               </div>
               <span className="font-black text-[10px] text-slate-200 mt-1 truncate max-w-full text-center">
-                {s.name}
+                {displayName(s)}
               </span>
             </div>
           ))}
@@ -480,14 +483,14 @@ export const StageKnightsAndDailyPulseView: React.FC = () => {
               <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-emerald-300 p-1 shadow-2xl">
                 <img
                   src={getAvatarUrl(selectedStudentForAction, 0)}
-                  alt={selectedStudentForAction.name}
+                  alt={displayName(selectedStudentForAction)}
                   className="w-full h-full rounded-full object-cover"
                 />
               </div>
 
               {/* Student Name */}
               <h3 className="font-black text-sm sm:text-base text-white mt-2 text-center truncate max-w-[180px]">
-                {selectedStudentForAction.name}
+                {displayName(selectedStudentForAction)}
               </h3>
               <p className="text-[11px] text-emerald-300 font-bold">
                 {selectedStudentForAction.halaqahName || "الحلقة القرآنية"}
