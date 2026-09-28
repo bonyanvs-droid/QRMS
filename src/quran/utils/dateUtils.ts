@@ -67,7 +67,7 @@ export function isDateWorkingDay(dateStr: string, schedule: WorkingDaysSchedule)
 }
 
 /**
- * Generates all working dates between startDate and endDate (inclusive)
+ * Generates all working dates between startDate and endDate (inclusive), excluding holidays
  */
 export function generateWorkingDates(
   startDateStr: string,
@@ -76,15 +76,37 @@ export function generateWorkingDates(
 ): string[] {
   const workingDates: string[] = [];
   let current = startDateStr;
-
   while (current <= endDateStr) {
     if (isDateWorkingDay(current, schedule)) {
       workingDates.push(current);
     }
     current = addDaysToDate(current, 1);
   }
-
   return workingDates;
+}
+
+/**
+ * Generates all schedule dates in range matching workingDays of week, tagging official holidays.
+ */
+export function generateScheduleDates(
+  startDateStr: string,
+  endDateStr: string,
+  schedule: WorkingDaysSchedule
+): { date: string; isHoliday: boolean }[] {
+  const result: { date: string; isHoliday: boolean }[] = [];
+  let current = startDateStr;
+  const holidaysSet = new Set(schedule.holidays || []);
+  while (current <= endDateStr) {
+    const dayOfWeek = getDayOfWeekFromDate(current);
+    if (schedule.workingDays.includes(dayOfWeek)) {
+      result.push({
+        date: current,
+        isHoliday: holidaysSet.has(current),
+      });
+    }
+    current = addDaysToDate(current, 1);
+  }
+  return result;
 }
 
 /**

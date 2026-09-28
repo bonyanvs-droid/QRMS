@@ -76,6 +76,7 @@ export class PlanRecalculationService {
 
     const planClone: StudentQuranPlan = JSON.parse(JSON.stringify(plan));
     const dailyPlans = planClone.generatedPlan?.dailyPlans;
+
     if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
       throw new Error('بيانات الخطة غير مكتملة في قاعدة البيانات — الخطة تحتاج إلى إعادة بناء قبل تسجيل الإنجاز.');
     }
@@ -88,7 +89,7 @@ export class PlanRecalculationService {
 
     const targetDay = dailyPlans[dayIndex];
     if (targetDay.isLocked && targetDay.status !== 'pending') {
-      // If already recorded and locked, teacher can still update or adjust, but let's note
+      // If already recorded and locked, teacher can still update or adjust
     }
 
     let achievedEnd = targetDay.targetUnit.end;
@@ -118,11 +119,10 @@ export class PlanRecalculationService {
         ...targetDay.targetUnit,
         end: actualEndPosition,
         totalAyahs: verses.length,
-        displayLabel: `${targetDay.targetUnit.displayLabel} (إنجاز فعلي: ${verses.length} آية)`,
       };
     }
 
-    // 1. Lock this historical day permanently
+    // 1. Lock and finalize the target day (IMMUTABLE HISTORICAL RECORD)
     targetDay.status = status;
     targetDay.isHistorical = true;
     targetDay.isLocked = true;
@@ -134,17 +134,15 @@ export class PlanRecalculationService {
       notes,
     };
 
-    // 2. Determine new current position
-    // If progress was made, current position is the last achieved verse.
-    // If absent or excused or unrecited, position stays at whatever was achieved up to previous day.
-    let newCurrentPosition = planClone.currentPosition;
-    if (status !== 'absent' && status !== 'excused' && status !== 'unrecited') {
-      newCurrentPosition = achievedEnd;
-    }
+    // 2. Determine new current position of the student
+    const newCurrentPosition: QuranPosition =
+      status === 'absent' || status === 'excused' || status === 'unrecited'
+        ? planClone.currentPosition
+        : achievedEnd;
+
     planClone.currentPosition = newCurrentPosition;
 
-    // 3. Determine next starting position for future recalculation
-    const effectiveFromDate = getNextWorkingDay(dayDate, planClone.schedule);
+    // 3. Compute next required start position for future days
     const allPlannedVerses = await this.provider.getAyahsInRange(
       planClone.targetStart,
       planClone.targetEnd,
@@ -170,9 +168,11 @@ export class PlanRecalculationService {
           break;
         }
       }
+
       nextFutureStart = resumeBase
         ? await this.nextPositionAfter(resumeBase, planClone)
         : planClone.targetStart;
+
       if (!nextFutureStart) {
         isTargetComplete = resumeBase ? this.reachedTargetEnd(resumeBase, planClone) : true;
       }
@@ -183,6 +183,7 @@ export class PlanRecalculationService {
           v.surahNumber === achievedEnd.surahNumber &&
           v.ayahNumber === achievedEnd.ayahNumber
       );
+
       if (idx !== -1 && idx + 1 < allPlannedVerses.length) {
         const v = allPlannedVerses[idx + 1];
         nextFutureStart = {
@@ -207,6 +208,7 @@ export class PlanRecalculationService {
     // minor revision seeded from the accumulated memorized content.
     let remainingUnits: PlanningUnit[] = [];
     let repartitionDone = false;
+
     if (nextFutureStart && !isTargetComplete) {
       remainingUnits = await this.buildRemainingUnits(
         planClone,
@@ -226,8 +228,8 @@ export class PlanRecalculationService {
       let unitCursor = 0;
       for (let i = dayIndex + 1; i < dailyPlans.length; i++) {
         const futureDay = dailyPlans[i];
-        if (futureDay.isHistorical || futureDay.isLocked) {
-          continue; // Strictly preserve any pre-existing historical records
+        if (futureDay.isHistorical || futureDay.isLocked || futureDay.dayType === 'holiday') {
+          continue; // Strictly preserve any pre-existing historical records and official holidays
         }
 
         if (unitCursor < remainingUnits.length) {
@@ -265,98 +267,84 @@ export class PlanRecalculationService {
       );
     }
 
-    // 6. Check if target is now at risk
-    const remainingWorkingDays = dailyPlans.filter(
-      (d, idx) => idx > dayIndex && !d.isHistorical && !d.isLocked
-    ).length;
+    // 7. Check if target has become AT_RISK
+    const futureActiveDays = dailyPlans.filter(
+      (d) => d.date > dayDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
+    );
+    const remainingUnitsCount = remainingUnits.length;
+    const isAtRisk = remainingUnitsCount > futureActiveDays.length;
 
-    const deficitUnits = Math.max(0, remainingUnits.length - remainingWorkingDays);
-    const isAtRisk = deficitUnits > 0;
-
-    let targetAtRiskDiagnostic: TargetAtRiskDiagnostic | undefined = undefined;
-
-    if (isAtRisk) {
-      const requiredDailyAmount =
-        remainingWorkingDays > 0
-          ? Math.ceil(remainingUnits.length / remainingWorkingDays)
-          : remainingUnits.length;
-
-      targetAtRiskDiagnostic = {
-        isAtRisk: true,
-        originalTarget: planClone.originalTarget,
-        currentPosition: newCurrentPosition,
-        completedUnits: planClone.originalTarget.totalUnits - remainingUnits.length,
-        remainingUnits: remainingUnits.length,
-        remainingWorkingDays,
-        requiredDailyAmount,
-        currentDailyAmount: planClone.dailyAmount,
-        deficitUnits,
-        projectedDeficitDays: deficitUnits,
-        warningMessage: `تنبيه تعثر الخطة: تبقى ${remainingUnits.length} وحدة مقابل ${remainingWorkingDays} يوم متاح فقط. سيحدث عجز متوقع قدره ${deficitUnits} وحدة عند نهاية الفترة دون تعديل الوتيرة.`,
-        actionableRecommendations: [
-          `رفع مقدار الحفظ/المراجعة اليومي إلى ${requiredDailyAmount} وحدة يومياً للتعويض.`,
-          `إضافة أيام تعويضية خلال عطلة نهاية الأسبوع لتغطية ${deficitUnits} يوماً دراسياً.`,
-          `جلسة تثبيت فردية مكثفة مع المعلم لتدارك التعثر الحالي.`,
-        ],
-      };
-      planClone.status = 'at_risk';
-    } else if (isTargetComplete) {
-      planClone.status = 'completed';
-    } else {
-      planClone.status = 'active';
-    }
-    planClone.targetAtRiskDiagnostic = targetAtRiskDiagnostic;
-
-    // 7. Re-synthesize Multi-Level summaries
-    this.rebuildSummaries(planClone);
-
-    // 8. Log Recalculation Event and Version History
-    const trigger: RecalculationEvent['trigger'] =
-      status === 'overachieved'
-        ? 'achievement_surplus'
-        : status === 'partial'
-          ? 'achievement_deficit'
-          : status === 'absent' || status === 'excused' || status === 'unrecited'
-            ? 'absence'
-            : 'achievement_surplus';
-
-    const prevRemaining = plan.targetAtRiskDiagnostic?.remainingUnits ?? plan.originalTarget.totalUnits;
-
-    planClone.recalculationHistory.unshift({
+    // 6. Append Recalculation Event for Auditing
+    const event: RecalculationEvent = {
       id: `recalc_${Date.now()}`,
       timestamp: nowIso,
-      trigger,
-      effectiveFromDate,
+      trigger:
+        status === "absent" || status === "excused"
+          ? "absence"
+          : status === "overachieved"
+          ? "achievement_surplus"
+          : status === "partial" || status === "unrecited"
+          ? "achievement_deficit"
+          : "schedule_change",
+      effectiveFromDate: dayDate,
       recordedAchievement: {
         date: dayDate,
         plannedAyahs: targetDay.targetUnit.totalAyahs,
         achievedAyahs: actualUnit.totalAyahs,
       },
-      previousRemainingUnits: prevRemaining,
+      previousRemainingUnits: remainingUnits.length,
       newRemainingUnits: remainingUnits.length,
       targetAtRisk: isAtRisk,
-      notes: notes || `تسجيل إنجاز يوم ${dayDate} بحالة (${status})`,
-    });
+      notes: `تم رصد الإنجاز لليوم (${dayDate}) بنتيجة [${status}] بواسطة المعلم (${recordedBy}).`,
+    };
 
-    planClone.planVersion += 1;
-    planClone.versionHistory.unshift({
-      version: planClone.planVersion,
-      createdAt: nowIso,
-      createdBy: recordedBy,
-      reason: `تحديث بعد تسجيل إنجاز ${dayDate} (${status})`,
-      dailyAmount: planClone.dailyAmount,
-      workingDays: [...planClone.schedule.workingDays],
-      remainingUnitsAtVersion: remainingUnits.length,
-    });
+    planClone.recalculationHistory.unshift(event);
+
+
+    if (isAtRisk) {
+      const deficitUnits = remainingUnitsCount - futureActiveDays.length;
+      const requiredDailyAmount =
+        futureActiveDays.length > 0
+          ? Math.ceil(remainingUnitsCount / futureActiveDays.length)
+          : remainingUnitsCount;
+
+      const diagnostic: TargetAtRiskDiagnostic = {
+        isAtRisk: true,
+        originalTarget: planClone.originalTarget,
+        currentPosition: newCurrentPosition,
+        completedUnits: dailyPlans.filter(
+          (d) => d.status === 'completed' || d.status === 'overachieved'
+        ).length,
+        remainingUnits: remainingUnitsCount,
+        remainingWorkingDays: futureActiveDays.length,
+        requiredDailyAmount,
+        currentDailyAmount: planClone.dailyAmount,
+        deficitUnits,
+        projectedDeficitDays: deficitUnits,
+        warningMessage: `تنبيه: نظراً للغياب أو التأخر، سيتبقى عجز بمقدار ${deficitUnits} حصة في نهاية الفصل الدراسي.`,
+        actionableRecommendations: [
+          `زيادة معدل الحفظ اليومي إلى ${requiredDailyAmount} لتدارك التأخر.`,
+          `إضافة أيام دراسية إضافية لتعويض الـ ${deficitUnits} يوماً دراسياً المفقود.`,
+          `تمديد الخطة الزمنية أو استثناء بعض أيام التثبيت باتفاق المشرف والمعلم.`,
+        ],
+      };
+
+      planClone.status = 'at_risk';
+      planClone.targetAtRiskDiagnostic = diagnostic;
+    } else {
+      planClone.status = 'active';
+      planClone.targetAtRiskDiagnostic = undefined;
+    }
+
+    // 8. Rebuild multi-level summaries strictly from the updated dailyPlans
+    this.rebuildSummaries(planClone);
 
     planClone.updatedAt = nowIso;
-
     return planClone;
   }
 
   /**
-   * Applies teacher override (amount change, schedule change, consolidation)
-   * strictly from effectiveFromDate onward, preserving all past records.
+   * Applies an explicit teacher override to a plan and recalculates all future days.
    */
   async applyTeacherOverride(params: ApplyTeacherOverrideParams): Promise<StudentQuranPlan> {
     const {
@@ -374,11 +362,12 @@ export class PlanRecalculationService {
     const nowIso = new Date().toISOString();
     const planClone: StudentQuranPlan = JSON.parse(JSON.stringify(plan));
     const dailyPlans = planClone.generatedPlan?.dailyPlans;
+
     if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
-      throw new Error('بيانات الخطة غير مكتملة في قاعدة البيانات — الخطة تحتاج إلى إعادة بناء قبل تطبيق تعديل المعلم.');
+      throw new Error('بيانات الخطة غير مكتملة.');
     }
 
-    const changesRecord: Record<string, { before: unknown; after: unknown }> = {};
+    const changesRecord: Record<string, { before: any; after: any }> = {};
 
     if (newDailyAmount !== undefined && newDailyAmount !== planClone.dailyAmount) {
       changesRecord['dailyAmount'] = {
@@ -388,7 +377,7 @@ export class PlanRecalculationService {
       planClone.dailyAmount = newDailyAmount;
     }
 
-    if (newWorkingDays !== undefined) {
+    if (newWorkingDays && newWorkingDays.length > 0) {
       changesRecord['workingDays'] = {
         before: planClone.schedule.workingDays,
         after: newWorkingDays,
@@ -396,7 +385,7 @@ export class PlanRecalculationService {
       planClone.schedule.workingDays = newWorkingDays;
     }
 
-    if (newTargetEnd !== undefined) {
+    if (newTargetEnd) {
       changesRecord['targetEnd'] = {
         before: planClone.targetEnd,
         after: newTargetEnd,
@@ -404,8 +393,6 @@ export class PlanRecalculationService {
       planClone.targetEnd = newTargetEnd;
     }
 
-    // Determine current position at effectiveFromDate
-    // All items before effectiveFromDate remain locked
     let lastAchievedPosition = planClone.currentPosition;
     for (const d of dailyPlans) {
       if (d.date < effectiveFromDate && d.isHistorical && d.actualAchieved) {
@@ -413,9 +400,6 @@ export class PlanRecalculationService {
       }
     }
 
-    // Partition remaining units from the position right after the last
-    // achieved verse to targetEnd — direction-aware, with consolidation days
-    // and rolling minor revision preserved (same strategy as plan creation).
     const startForRemaining =
       (await this.nextPositionAfter(lastAchievedPosition, planClone)) ||
       lastAchievedPosition;
@@ -427,10 +411,9 @@ export class PlanRecalculationService {
       null
     );
 
-    // Re-assign future unhistorical days from effectiveFromDate
     let cursor = 0;
     for (const d of dailyPlans) {
-      if (d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked) {
+      if (d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday') {
         if (cursor < remainingUnits.length) {
           this.applyUnitToDay(d, remainingUnits[cursor], planClone);
           cursor++;
@@ -450,23 +433,19 @@ export class PlanRecalculationService {
       }
     }
 
-    // Rebuild multi-level hierarchy
     this.rebuildSummaries(planClone);
 
-    // Record teacher override in audit trail
     const overrideRecord: TeacherOverride = {
       id: `override_${Date.now()}`,
-      timestamp: nowIso,
       teacherId,
-      teacherName: teacherName || 'المعلم المعتمد',
-      reason,
-      reasonArabicText: reasonArabicText || 'تعديل المعلم المباشر لخطة الطالب',
-      changes: changesRecord,
+      timestamp: nowIso,
       effectiveFromDate,
+      reason,
+      reasonArabicText,
+      changes: changesRecord,
     };
-    planClone.teacherOverrides.unshift(overrideRecord);
 
-    // Version update
+    planClone.teacherOverrides.unshift(overrideRecord);
     planClone.planVersion += 1;
     planClone.versionHistory.unshift({
       version: planClone.planVersion,
@@ -479,26 +458,13 @@ export class PlanRecalculationService {
     });
 
     planClone.updatedAt = nowIso;
-
     return planClone;
   }
 
-  /**
-   * Resolves the plan's effective revision direction — the plan-level field
-   * wins, then the persisted revisionSettings snapshot, then the default
-   * backward (newest-first) rolling used by all current stage templates.
-   */
   private resolveRevisionDirection(plan: StudentQuranPlan): 'forward' | 'backward' {
     return plan.revisionDirection || plan.revisionSettings?.direction || 'backward';
   }
 
-  /**
-   * Builds the revision seed = fully memorized surahs up to the given
-   * position (Auto Minor Revision) or the plan's fixed manual revision
-   * range ordered by the plan's INDEPENDENT revision direction.
-   * The current incomplete surah is never seeded — it only becomes
-   * revision-eligible once fully memorized.
-   */
   private async buildRevisionSeed(
     plan: StudentQuranPlan,
     upToPosition: QuranPosition
@@ -518,50 +484,69 @@ export class PlanRecalculationService {
         );
       }
     } catch {
-      /* seed unavailable — revision rolls over new memorization only */
+      // ignore
     }
     return [];
   }
 
-  /**
-   * Rebuilds the remaining future units from `fromPosition` to `targetEnd` using
-   * the same strategy as plan creation (cumulative per-surah pacing +
-   * consolidation days + rolling minor revision seeded from accumulated
-   * memorized content). When `completedSurahEnd` marks a surah that was just
-   * finished by the recorded achievement, its consolidation cycle is prepended —
-   * the same rule the creation engine applies after every completed surah.
-   */
   private async buildRemainingUnits(
     plan: StudentQuranPlan,
-    fromPosition: QuranPosition,
-    currentPosition: QuranPosition,
-    completedSurahEnd: QuranPosition | null
+    startPos: QuranPosition,
+    achievedPositionForSeed: QuranPosition,
+    justCompletedEnd: QuranPosition | null
   ): Promise<PlanningUnit[]> {
-    const seed = await this.buildRevisionSeed(plan, currentPosition);
-    const revisionPages = plan.revisionDailyPages ?? 1;
-    const consolidationDays = plan.consolidationDaysPerSurah ?? 3;
     const revisionDirection = this.resolveRevisionDirection(plan);
-    const revisionUnitKind = plan.revisionSettings?.unitType ?? 'page';
-    const revisionUnitsPerWindow =
-      revisionUnitKind === 'surah' ? plan.revisionSettings?.surahsPerDay ?? 1 : undefined;
+    const revisionPages = plan.revisionDailyPages ?? 1;
+    const revisionUnitKind = (plan.revisionSettings?.unitType as 'page' | 'surah') || 'page';
+    const revisionUnitsPerWindow = plan.revisionSettings?.surahsPerDay;
 
-    const units = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
-      fromPosition,
+    const seed = await this.buildRevisionSeed(plan, achievedPositionForSeed);
+    const rawUnits = await this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
+      startPos,
       plan.targetEnd,
       plan.unitType,
       plan.dailyAmount,
       plan.direction,
-      consolidationDays,
+      plan.consolidationDaysPerSurah,
       revisionPages,
       seed,
       revisionDirection,
       revisionUnitKind,
       revisionUnitsPerWindow,
-      plan.autoMinorRevisionMode === true,
-      completedSurahEnd?.surahNumber
+      plan.autoMinorRevisionMode
     );
 
-    if (!completedSurahEnd || consolidationDays <= 0) return units;
+    if (justCompletedEnd) {
+      return await this.prependCompletedSurahConsolidation(
+        rawUnits,
+        justCompletedEnd,
+        plan,
+        seed,
+        revisionDirection,
+        revisionPages,
+        revisionUnitKind,
+        revisionUnitsPerWindow
+      );
+    }
+
+    return rawUnits;
+  }
+
+  private async prependCompletedSurahConsolidation(
+    units: PlanningUnit[],
+    completedSurahEnd: QuranPosition,
+    plan: StudentQuranPlan,
+    seed: Ayah[],
+    revisionDirection: 'forward' | 'backward',
+    revisionPages: number,
+    revisionUnitKind: 'page' | 'surah',
+    revisionUnitsPerWindow?: number
+  ): Promise<PlanningUnit[]> {
+    const consolidationDays = plan.consolidationDaysPerSurah ?? 3;
+    const alreadyHasConsolidation = units.some(
+      (u) => u.isConsolidation && u.consolidationSurahNumber === completedSurahEnd?.surahNumber
+    );
+    if (alreadyHasConsolidation || !completedSurahEnd || consolidationDays <= 0) return units;
 
     const surahAyahCount = getSurahAyahsCount(completedSurahEnd.surahNumber);
     if (surahAyahCount <= 0 || completedSurahEnd.ayahNumber < surahAyahCount) return units;
@@ -570,15 +555,10 @@ export class PlanRecalculationService {
     const lastVerse = await this.provider.getAyah(completedSurahEnd.surahNumber, surahAyahCount);
     if (!firstVerse || !lastVerse) return units;
 
-    // During the just-completed surah's own consolidation days it stays out of
-    // the minor-revision pool — it becomes eligible right after consolidation,
-    // matching the creation engine's staging rule.
     const acc: Ayah[] = seed.filter((v) => v.surahNumber !== completedSurahEnd.surahNumber);
-    // Offset 0 targets the first window in the resolved revision direction
-    // ('backward' walks the pool newest → oldest internally).
     let offset = 0;
-
     const consolidationUnits: PlanningUnit[] = [];
+
     for (let c = 1; c <= consolidationDays; c++) {
       const rev = this.rangeCalculator.computeRollingRevision(
         acc,
@@ -610,11 +590,6 @@ export class PlanRecalculationService {
     return [...consolidationUnits, ...units];
   }
 
-  /**
-   * Direction-aware next position after `pos` within the plan's governed order.
-   * Backward plans traverse surahs in the governed order (الفاتحة ثم الناس نزولاً)
-   * while ayahs inside each surah still ascend.
-   */
   private async nextPositionAfter(
     pos: QuranPosition,
     plan: StudentQuranPlan
@@ -639,6 +614,7 @@ export class PlanRecalculationService {
         ? { surahNumber: next.surahNumber, ayahNumber: next.ayahNumber, globalIndex: next.globalIndex }
         : null;
     }
+
     const seq = getSurahsInRangeByDirection(pos.surahNumber, plan.targetEnd.surahNumber, 'backward');
     const idx = seq.findIndex((s) => s.number === pos.surahNumber);
     if (idx !== -1 && idx + 1 < seq.length) {
@@ -650,10 +626,6 @@ export class PlanRecalculationService {
     return null;
   }
 
-  /**
-   * True when `pos` has reached or passed the plan target end in the plan's
-   * governed direction.
-   */
   private reachedTargetEnd(pos: QuranPosition, plan: StudentQuranPlan): boolean {
     const posIdx = getSurahSequenceIndex(pos.surahNumber, plan.direction);
     const endIdx = getSurahSequenceIndex(plan.targetEnd.surahNumber, plan.direction);
@@ -661,11 +633,6 @@ export class PlanRecalculationService {
     return pos.ayahNumber >= plan.targetEnd.ayahNumber;
   }
 
-  /**
-   * Copies a regenerated unit onto a future plan day, carrying all metadata
-   * (consolidation flags, rolling revision label/pages) so recalculated days
-   * keep the same shape as freshly generated ones.
-   */
   private applyUnitToDay(day: DailyPlanItem, unit: PlanningUnit, plan: StudentQuranPlan): void {
     day.targetUnit = unit;
     const isConsolidation = Boolean(unit.isConsolidation);
@@ -684,9 +651,6 @@ export class PlanRecalculationService {
     day.revisionPageEnd = unit.revisionPageEnd;
   }
 
-  /**
-   * Reconstructs Weekly, Monthly, and Term summaries from the canonical daily items
-   */
   private rebuildSummaries(plan: StudentQuranPlan): void {
     const dailyPlans = plan.generatedPlan.dailyPlans;
 
@@ -703,7 +667,7 @@ export class PlanRecalculationService {
       const firstDay = days[0];
       const lastDay = days[days.length - 1];
       const totalAyahs = days.reduce((sum, d) => sum + d.targetUnit.totalAyahs, 0);
-      const totalUnits = days.filter((d) => d.targetUnit.totalAyahs > 0).length;
+      const totalUnits = days.filter((d) => d.dayType !== 'holiday' && d.targetUnit.totalAyahs > 0).length;
       const completedDaysCount = days.filter(
         (d) => d.status === 'completed' || d.status === 'overachieved'
       ).length;
@@ -763,7 +727,7 @@ export class PlanRecalculationService {
       displayLabel: plan.originalTarget.displayTarget,
       totalAyahs: plan.originalTarget.totalAyahs,
       totalUnits: plan.originalTarget.totalUnits,
-      totalWorkingDays: dailyPlans.length,
+      totalWorkingDays: dailyPlans.filter((d) => d.dayType !== 'holiday').length,
       direction: plan.direction,
     };
 

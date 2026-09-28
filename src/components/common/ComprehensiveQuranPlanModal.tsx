@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   X,
   Printer,
@@ -7,6 +7,7 @@ import {
   Sparkles,
   CalendarDays,
   ChevronDown,
+  ChevronUp,
   Target,
   Flag,
   CheckCircle2,
@@ -22,6 +23,8 @@ import {
   ShieldCheck,
   Clock,
   Info,
+  RefreshCw,
+  Award,
 } from 'lucide-react';
 import { Student, DailySessionRecord } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -118,6 +121,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   );
   const enabledTrackIds = useMemo(() => getHalaqahActiveTrackIds(studentHalaqah), [studentHalaqah]);
   const spellingTrackOn = enabledTrackIds.includes('track_spelling');
+
   const teacherName =
     teachers.find((t) => t.id === student.teacherId)?.name ||
     studentHalaqah?.teacherName ||
@@ -147,20 +151,18 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   // Calendar Mode: Hijri / Gregorian / None (إخفاء التاريخ)
   const [calendar, setCalendar] = useState<CalendarMode>('hijri');
 
-  // Preview plan waiting for approval
+  // Preview plan generated reactively or manually
   const [previewPlan, setPreviewPlan] = useState<StudentQuranPlan | null>(null);
 
-  // Configuration Mode: Only enabled if user has management authority and either requests it or has no plan
-  const [isConfiguring, setIsConfiguring] = useState<boolean>(() => {
+  // Collapsible Settings Bar state
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(() => {
     if (!canManagePlan) return false;
-    if (initialMode === 'setup') return true;
-    if (!activePlan) return true;
+    if (initialMode === 'setup' || !activePlan) return true;
     return false;
   });
 
-  const [justApproved, setJustApproved] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<boolean>(false);
-  const [isSettingUp, setIsSettingUp] = useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [showStageConfigsModal, setShowStageConfigsModal] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{
@@ -180,40 +182,33 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   const [useStageTemplate, setUseStageTemplate] = useState<boolean>(false);
   const [selectedStageConfigId, setSelectedStageConfigId] = useState<string>('');
 
-  // Overall Quran Plan Type: 'combined' (حفظ ومراجعة) | 'memorization' (حفظ فقط) | 'revision' (مراجعة فقط)
+  // Plan Track: 'combined' (حفظ ومراجعة) | 'memorization' (حفظ فقط) | 'revision' (مراجعة فقط)
   const [setupPlanType, setSetupPlanType] = useState<'combined' | 'memorization' | 'revision'>(() => {
     if (activePlan?.planType === 'revision') return 'revision';
     if (activePlan?.planType === 'memorization' || activePlan?.revisionMode === 'none') return 'memorization';
     return 'combined';
   });
 
-  // Target Boundaries
+  // Memorization parameters (Start point only — end point is resolved academically)
   const [setupStartSurah, setSetupStartSurah] = useState<string>('الناس');
   const [setupStartAyah, setSetupStartAyah] = useState<number>(1);
-  const [setupEndSurah, setSetupEndSurah] = useState<string>(
-    student.minimumTargetSurah || 'الفاتحة'
-  );
-  const [setupEndAyah, setSetupEndAyah] = useState<number>(() =>
-    getSurahAyahsCount(student.minimumTargetSurah || 'الفاتحة') || 7
-  );
-
-  // Memorization parameters
   const [setupDailyAmount, setSetupDailyAmount] = useState<number>(1);
   const [setupUnitType, setSetupUnitType] = useState<PlanningUnitType>('page');
   const [setupDirection, setSetupDirection] = useState<PlanDirection>('backward');
+  const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
 
-  // Revision parameters (dedicated independent section)
+  // Revision parameters (Cumulative toggle FIRST)
+  const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
   const [setupRevisionMode, setSetupRevisionMode] = useState<'pages' | 'surahs' | 'none'>('pages');
   const [setupRevisionDailyPages, setSetupRevisionDailyPages] = useState<number>(1);
   const [setupRevisionUnitsPerWindow, setSetupRevisionUnitsPerWindow] = useState<number>(2);
   const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
-  const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
   const [setupRevStartSurah, setSetupRevStartSurah] = useState<string>('الفاتحة');
   const [setupRevStartAyah, setSetupRevStartAyah] = useState<number>(1);
   const [setupRevEndSurah, setSetupRevEndSurah] = useState<string>('الناس');
   const [setupRevEndAyah, setSetupRevEndAyah] = useState<number>(6);
 
-  // Mutual Exclusivity of Offsets
+  // Offsets (Mutual Exclusivity)
   const [setupSavingOffset, setSetupSavingOffset] = useState<number>(0);
   const [setupRevisionOffset, setSetupRevisionOffset] = useState<number>(0);
 
@@ -233,29 +228,13 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     }
   };
 
-  // Consolidation & Schedule
-  const [setupConsolidationDays, setSetupConsolidationDays] = useState<number>(3);
   const [setupWorkingDays, setSetupWorkingDays] = useState<number[]>([0, 1, 2, 3]);
-
   const todayIso = getTodayLocalIso();
 
   // Effective plan to display (preview takes precedence, then active)
   const effectivePlan: StudentQuranPlan | undefined = previewPlan || activePlan;
 
-  // Revision path active? A dedicated revision column only exists for combined
-  // plans. 'none'/memorization-only plans hide it, and revision-only plans put
-  // their content in the main target column (labeled "مقرر المراجعة").
-  const revisionOnlyPlan = effectivePlan?.planType === 'revision';
-  const revisionTrackOn = useMemo(() => {
-    if (!effectivePlan) return true;
-    if (effectivePlan.planType === 'revision') return false;
-    if (effectivePlan.revisionMode === 'none' || effectivePlan.revisionSettings?.mode === 'none') {
-      return false;
-    }
-    return true;
-  }, [effectivePlan]);
-
-  // Auto-fill setup defaults
+  // Auto-fill setup defaults on first load
   useEffect(() => {
     if (student) {
       const latestMemRec = sessionRecords
@@ -317,64 +296,23 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     }
   }, [student, quranStageConfigs, sessionRecords]);
 
-  // Stage Config Change handler
-  const handleStageConfigChange = (configId: string) => {
-    setSelectedStageConfigId(configId);
-    const cfg = quranStageConfigs.find((c) => c.id === configId);
-    if (!cfg) return;
-
-    if (cfg.memorization) {
-      setSetupDailyAmount(cfg.memorization.defaultDailyAmount);
-      setSetupUnitType(cfg.memorization.unitType as any);
-      setSetupDirection(cfg.memorization.defaultDirection);
-    }
-    if (cfg.revision) {
-      const mode = (cfg.revision.mode as 'pages' | 'surahs' | 'none') || 'pages';
-      setSetupRevisionMode(mode);
-      setSetupRevisionDailyPages(cfg.revision.defaultDailyPages ?? 1);
-      if (cfg.revision.surahsPerDay) {
-        setSetupRevisionUnitsPerWindow(cfg.revision.surahsPerDay);
-      }
-      if (cfg.revision.defaultDirection) {
-        setSetupRevisionDirection(cfg.revision.defaultDirection);
-      }
-    }
-    if (cfg.consolidationDays !== undefined) {
-      setSetupConsolidationDays(cfg.consolidationDays);
-    }
-    if (cfg.schedule?.workingDays) {
-      setSetupWorkingDays(cfg.schedule.workingDays);
-    }
-  };
-
-  // Generate & Preview Plan
-  const handleGeneratePreview = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canManagePlan) {
-      setFeedbackMessage({
-        type: 'error',
-        text: 'تأسيس واعتماد الخطط القرآنية مخصص للمشرف التربوي المسؤول عن الحلقة فقط.',
-      });
-      return;
-    }
-
-    setIsSettingUp(true);
-    setFeedbackMessage(null);
+  // Reactive Debounced Plan Preview Generator
+  const generateReactivePreview = useCallback(async () => {
+    if (!canManagePlan) return;
+    setIsGenerating(true);
 
     const startSurahMeta = findSurahMetadata(setupStartSurah);
-    const endSurahMeta = findSurahMetadata(setupEndSurah);
     const revStartMeta = findSurahMetadata(setupRevStartSurah);
     const revEndMeta = findSurahMetadata(setupRevEndSurah);
 
-    if (!startSurahMeta || !endSurahMeta) {
-      setFeedbackMessage({ type: 'error', text: 'يرجى اختيار سور بداية ونهاية صالحة.' });
-      setIsSettingUp(false);
+    if (!startSurahMeta && setupPlanType !== 'revision') {
+      setIsGenerating(false);
       return;
     }
 
     try {
-      const manualRevisionRange: { start: { surahNumber: number; ayahNumber: number }; end: { surahNumber: number; ayahNumber: number } } | undefined =
-        setupRevisionMode !== 'none' && !setupAutoMinorRevision && revStartMeta && revEndMeta
+      const manualRevisionRange =
+        setupPlanType !== 'memorization' && !setupAutoMinorRevision && revStartMeta && revEndMeta
           ? {
               start: { surahNumber: revStartMeta.number, ayahNumber: setupRevStartAyah },
               end: { surahNumber: revEndMeta.number, ayahNumber: setupRevEndAyah },
@@ -390,21 +328,23 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         student,
         stageConfig,
         allStageConfigs: quranStageConfigs,
-        customTargetStart: { surahNumber: startSurahMeta.number, ayahNumber: setupStartAyah },
-        customTargetEnd: { surahNumber: endSurahMeta.number, ayahNumber: setupEndAyah },
+        customTargetStart: startSurahMeta ? { surahNumber: startSurahMeta.number, ayahNumber: setupStartAyah } : undefined,
         customDirection: setupDirection,
         customRevisionDirection: setupRevisionDirection,
         customUnitType: setupUnitType,
         planType: setupPlanType,
         customDailyAmount: setupDailyAmount,
-        customRevisionDailyPages: setupPlanType === 'memorization' || setupRevisionMode === 'none' ? 0 : setupRevisionDailyPages,
-        customRevisionUnitsPerWindow: setupPlanType === 'memorization' || setupRevisionMode === 'none' ? undefined : (setupRevisionMode === 'surahs' ? setupRevisionUnitsPerWindow : undefined),
+        customRevisionDailyPages:
+          setupPlanType === 'memorization' ? 0 : setupRevisionDailyPages,
+        customRevisionUnitsPerWindow:
+          setupPlanType === 'memorization' ? undefined : (setupRevisionMode === 'surahs' ? setupRevisionUnitsPerWindow : undefined),
         revisionMode: setupPlanType === 'memorization' ? 'none' : setupRevisionMode,
         savingOffset: setupPlanType === 'revision' ? 0 : setupSavingOffset,
         revisionOffset: setupPlanType === 'memorization' ? 0 : setupRevisionOffset,
         customConsolidationDays: setupPlanType === 'revision' ? 0 : setupConsolidationDays,
         customWorkingDays: setupWorkingDays,
-        autoMinorRevisionMode: setupPlanType !== 'memorization' && setupRevisionMode !== 'none' && setupAutoMinorRevision,
+        autoMinorRevisionMode:
+          setupPlanType !== 'memorization' && setupAutoMinorRevision,
         manualRevisionRange,
         sessionRecords: (sessionRecords || []).filter((r) => r.studentId === student.id),
         halaqah: studentHalaqah,
@@ -415,38 +355,74 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
       });
 
       setPreviewPlan(built);
-      setIsConfiguring(false);
     } catch (err: any) {
-      setFeedbackMessage({
-        type: 'error',
-        text: err.message || 'تعذر توليد معاينة الخطة، يرجى مراجعة المدخلات.',
-      });
+      console.warn('Reactive preview generation warning:', err?.message);
     } finally {
-      setIsSettingUp(false);
+      setIsGenerating(false);
     }
-  };
+  }, [
+    canManagePlan,
+    setupStartSurah,
+    setupStartAyah,
+    setupDirection,
+    setupRevisionDirection,
+    setupUnitType,
+    setupPlanType,
+    setupDailyAmount,
+    setupRevisionDailyPages,
+    setupRevisionUnitsPerWindow,
+    setupRevisionMode,
+    setupSavingOffset,
+    setupRevisionOffset,
+    setupConsolidationDays,
+    setupWorkingDays,
+    setupAutoMinorRevision,
+    setupRevStartSurah,
+    setupRevStartAyah,
+    setupRevEndSurah,
+    setupRevEndAyah,
+    useStageTemplate,
+    selectedStageConfigId,
+    student,
+    quranStageConfigs,
+    previewStudentQuranPlan,
+    sessionRecords,
+    studentHalaqah,
+    activeTenant,
+    academicConfig,
+    stages,
+    spellingLessons,
+  ]);
+
+  // Trigger reactive preview on parameter changes (debounced 250ms)
+  useEffect(() => {
+    if (!canManagePlan) return;
+    const timer = setTimeout(() => {
+      generateReactivePreview();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [generateReactivePreview, canManagePlan]);
 
   // Approve & Persist Plan
   const handleApprovePlan = async () => {
-    if (!previewPlan) return;
+    const planToSave = previewPlan || activePlan;
+    if (!planToSave) return;
     if (!canManagePlan) {
       setFeedbackMessage({
         type: 'error',
-        text: 'اعتماد الخطط القرآنية مخصص للمشرف التربوي فقط لمنع التلاعب.',
+        text: 'تأسيس واعتماد الخطط القرآنية مخصص للمشرف التربوي المسؤول فقط.',
       });
       return;
     }
-
     setIsApproving(true);
     setFeedbackMessage(null);
     try {
-      await approveStudentQuranPlan(previewPlan, student);
+      await approveStudentQuranPlan(planToSave, student);
       setPreviewPlan(null);
-      setIsConfiguring(false);
-      setJustApproved(true);
+      setIsSettingsOpen(false);
       setFeedbackMessage({
         type: 'success',
-        text: 'تم اعتماد الخطة القرآنية وحفظها كخطة نشطة بنجاح ✓',
+        text: 'تم اعتماد الخطة القرآنية وتثبيتها بنجاح ✓',
       });
     } catch (err: any) {
       setFeedbackMessage({
@@ -468,7 +444,8 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         archiveMode,
       });
       setShowArchiveDialog(false);
-      setIsConfiguring(canManagePlan);
+      setIsSettingsOpen(true);
+      setPreviewPlan(null);
       setFeedbackMessage({
         type: 'success',
         text: 'تمت أرشفة الخطة السابقة بنجاح. يمكنك الآن تهيئة خطة جديدة للطالب.',
@@ -506,7 +483,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   const rawDailyPlans = effectivePlan?.generatedPlan?.dailyPlans || [];
   const holidays = new Set(effectivePlan?.schedule?.holidays || []);
 
-  // Filter days: When calendar === 'none', filter out holidays to present a clean sequential syllabus (اليوم 1، 2، 3...)
+  // Filter days: When calendar === 'none', filter out holidays to present a clean sequential syllabus (الحصة 1، 2، 3...)
   const dailyPlans = useMemo(() => {
     if (calendar === 'none') {
       return rawDailyPlans.filter((d) => d.dayType !== 'holiday' && !holidays.has(d.date));
@@ -543,49 +520,21 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   const isWeekOpen = (w: number) => !collapsedWeeks.has(w);
 
   useEffect(() => {
-    if (currentWeek === undefined || isConfiguring) return;
+    if (currentWeek === undefined) return;
     const el = document.getElementById(`quran-plan-week-${currentWeek}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [currentWeek, isConfiguring]);
+  }, [currentWeek]);
 
-  const priorMemRecords = useMemo(() => {
-    if (!effectivePlan?.startDate) return [];
-    return sessionRecords
-      .filter(
-        (r) =>
-          r.studentId === student.id &&
-          r.memorization &&
-          r.memorization.surahTo &&
-          r.date < effectivePlan.startDate
-      )
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [sessionRecords, student.id, effectivePlan?.startDate]);
-
-  const completedCount = dailyPlans.filter(
-    (d) => d.status === 'completed' || d.status === 'overachieved'
-  ).length;
-
-  const currentDayItem = useMemo(() => {
-    if (!dailyPlans.length) return undefined;
-    return (
-      dailyPlans.find((d) => d.date === todayIso) ||
-      dailyPlans.find((d) => d.date > todayIso && !d.isHistorical) ||
-      dailyPlans[dailyPlans.length - 1]
-    );
-  }, [dailyPlans, todayIso]);
-
-  const currentDayRecord = currentDayItem ? recordsByDate.get(currentDayItem.date) : undefined;
-
+  // Print & PDF Handler
   const handlePrint = async () => {
-    if (!printRef.current || isPrinting) return;
+    if (!printRef.current || !effectivePlan) return;
     setIsPrinting(true);
     try {
-      await executePrintOrPdfFallback(printRef.current, {
-        fileName: `خطة_القرآن_${student.fullName.replace(/\s+/g, '_')}`,
-        title: `الخطة القرآنية الشاملة — ${student.fullName}`,
-      });
+      const fileName = `الخطة_القرآنية_${student.name.replace(/\s+/g, '_')}`;
+      const title = `الخطة القرآنية المعتمدة — ${student.name}`;
+      await executePrintOrPdfFallback(printRef.current, { fileName, title });
     } catch (err) {
-      console.error('Failed to export PDF/print:', err);
+      console.error('Print generation failed:', err);
     } finally {
       setIsPrinting(false);
     }
@@ -594,70 +543,71 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl flex flex-col max-h-[94vh] overflow-hidden border border-slate-200">
-        {/* Header Bar */}
-        <div className="bg-gradient-to-r from-emerald-800 to-emerald-900 text-white px-4 py-3 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center shrink-0 border border-white/20">
-              <BookOpen className="w-5 h-5 text-amber-300" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+      <div className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[94vh] overflow-hidden">
+        {/* Modal Top Bar */}
+        <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 text-white px-4 py-3 flex items-center justify-between shadow-md shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-white/15 rounded-xl shrink-0">
+              <BookOpen className="w-5 h-5 text-emerald-200" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-black truncate flex items-center gap-2">
-                <span>الخطة القرآنية الشاملة — {student.fullName}</span>
-                {effectivePlan?.termName && (
-                  <span className="text-[10px] font-bold bg-amber-400/20 text-amber-200 border border-amber-300/30 rounded-md px-2 py-0.5 hidden sm:inline">
-                    {effectivePlan.termName}
+              <h3 className="text-base sm:text-lg font-black truncate flex items-center gap-2">
+                <span>الخطة القرآنية المعتمدة</span>
+                <span className="text-xs font-normal text-emerald-200 truncate">
+                  — {student.name}
+                </span>
+                {previewPlan && (
+                  <span className="text-[10px] bg-amber-400 text-amber-950 px-2 py-0.5 rounded-full font-black animate-pulse">
+                    معاينة حية
                   </span>
                 )}
               </h3>
               <p className="text-[11px] text-emerald-100/90 truncate">
-                {isConfiguring
-                  ? 'تهيئة وإعداد معايير ومحددات الخطة القرآنية الفردية'
-                  : previewPlan
-                  ? 'معاينة تفاعلية كاملة قبل الاعتماد'
-                  : 'العرض التشغيلي المعتمد — موحد للعرض والطباعة والـ PDF'}
+                {studentHalaqah?.name || 'الحلقة'} • المعلم: {teacherName} • الصف: {student.grade || '—'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Calendar Selector (3 Modes: Hijri / Gregorian / Hide Date) */}
-            {!isConfiguring && effectivePlan && (
-              <div className="bg-white/15 rounded-lg p-0.5 flex text-[11px] font-bold">
-                <button
-                  onClick={() => setCalendar('hijri')}
-                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                    calendar === 'hijri' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white'
-                  }`}
-                  title="عرض التواريخ بالتقويم الهجري"
-                >
-                  هجري
-                </button>
-                <button
-                  onClick={() => setCalendar('gregorian')}
-                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                    calendar === 'gregorian' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white'
-                  }`}
-                  title="عرض التواريخ بالتقويم الميلادي"
-                >
-                  ميلادي
-                </button>
-                <button
-                  onClick={() => setCalendar('none')}
-                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                    calendar === 'none' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white'
-                  }`}
-                  title="إخفاء التواريخ والاعتماد على تسلسل الحصص المنهجية (دفتر متابعة بدون تواريخ)"
-                >
-                  إخفاء التاريخ
-                </button>
-              </div>
-            )}
+            {/* Calendar Selector */}
+            <div className="bg-white/15 rounded-lg p-0.5 flex text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setCalendar('hijri')}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  calendar === 'hijri' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white hover:bg-white/10'
+                }`}
+                title="عرض بالتقويم الهجري"
+              >
+                هجري
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendar('gregorian')}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  calendar === 'gregorian' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white hover:bg-white/10'
+                }`}
+                title="عرض بالتقويم الميلادي"
+              >
+                ميلادي
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendar('none')}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  calendar === 'none' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white hover:bg-white/10'
+                }`}
+                title="إخفاء التاريخ وعرض الحصص تسلسلياً"
+              >
+                إخفاء التاريخ
+              </button>
+            </div>
 
             {/* Print / PDF Button */}
-            {!isConfiguring && effectivePlan && (
+            {effectivePlan && (
               <button
+                type="button"
                 onClick={handlePrint}
                 disabled={isPrinting}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
@@ -665,27 +615,40 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     ? 'bg-white/10 text-white/50 cursor-not-allowed opacity-60'
                     : 'bg-white/15 hover:bg-white/25 text-white'
                 }`}
-                title={isPrinting ? 'جاري تجهيز المستند...' : 'طباعة / تصدير PDF'}
+                title="طباعة / تصدير PDF"
               >
                 <Printer className={`w-4 h-4 ${isPrinting ? 'animate-pulse' : ''}`} />
               </button>
             )}
 
-            {/* Reconfigure / Setup Toggle for Supervisors/Admins only */}
-            {canManagePlan && !isConfiguring && (
+            {/* Supervisor Settings Drawer Toggle */}
+            {canManagePlan && (
               <button
-                onClick={() => setIsConfiguring(true)}
-                className="px-2.5 py-1 rounded-lg bg-amber-500/80 hover:bg-amber-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
-                title="تعديل محددات الخطة أو إعادة بنائها"
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition-colors cursor-pointer flex items-center gap-1 shadow-xs ${
+                  isSettingsOpen
+                    ? 'bg-amber-400 text-amber-950 hover:bg-amber-300'
+                    : 'bg-white/20 hover:bg-white/30 text-white'
+                }`}
+                title={isSettingsOpen ? 'إغلاق لوحة الضبط' : 'فتح لوحة ضبط محددات الخطة'}
               >
-                <Settings className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">إعادة ضبط</span>
+                <Sliders className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {isSettingsOpen ? 'طي الإعدادات' : 'تعديل المحددات'}
+                </span>
+                {isSettingsOpen ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
               </button>
             )}
 
-            {/* Archive Plan for Supervisors/Admins only */}
-            {canManagePlan && !isConfiguring && activePlan && !previewPlan && (
+            {/* Archive Plan (Supervisor only) */}
+            {canManagePlan && activePlan && !previewPlan && (
               <button
+                type="button"
                 onClick={() => setShowArchiveDialog(true)}
                 className="p-1.5 rounded-lg bg-rose-500/80 hover:bg-rose-600 text-white transition-colors cursor-pointer"
                 title="أرشفة الخطة الحالية"
@@ -696,6 +659,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
             {/* Close Modal */}
             <button
+              type="button"
               onClick={onClose}
               className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
               title="إغلاق"
@@ -723,6 +687,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
               <span>{feedbackMessage.text}</span>
             </div>
             <button
+              type="button"
               onClick={() => setFeedbackMessage(null)}
               className="text-slate-400 hover:text-slate-600 cursor-pointer"
             >
@@ -732,1291 +697,807 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         )}
 
         {/* Live Preview Persistent Banner */}
-        {previewPlan && !isConfiguring && (
+        {previewPlan && (
           <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white px-4 py-2.5 flex items-center justify-between shadow-sm shrink-0 border-b border-amber-800">
             <div className="flex items-center gap-2.5">
-              <Eye className="w-5 h-5 text-amber-200 shrink-0" />
+              <Eye className="w-5 h-5 text-amber-200 shrink-0 animate-pulse" />
               <div>
                 <span className="font-black text-xs sm:text-sm block">
-                  معاينة الخطة المقترحة (مسودة تفاعلية قبل الاعتماد)
+                  معاينة الخطة المقترحة (محدثة لحظياً وفق المحددات)
                 </span>
                 <span className="text-[10px] text-amber-100 block">
-                  راجع الواجبات والمحددات أدناه ثم اضغط اعتماد الخطة. ستبقى الشاشة ثابتة وتتحول إلى الخطة المعتمدة النشطة فوراً.
+                  راجع الوثيقة أدناه ثم اضغط «اعتماد وتثبيت الخطة» لحفظها فوراً في مكانها.
                 </span>
               </div>
             </div>
             {canManagePlan && (
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsConfiguring(true)}
-                  className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                >
-                  تعديل المحددات ✎
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApprovePlan}
-                  disabled={isApproving}
-                  className="px-4 py-1.5 bg-white text-emerald-800 hover:bg-emerald-50 rounded-lg text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>{isApproving ? 'جاري الحفظ...' : 'اعتماد الخطة وحفظها ✓'}</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleApprovePlan}
+                disabled={isApproving}
+                className="px-4 py-1.5 bg-white text-emerald-800 hover:bg-emerald-50 rounded-lg text-xs font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>{isApproving ? 'جاري الحفظ...' : 'اعتماد وتثبيت الخطة ✓'}</span>
+              </button>
             )}
           </div>
         )}
 
-        {/* Just Approved Success Toast */}
-        {justApproved && !isConfiguring && (
-          <div className="bg-emerald-600 text-white px-4 py-2 flex items-center justify-between shadow-sm shrink-0">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-200 shrink-0" />
-              <span className="font-bold text-xs">
-                تم اعتماد الخطة وحفظها في قاعدة البيانات — الخطة الآن نشطة وتتحدث تلقائياً مع جلسات التسميع.
-              </span>
-            </div>
-            <button
-              onClick={() => setJustApproved(false)}
-              className="text-emerald-200 hover:text-white text-xs font-bold cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-        )}
+        {/* MAIN BODY CONTAINER: Collapsible Settings Bar + Live Unified Document */}
+        <div className="flex-1 overflow-y-auto bg-slate-100 p-3 sm:p-5 space-y-4">
+          {/* 1. COLLAPSIBLE TOP SETTINGS PANEL (Supervisor Only) */}
+          {canManagePlan && isSettingsOpen && (
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border-2 border-amber-300 shadow-md transition-all space-y-5">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-amber-100 text-amber-900 rounded-lg">
+                    <Sliders className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      لوحة ضبط وتعديل محددات الخطة القرآنية
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      أي تعديل هنا يعيد توليد المعاينة الحية فوراً في الوثيقة الرسمية أدناه.
+                    </p>
+                  </div>
+                </div>
 
-        {/* Body Container */}
-        <div className="flex-1 overflow-y-auto bg-slate-50">
-          {/* ============================================================
-              VIEW 1: SETUP & CONFIGURATION FORM (Supervisors / Admins only)
-              ============================================================ */}
-          {isConfiguring && canManagePlan ? (
-            <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-4">
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-sm font-black text-amber-900">
-                    {activePlan ? 'إعادة ضبط وبناء الخطة القرآنية' : 'تأسيس الخطة القرآنية الفردية'}
-                  </h4>
-                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                    حدد معايير ومحددات الحفظ والمراجعة للطالب. عند الضغط على «توليد ومعاينة الخطة»، ستظهر لك الخطة كاملة
-                    في نفس التصميم المعتمد للطباعة مع إمكانية مراجعتها واعتمادها دون تشتت.
-                  </p>
+                <div className="flex items-center gap-2">
+                  {isGenerating && (
+                    <span className="text-[11px] text-amber-700 font-bold flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      جاري التحديث...
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleApprovePlan}
+                    disabled={isApproving}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isApproving ? 'جاري الاعتماد...' : 'اعتماد الخطة'}</span>
+                  </button>
                 </div>
               </div>
 
-              <form onSubmit={handleGeneratePreview} className="bg-white rounded-2xl p-5 border border-slate-200 space-y-5 shadow-xs">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <h5 className="text-xs font-black text-slate-900 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-700" />
-                    <span>محددات الخطة ومسارات التسميع</span>
-                  </h5>
-                  {activePlan && (
-                    <button
-                      type="button"
-                      onClick={() => setIsConfiguring(false)}
-                      className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
-                    >
-                      إلغاء والعودة للخطة الحالية ✕
-                    </button>
-                  )}
+              {/* TRACK SELECTOR TABS */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 mb-2">
+                  نوع الخطة القرآنية ومساراتها:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSetupPlanType('combined')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      setupPlanType === 'combined'
+                        ? 'bg-emerald-800 text-white border-emerald-900 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>حفظ ومراجعة (المسار المزدوج)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSetupPlanType('memorization')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      setupPlanType === 'memorization'
+                        ? 'bg-emerald-800 text-white border-emerald-900 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>حفظ فقط (بدون مراجعة)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSetupPlanType('revision')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      setupPlanType === 'revision'
+                        ? 'bg-emerald-800 text-white border-emerald-900 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>مراجعة فقط (تثبيت وخاتمين)</span>
+                  </button>
                 </div>
+              </div>
 
-                {/* 0. اختيار نوع الخطة القرآنية المطلوب اعتمادها */}
-                <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200">
-                  <label className="text-xs font-black text-emerald-950 block mb-2">
-                    نوع ومسار الخطة القرآنية المطلوب تأسيسها:
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSetupPlanType('combined');
-                        if (setupRevisionMode === 'none') setSetupRevisionMode('pages');
-                      }}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                        setupPlanType === 'combined'
-                          ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
-                      }`}
-                    >
-                      حفظ ومراجعة (شامل)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSetupPlanType('memorization');
-                        setSetupRevisionMode('none');
-                        setSetupRevisionOffset(0);
-                      }}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                        setupPlanType === 'memorization'
-                          ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
-                      }`}
-                    >
-                      حفظ فقط (الاستغناء عن المراجعة)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSetupPlanType('revision');
-                        if (setupRevisionMode === 'none') setSetupRevisionMode('pages');
-                        setSetupSavingOffset(0);
-                      }}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                        setupPlanType === 'revision'
-                          ? 'bg-indigo-700 text-white border-indigo-800 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'
-                      }`}
-                    >
-                      مراجعة فقط (بدون حفظ جديد)
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-emerald-800 mt-2 font-medium">
-                    {setupPlanType === 'combined' && 'المسار المتكامل: إنجاز يومي متزامن للحفظ الجديد مع مراجعة تراكمية متدحرجة أو بالسور.'}
-                    {setupPlanType === 'memorization' && 'الاستغناء عن المراجعة: يركز الطالب على مقرر الحفظ الجديد فقط، ويكون ويزارد المعلم مخصصاً للحفظ دون إجبار على المراجعة.'}
-                    {setupPlanType === 'revision' && 'مسار المراجعة والتثبيت: يركز الطالب على مراجعة المحفوظ السابق دون تكليفه بحفظ جديد في ويزارد المعلم.'}
-                  </p>
-                </div>
-
-                {/* Optional Stage Template Selector */}
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={useStageTemplate}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setUseStageTemplate(checked);
-                          if (checked && quranStageConfigs.length > 0) {
-                            handleStageConfigChange(selectedStageConfigId || quranStageConfigs[0].id);
-                          }
-                        }}
-                        className="w-4 h-4 rounded text-emerald-700 focus:ring-emerald-600 border-slate-300 cursor-pointer"
-                      />
-                      <span className="text-xs font-black text-slate-800">
-                        تطبيق خطة من قالب معتمد (اختياري كدليل استرشادي)
-                      </span>
-                    </label>
-                    {useStageTemplate && (
-                      <button
-                        type="button"
-                        onClick={() => setShowStageConfigsModal(true)}
-                        className="text-[11px] font-black text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs transition-all shrink-0"
-                      >
-                        <Sliders className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>⚙️ إدارة النماذج</span>
-                      </button>
-                    )}
+              {/* 1. MEMORIZATION SECTION (Hidden if 'revision') */}
+              {setupPlanType !== 'revision' && (
+                <div className="p-3.5 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-900 font-black text-xs">
+                    <BookOpen className="w-4 h-4 text-emerald-700" />
+                    <span>محددات مسار الحفظ الجديد:</span>
                   </div>
 
-                  {useStageTemplate && (
-                    <div className="pt-2 border-t border-slate-200/60">
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        اختر نموذج المرحلة المعتمد:
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* Start Surah & Ayah */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        سورة وآية البداية:
                       </label>
-                      <select
-                        value={selectedStageConfigId}
-                        onChange={(e) => handleStageConfigChange(e.target.value)}
-                        className="w-full text-xs font-bold px-3 py-2 rounded-xl border border-slate-300 bg-white focus:outline-emerald-700 shadow-2xs text-slate-900"
-                      >
-                        {quranStageConfigs.map((cfg) => (
-                          <option key={cfg.id} value={cfg.id}>
-                            {cfg.name} – {cfg.memorization?.defaultDirection === 'backward' ? 'تنازلي (جزء عم)' : 'تصاعدي'} ({cfg.memorization?.defaultDailyAmount || 1}{' '}
-                            {cfg.memorization?.unitType === 'ayah' ? 'آيات' : 'صفحة'} يومياً)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                {/* Target Start & End Inputs */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Start Position */}
-                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2">
-                    <span className="text-[11px] font-bold text-emerald-800 block">نقطة البداية (الموضع الحالي)</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-500 block mb-0.5">السورة</label>
+                      <div className="grid grid-cols-2 gap-1.5">
                         <select
                           value={setupStartSurah}
                           onChange={(e) => {
-                            const newSurah = e.target.value;
-                            setSetupStartSurah(newSurah);
-                            const maxAyahs = getSurahAyahsCount(newSurah);
-                            if (setupStartAyah > maxAyahs) setSetupStartAyah(maxAyahs);
+                            setSetupStartSurah(e.target.value);
+                            setSetupStartAyah(1);
                           }}
-                          className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         >
                           {getSurahsByDirection(setupDirection).map((s) => (
                             <option key={s.number} value={s.name}>
-                              {s.number}. سورة {s.name} ({s.ayahsCount} آية)
+                              {s.number}. {s.name}
                             </option>
                           ))}
                         </select>
-                      </div>
-                      <div>
                         <QuranAyahSelect
-                          id="setup_start_ayah"
                           surah={setupStartSurah}
                           value={setupStartAyah}
                           onChange={setSetupStartAyah}
-                          label="الآية"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Memorization Direction */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        اتجاه الحفظ:
+                      </label>
+                      <select
+                        value={setupDirection}
+                        onChange={(e) => setSetupDirection(e.target.value as PlanDirection)}
+                        className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                      >
+                        <option value="backward">عكسي (من الناس صعوداً نحو الفاتحة)</option>
+                        <option value="forward">طردي (من الفاتحة نزولاً نحو الناس)</option>
+                      </select>
+                    </div>
+
+                    {/* Planning Unit Type */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        وحدة التخطيط:
+                      </label>
+                      <select
+                        value={setupUnitType}
+                        onChange={(e) => setSetupUnitType(e.target.value as PlanningUnitType)}
+                        className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                      >
+                        <option value="page">صفحة مصحف كاملة</option>
+                        <option value="ayah">آيات محددة</option>
+                        <option value="surah">سورة كاملة</option>
+                        <option value="quarter">ربع حزب</option>
+                        <option value="rub">ثمن</option>
+                        <option value="hizb">نصف جزء (حزب)</option>
+                        <option value="juz">جزء كامل</option>
+                      </select>
+                    </div>
+
+                    {/* Daily Amount & Consolidation Days */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          المقدار اليومي:
+                        </label>
+                        <input
+                          type="number"
+                          min="0.25"
+                          step="0.25"
+                          value={setupDailyAmount}
+                          onChange={(e) => setSetupDailyAmount(parseFloat(e.target.value) || 1)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          أيام التثبيت:
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="10"
+                          value={setupConsolidationDays}
+                          onChange={(e) => setSetupConsolidationDays(parseInt(e.target.value) || 0)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         />
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
 
-                  {/* End Position */}
-                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2">
-                    <span className="text-[11px] font-bold text-blue-800 block">نقطة النهاية (المستهدف الفصلي)</span>
-                    <div className="grid grid-cols-2 gap-2">
+              {/* 2. REVISION SECTION (Hidden if 'memorization') */}
+              {setupPlanType !== 'memorization' && (
+                <div className="p-3.5 bg-amber-50/60 rounded-xl border border-amber-200/90 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                    <div className="flex items-center gap-2 text-amber-950 font-black text-xs">
+                      <RotateCcw className="w-4 h-4 text-amber-700" />
+                      <span>محددات مسار المراجعة والتثبيت:</span>
+                    </div>
+
+                    {/* Toggle: Automatic Cumulative Revision FIRST */}
+                    <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1 rounded-lg border border-amber-300 text-xs font-black text-amber-900 shadow-2xs">
+                      <input
+                        type="checkbox"
+                        checked={setupAutoMinorRevision}
+                        onChange={(e) => setSetupAutoMinorRevision(e.target.checked)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span>المراجعة التراكمية التلقائية (تبدأ عند اكتمال السورة وتثبيتها)</span>
+                    </label>
+                  </div>
+
+                  {/* If Auto Cumulative is Enabled */}
+                  {setupAutoMinorRevision ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
-                        <label className="text-[10px] text-slate-500 block mb-0.5">السورة</label>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          اتجاه المراجعة التراكمية:
+                        </label>
                         <select
-                          value={setupEndSurah}
-                          onChange={(e) => {
-                            const newSurah = e.target.value;
-                            setSetupEndSurah(newSurah);
-                            const maxAyahs = getSurahAyahsCount(newSurah);
-                            if (setupEndAyah > maxAyahs) setSetupEndAyah(maxAyahs);
-                          }}
-                          className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
+                          value={setupRevisionDirection}
+                          onChange={(e) => setSetupRevisionDirection(e.target.value as PlanDirection)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         >
-                          {getSurahsByDirection(setupDirection).map((s) => (
-                            <option key={s.number} value={s.name}>
-                              {s.number}. سورة {s.name} ({s.ayahsCount} آية)
-                            </option>
-                          ))}
+                          <option value="backward">عكسي (المحفوظ الأحدث أولاً)</option>
+                          <option value="forward">طردي (من أول المحفوظ نحو آخره)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          وحدة المراجعة اليومية:
+                        </label>
+                        <select
+                          value={setupRevisionMode}
+                          onChange={(e) => setSetupRevisionMode(e.target.value as any)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                        >
+                          <option value="pages">صفحات مصحف المدينة</option>
+                          <option value="surahs">سور كاملة</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          مقدار الورد اليومي:
+                        </label>
+                        {setupRevisionMode === 'surahs' ? (
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            value={setupRevisionUnitsPerWindow}
+                            onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value) || 1)}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                            placeholder="عدد السور يومياً"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            min="0.5"
+                            step="0.5"
+                            value={setupRevisionDailyPages}
+                            onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                            placeholder="عدد الصفحات"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* If Manual Range is Selected */
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          بداية نطاق المراجعة:
+                        </label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <select
+                            value={setupRevStartSurah}
+                            onChange={(e) => {
+                              setSetupRevStartSurah(e.target.value);
+                              setSetupRevStartAyah(1);
+                            }}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                          >
+                            {ALL_114_SURAHS.map((s) => (
+                              <option key={s.number} value={s.name}>
+                                {s.number}. {s.name}
+                              </option>
+                            ))}
+                          </select>
+                          <QuranAyahSelect
+                            surah={setupRevStartSurah}
+                            value={setupRevStartAyah}
+                            onChange={setSetupRevStartAyah}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          نهاية نطاق المراجعة:
+                        </label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <select
+                            value={setupRevEndSurah}
+                            onChange={(e) => {
+                              setSetupRevEndSurah(e.target.value);
+                              setSetupRevEndAyah(1);
+                            }}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                          >
+                            {ALL_114_SURAHS.map((s) => (
+                              <option key={s.number} value={s.name}>
+                                {s.number}. {s.name}
+                              </option>
+                            ))}
+                          </select>
+                          <QuranAyahSelect
+                            surah={setupRevEndSurah}
+                            value={setupRevEndAyah}
+                            onChange={setSetupRevEndAyah}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          اتجاه المراجعة:
+                        </label>
+                        <select
+                          value={setupRevisionDirection}
+                          onChange={(e) => setSetupRevisionDirection(e.target.value as PlanDirection)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                        >
+                          <option value="backward">عكسي (من الناس نحو الفاتحة)</option>
+                          <option value="forward">طردي (من الفاتحة نحو الناس)</option>
                         </select>
                       </div>
                       <div>
-                        <QuranAyahSelect
-                          id="setup_end_ayah"
-                          surah={setupEndSurah}
-                          value={setupEndAyah}
-                          onChange={setSetupEndAyah}
-                          label="الآية"
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          مقدار المراجعة اليومي:
+                        </label>
+                        <input
+                          type="number"
+                          min="0.5"
+                          step="0.5"
+                          value={setupRevisionDailyPages}
+                          onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         />
                       </div>
                     </div>
-                  </div>
-                </div>
-
-                {/* Parameters: Unit Type, Daily Amount, Direction */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">وحدة التخطيط</label>
-                    <select
-                      value={setupUnitType}
-                      onChange={(e) => setSetupUnitType(e.target.value as PlanningUnitType)}
-                      className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
-                    >
-                      <option value="line">سطر مصحف (توزيع ذكي)</option>
-                      <option value="ayah">آيات محددة (بالآيات)</option>
-                      <option value="quarter_page">ربع صفحة</option>
-                      <option value="half_page">نصف صفحة</option>
-                      <option value="page">صفحة كاملة</option>
-                      <option value="quarter">ربع حزب</option>
-                      <option value="surah">سورة كاملة</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">المقدار اليومي (حفظ)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      value={setupDailyAmount}
-                      onChange={(e) => setSetupDailyAmount(Number(e.target.value))}
-                      className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">اتجاه الحفظ</label>
-                    <select
-                      value={setupDirection}
-                      onChange={(e) => setSetupDirection(e.target.value as PlanDirection)}
-                      className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white"
-                    >
-                      <option value="backward">تنازلي (الناس ← البقرة)</option>
-                      <option value="forward">تصاعدي (الفاتحة ← الناس)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* ============================================================
-                    قسم مسار ونمط المراجعة (منفصل ومستقل بصرياً عن الحفظ)
-                    ============================================================ */}
-                <div className="bg-indigo-50/50 p-4 rounded-2xl border-2 border-indigo-200/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-indigo-100 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <RotateCcw className="w-4 h-4 text-indigo-700" />
-                      <span className="text-xs font-black text-indigo-950">
-                        مسار ونمط المراجعة (منفصل ومستقل عن الحفظ)
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
-                      مسار مستقل
-                    </span>
-                  </div>
-
-                  {/* 1. اختيار نمط المراجعة */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1.5">
-                      نمط المراجعة المطلوب:
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetupRevisionMode('pages');
-                          if (setupPlanType === 'memorization') setSetupPlanType('combined');
-                        }}
-                        className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                          setupRevisionMode === 'pages'
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        مراجعة صفحات (متدحرجة)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetupRevisionMode('surahs');
-                          if (setupPlanType === 'memorization') setSetupPlanType('combined');
-                        }}
-                        className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                          setupRevisionMode === 'surahs'
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        مراجعة بالسور
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetupRevisionMode('none');
-                          setSetupRevisionOffset(0);
-                          if (setupPlanType !== 'revision') setSetupPlanType('memorization');
-                        }}
-                        className={`py-2 px-2 rounded-xl text-xs font-black border transition-all text-center cursor-pointer ${
-                          setupRevisionMode === 'none'
-                            ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        بدون مراجعة (الاستغناء)
-                      </button>
-                    </div>
-                  </div>
-
-                  {setupRevisionMode !== 'none' && (
-                    <>
-                      {/* 2. اتجاه ومقدار المراجعة */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                            اتجاه المراجعة (مستقل)
-                          </label>
-                          <select
-                            value={setupRevisionDirection}
-                            onChange={(e) => setSetupRevisionDirection(e.target.value as PlanDirection)}
-                            className="w-full text-xs px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-                          >
-                            <option value="backward">عكسي (الأحدث حفظاً ← الأقدم)</option>
-                            <option value="forward">طردي (من أول المحفوظ باتجاه الأحدث)</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                            {setupRevisionMode === 'surahs' ? 'المقدار اليومي (سور)' : 'المقدار اليومي (صفحات)'}
-                          </label>
-                          {setupRevisionMode === 'surahs' ? (
-                            <select
-                              value={setupRevisionUnitsPerWindow}
-                              onChange={(e) => setSetupRevisionUnitsPerWindow(parseInt(e.target.value, 10) || 1)}
-                              className="w-full text-xs px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-                            >
-                              <option value="1">سورة واحدة (1)</option>
-                              <option value="2">سورتان (2)</option>
-                              <option value="3">3 سور</option>
-                              <option value="4">4 سور</option>
-                              <option value="5">5 سور</option>
-                            </select>
-                          ) : (
-                            <select
-                              value={setupRevisionDailyPages}
-                              onChange={(e) => setSetupRevisionDailyPages(parseFloat(e.target.value) || 1)}
-                              className="w-full text-xs px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-                            >
-                              <option value="0.5">نصف صفحة (0.5)</option>
-                              <option value="1">صفحة واحدة (1)</option>
-                              <option value="2">صفحتان (2)</option>
-                              <option value="3">3 صفحات</option>
-                              <option value="4">4 صفحات</option>
-                              <option value="5">5 صفحات</option>
-                              <option value="10">نصف جزء (10 صفحات)</option>
-                              <option value="20">جزء كامل (20 صفحة)</option>
-                            </select>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 3. نطاق المراجعة: تلقائي أو يدوي مخصص */}
-                      <div className="bg-white p-3 rounded-xl border border-indigo-200/80 space-y-2">
-                        <label className="flex items-center justify-between gap-3 cursor-pointer">
-                          <span className="min-w-0">
-                            <span className="text-xs font-bold text-indigo-950 block">المراجعة التراكمية التلقائية</span>
-                            <span className="text-[10px] text-slate-500 block">
-                              تبدأ تلقائياً عند اكتمال السورة وتثبيتها من المحفوظ المعتمد
-                            </span>
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={setupAutoMinorRevision}
-                            onChange={(e) => setSetupAutoMinorRevision(e.target.checked)}
-                            className="w-4 h-4 accent-indigo-700"
-                          />
-                        </label>
-
-                        {!setupAutoMinorRevision && (
-                          <div className="pt-2 border-t border-slate-100 space-y-2">
-                            <span className="text-[10px] font-bold text-slate-600 block">
-                              تحديد نطاق مراجعة يدوي ثابت:
-                            </span>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              {/* Rev Start */}
-                              <div>
-                                <label className="text-[10px] text-slate-500 block">من سورة</label>
-                                <select
-                                  value={setupRevStartSurah}
-                                  onChange={(e) => setSetupRevStartSurah(e.target.value)}
-                                  className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
-                                >
-                                  {SURAHS_LIST.map((s) => (
-                                    <option key={s.number} value={s.name}>
-                                      {s.number}. {s.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              {/* Rev End */}
-                              <div>
-                                <label className="text-[10px] text-slate-500 block">إلى سورة</label>
-                                <select
-                                  value={setupRevEndSurah}
-                                  onChange={(e) => setSetupRevEndSurah(e.target.value)}
-                                  className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
-                                >
-                                  {SURAHS_LIST.map((s) => (
-                                    <option key={s.number} value={s.name}>
-                                      {s.number}. {s.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
                   )}
                 </div>
+              )}
 
-                {/* ============================================================
-                    قسم الإزاحة التبادلية (Saving / Revision Offsets)
-                    قاعدة حاسمة: تفعيل إحداهما يلغي الأخرى
-                    ============================================================ */}
-                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200 space-y-3">
-                  <div className="flex items-center justify-between border-b border-amber-200/60 pb-2">
-                    <div className="flex items-center gap-2">
-                      <Sliders className="w-4 h-4 text-amber-700" />
-                      <span className="text-xs font-black text-amber-950">
-                        منطق الإزاحة التبادلية (تأجيل البداية)
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
-                      إزاحة متبادلة حصرية
-                    </span>
-                  </div>
-
-                  <p className="text-[10px] text-amber-800 leading-relaxed">
-                    يسمح النظام بتأجيل انطلاق مسار الحفظ أو المراجعة لعدد محدد من الحصص للتهيئة. 
-                    <strong> قاعدة حاسمة:</strong> لا يمكن الجمع بين إزاحة الحفظ والمراجعة معاً، تفعيل أي منهما يُلغي ويُقفل الآخر تلقائياً.
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* إزاحة الحفظ */}
-                    <div className={`p-3 rounded-xl border transition-all ${
-                      setupRevisionOffset > 0
-                        ? 'bg-slate-100 border-slate-200 opacity-60'
-                        : setupSavingOffset > 0
-                        ? 'bg-white border-amber-400 ring-2 ring-amber-200'
-                        : 'bg-white border-slate-200'
-                    }`}>
-                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
-                        إزاحة بداية الحفظ (savingOffset)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={setupSavingOffset}
-                        disabled={setupRevisionOffset > 0}
-                        onChange={(e) => handleSavingOffsetChange(parseInt(e.target.value, 10) || 0)}
-                        className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-bold disabled:bg-slate-100 disabled:text-slate-400"
-                      />
-                      <span className="text-[9px] text-slate-500 block mt-1">
-                        {setupRevisionOffset > 0
-                          ? '⚠️ مقفل لوجود إزاحة مراجعة'
-                          : setupSavingOffset > 0
-                          ? `تأجيل الحفظ الجديد أول ${setupSavingOffset} حصص والتركيز على المراجعة والتهيئة`
-                          : 'عدد الحصص المؤجلة قبل بدء الحفظ الجديد'}
-                      </span>
-                    </div>
-
-                    {/* إزاحة المراجعة */}
-                    <div className={`p-3 rounded-xl border transition-all ${
-                      setupSavingOffset > 0 || setupRevisionMode === 'none'
-                        ? 'bg-slate-100 border-slate-200 opacity-60'
-                        : setupRevisionOffset > 0
-                        ? 'bg-white border-amber-400 ring-2 ring-amber-200'
-                        : 'bg-white border-slate-200'
-                    }`}>
-                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
-                        إزاحة بداية المراجعة (revisionOffset)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={setupRevisionOffset}
-                        disabled={setupSavingOffset > 0 || setupRevisionMode === 'none'}
-                        onChange={(e) => handleRevisionOffsetChange(parseInt(e.target.value, 10) || 0)}
-                        className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-bold disabled:bg-slate-100 disabled:text-slate-400"
-                      />
-                      <span className="text-[9px] text-slate-500 block mt-1">
-                        {setupSavingOffset > 0
-                          ? '⚠️ مقفل لوجود إزاحة حفظ'
-                          : setupRevisionMode === 'none'
-                          ? '⚠️ مسار المراجعة متوقف'
-                          : setupRevisionOffset > 0
-                          ? `تأجيل المراجعة أول ${setupRevisionOffset} حصص حتى يتم حفظ قدر كافٍ`
-                          : 'عدد الحصص المؤجلة قبل بدء المراجعة'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Additional Settings: Consolidation & Working Days */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">تثبيت السورة المنتهية</label>
-                    <select
-                      value={setupConsolidationDays}
-                      onChange={(e) => setSetupConsolidationDays(parseInt(e.target.value, 10) || 0)}
-                      className="w-full text-xs px-2 py-1.5 rounded-xl border border-slate-200 bg-white"
-                    >
-                      <option value="3">3 أيام متتالية (معياري)</option>
-                      <option value="2">يومان</option>
-                      <option value="1">يوم واحد</option>
-                      <option value="0">بدون أيام تثبيت</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">أيام التسميع الأسبوعية</label>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {[
-                        { d: 0, l: 'أحد' },
-                        { d: 1, l: 'اثنين' },
-                        { d: 2, l: 'ثلاثاء' },
-                        { d: 3, l: 'أربعاء' },
-                        { d: 4, l: 'خميس' },
-                        { d: 5, l: 'جمعة' },
-                        { d: 6, l: 'سبت' },
-                      ].map((day) => {
-                        const isChecked = setupWorkingDays.includes(day.d);
-                        return (
-                          <button
-                            key={day.d}
-                            type="button"
-                            onClick={() => {
-                              if (isChecked) {
-                                setSetupWorkingDays(setupWorkingDays.filter((w) => w !== day.d));
-                              } else {
-                                setSetupWorkingDays([...setupWorkingDays, day.d]);
-                              }
-                            }}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors ${
-                              isChecked
-                                ? 'bg-emerald-800 text-white'
-                                : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                            }`}
-                          >
-                            {day.l}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Submit button */}
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="submit"
-                    disabled={isSettingUp}
-                    className="px-6 py-2.5 rounded-xl text-xs font-black bg-emerald-700 hover:bg-emerald-800 text-white shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <Eye className="w-4 h-4 text-amber-300" />
-                    <span>{isSettingUp ? 'جارٍ توليد المعاينة...' : 'توليد ومعاينة الخطة القرآنية 👁️'}</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : !effectivePlan && !canManagePlan ? (
-            /* ============================================================
-               VIEW 2: TEACHER / UNAUTHORIZED — WAITING FOR SUPERVISOR PLAN
-               ============================================================ */
-            <div className="p-6 max-w-xl mx-auto my-10 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-5 text-center">
-              <div className="w-16 h-16 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-center mx-auto text-amber-700 shadow-2xs">
-                <Clock className="w-8 h-8" />
-              </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900">
-                  لم يتم اعتماد خطة قرآنية لهذا الطالب بعد
-                </h3>
-                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  وفقاً لضوابط الجودة المعتمدة لمنع التلاعب، يتولى <strong className="text-emerald-800">المشرف التربوي</strong> المسؤول عن الحلقة تأسيس الخطة القرآنية واعتماد محددات الحفظ والمراجعة. يطّلع المعلم على الخطة فور اعتمادها دون صلاحية تعديلها.
-                </p>
-              </div>
-
-              {/* بطاقة محددات الطالب الأولية */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-right space-y-2.5 text-xs">
-                <div className="font-black text-slate-800 border-b border-slate-200 pb-2 flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-amber-600" />
-                  <span>المحددات الأولية المسجلة للطالب:</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div>
-                    <span className="text-slate-400 block">الطالب:</span>
-                    <span className="font-bold text-slate-800">{student.fullName}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">الحلقة:</span>
-                    <span className="font-bold text-slate-800">{studentHalaqah?.name || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">الموضع الحالي المسجل:</span>
-                    <span className="font-bold text-slate-800">
-                      سورة {student.currentSurah || 'الناس'} (آية {student.currentAyah || 1})
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">المستهدف المسجل:</span>
-                    <span className="font-bold text-slate-800">
-                      سورة {student.minimumTargetSurah || student.personalTargetSurah || 'الفاتحة'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-center">
-                <button
-                  onClick={onClose}
-                  className="px-6 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  إغلاق النافذة
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* ============================================================
-               VIEW 3: UNIFIED COMPREHENSIVE PLAN (Official, Print, PDF)
-               ============================================================ */
-            <div ref={printRef} className="p-3 sm:p-4 space-y-3">
-              {/* Official Document Letterhead */}
-              {effectivePlan && (
-                <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs">
-                  <div className="flex items-center gap-3">
-                    {activeTenant?.logoUrl ? (
-                      <img
-                        src={activeTenant.logoUrl}
-                        alt={activeTenant.name}
-                        className="w-12 h-12 rounded-xl object-contain border border-slate-100 bg-white shrink-0"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-emerald-800 text-amber-300 font-black text-xl flex items-center justify-center shrink-0">
-                        ق
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-black text-slate-900 truncate">
-                        {activeTenant?.name || 'المجمع القرآني'}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-bold">
-                        وثيقة الخطة القرآنية الشاملة — {effectivePlan.termName || 'الفصل الدراسي الحالي'}
-                      </div>
-                    </div>
-                    <div className="text-left text-[10px] text-slate-500 font-bold shrink-0">
-                      <div>الإصدار: v{effectivePlan.planVersion || 1}</div>
+              {/* 3. OFFSETS & SCHEDULE DAYS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                {/* Offsets (Mutual Exclusivity) */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <label className="block text-xs font-black text-slate-800">
+                    إزاحة بدء المسار (تأجيل البداية لعدد من الحصص):
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {setupPlanType !== 'revision' && (
                       <div>
-                        {calendar !== 'none'
-                          ? `تاريخ الإصدار: ${fmtDate(todayIso)}`
-                          : 'نمط الحصص المنهجية'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2.5 pt-2.5 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
-                    <div>
-                      <span className="text-slate-400 block">الطالب</span>
-                      <span className="font-black text-slate-800">{student.fullName}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">المرحلة / الصف</span>
-                      <span className="font-black text-slate-800">{student.grade}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">الحلقة</span>
-                      <span className="font-black text-slate-800">{studentHalaqah?.name || '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">المعلم</span>
-                      <span className="font-black text-slate-800">{teacherName}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">فترة الخطة</span>
-                      <span className="font-black text-slate-800">
-                        {calendar !== 'none'
-                          ? `${fmtDate(effectivePlan.startDate)} ← ${fmtDate(effectivePlan.endDate)}`
-                          : `مقرر فصلي (${dailyPlans.length} يوماً منهجياً)`}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">مصدر المستهدف</span>
-                      <span className="font-black text-slate-800">
-                        {effectivePlan.targetSource === 'explicit'
-                          ? 'تحديد مباشر'
-                          : effectivePlan.targetSource === 'academic_year'
-                          ? 'مستهدف السنة الأكاديمية'
-                          : effectivePlan.targetSource === 'template'
-                          ? 'قالب المرحلة'
-                          : 'خطة فردية'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">نوع ومسار الخطة</span>
-                      <span className="font-black text-emerald-800">
-                        {effectivePlan.planType === 'revision'
-                          ? 'مراجعة فقط (بدون حفظ جديد)'
-                          : effectivePlan.planType === 'memorization' || effectivePlan.revisionMode === 'none'
-                          ? 'حفظ فقط (الاستغناء عن المراجعة)'
-                          : 'حفظ ومراجعة متكاملة'}
-                        {spellingTrackOn ? ' + هجاء' : ''}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">نسبة الإنجاز</span>
-                      <span className="font-black text-emerald-800">
-                        {dailyPlans.length
-                          ? `${Math.round((completedCount / dailyPlans.length) * 100)}% (${completedCount}/${dailyPlans.length})`
-                          : '0%'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ============================================================
-                  محددات الخطة القرآنية المعتمدة (لوحة التفاصيل المعيارية)
-                  المعلم يرى كافة المحددات مع شارة القراءة فقط لمنع التلاعب
-                  ============================================================ */}
-              {effectivePlan && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 space-y-3">
-                  <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-200 pb-2">
-                    <div className="flex items-center gap-2">
-                      <Sliders className="w-4 h-4 text-emerald-700" />
-                      <span className="text-xs font-black text-slate-900">محددات الخطة القرآنية المعتمدة</span>
-                    </div>
-                    {!canManagePlan ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
-                        <Lock className="w-3 h-3 text-amber-700" />
-                        وضع الاطلاع فقط للمعلم — معتمدة من المشرف التربوي لمنع التلاعب
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
-                        <ShieldCheck className="w-3 h-3 text-emerald-700" />
-                        معتمدة رسمياً — إدارة المشرف التربوي
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px]">
-                    {/* نقطة البداية */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">بداية الحفظ (نقطة الانطلاق)</span>
-                      <span className="font-black text-slate-800">
-                        سورة {surahName(effectivePlan.targetStart?.surahNumber)} (آية {effectivePlan.targetStart?.ayahNumber || 1})
-                      </span>
-                    </div>
-
-                    {/* المستهدف النهائي */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">مستهدف الحفظ (نهاية الخطة)</span>
-                      <span className="font-black text-slate-800">
-                        سورة {surahName(effectivePlan.targetEnd?.surahNumber)} (آية {effectivePlan.targetEnd?.ayahNumber || 1})
-                      </span>
-                    </div>
-
-                    {/* مقدار الحفظ واتجاهه */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">مقدار الحفظ واتجاهه</span>
-                      <span className="font-black text-slate-800">
-                        {effectivePlan.dailyAmount || 1} {effectivePlan.unitType === 'page' ? 'صفحة' : effectivePlan.unitType === 'line' ? 'أسطر' : effectivePlan.unitType === 'ayah' ? 'آيات' : effectivePlan.unitType} يومياً • {effectivePlan.direction === 'backward' ? 'تنازلي (الناس ← الفاتحة)' : 'تصاعدي (الفاتحة ← الناس)'}
-                      </span>
-                    </div>
-
-                    {/* مسار المراجعة */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">مسار ونمط المراجعة</span>
-                      <span className="font-black text-slate-800">
-                        {effectivePlan.revisionSettings?.mode === 'none'
-                          ? 'بدون مراجعة (متوقف)'
-                          : effectivePlan.revisionSettings?.mode === 'surahs'
-                          ? `مراجعة بالسور (${effectivePlan.revisionSettings?.surahsPerDay || 1} سورة)`
-                          : `مراجعة صفحات (${effectivePlan.dailyRevisionPages || 1} ص يومياً)`}
-                        {effectivePlan.revisionSettings?.mode !== 'none' && (
-                          <span className="text-[10px] text-slate-500 block font-normal">
-                            اتجاه: {effectivePlan.revisionDirection === 'forward' ? 'طردي' : 'عكسي (الأحدث أولاً)'}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-
-                    {/* التثبيت */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">تثبيت السورة المنتهية</span>
-                      <span className="font-black text-slate-800">
-                        {effectivePlan.consolidationDays ? `${effectivePlan.consolidationDays} أيام تثبيت متتالية` : 'بدون تثبيت'}
-                      </span>
-                    </div>
-
-                    {/* أيام التسميع */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">أيام التسميع الأسبوعية</span>
-                      <span className="font-black text-slate-800">
-                        {effectivePlan.schedule?.workingDays?.map(d => ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'][d]).join('، ') || 'الأحد إلى الأربعاء'}
-                      </span>
-                    </div>
-
-                    {/* إزاحة الحفظ / المراجعة */}
-                    {(effectivePlan.savingOffset || effectivePlan.revisionOffset) ? (
-                      <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                        <span className="text-slate-400 block text-[10px] font-bold">إزاحة المسارات</span>
-                        <span className="font-black text-amber-800">
-                          {effectivePlan.savingOffset
-                            ? `إزاحة الحفظ: تأجيل ${effectivePlan.savingOffset} حصص للتهيئة`
-                            : `إزاحة المراجعة: تأجيل ${effectivePlan.revisionOffset} حصص`}
-                        </span>
-                      </div>
-                    ) : null}
-
-                    {/* حالة الاعتماد والتاريخ */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 block text-[10px] font-bold">حالة الخطة والاعتماد</span>
-                      <span className="font-black text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{previewPlan ? 'مسودة قيد المراجعة' : 'معتمدة ونشطة'}</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Current Day Progress Panel */}
-              {currentDayItem && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="w-4 h-4 text-emerald-800" />
-                      <span className="text-xs font-black text-slate-900">
-                        {calendar !== 'none'
-                          ? `حصة اليوم: ${fmtDate(currentDayItem.date)}`
-                          : `حصة المنهج رقم: ${currentDayItem.itemIndex}`}
-                      </span>
-                      {currentDayItem.isConsolidationDay && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200">
-                          يوم تثبيت ({currentDayItem.consolidationDayIndex}/
-                          {effectivePlan?.consolidationDays || 3})
-                        </span>
-                      )}
-                    </div>
-                    {currentDayRecord && (
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                          STATUS_META[currentDayRecord.status]?.cls || 'bg-slate-100'
-                        }`}
-                      >
-                        حالة التسميع:{' '}
-                        {STATUS_META[currentDayRecord.status]?.label || currentDayRecord.status}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                    {/* Memorization */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-400 block">
-                        مقرر الحفظ اليومي
-                      </span>
-                      <span className="font-black text-slate-800">
-                        {currentDayItem.targetUnit?.displayLabel || '—'}
-                      </span>
-                    </div>
-
-                    {/* Revision */}
-                    {revisionTrackOn && (
-                      <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                        <span className="text-[10px] font-bold text-slate-400 block">
-                          مقرر المراجعة اليومي
-                        </span>
-                        <span className="font-black text-slate-800">
-                          {currentDayItem.revisionDisplayLabel || '—'}
-                        </span>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                          إزاحة بدء الحفظ:
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={setupSavingOffset}
+                          onChange={(e) => handleSavingOffsetChange(parseInt(e.target.value) || 0)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                          placeholder="0 حصص"
+                        />
                       </div>
                     )}
-
-                    {/* Actual Achievement / Recitation */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-400 block">
-                        الإنجاز الفعلي المسجل
-                      </span>
-                      <span className="font-black text-emerald-800">
-                        {currentDayRecord?.memorization?.surahTo
-                          ? `${currentDayRecord.memorization.surahTo} (${currentDayRecord.memorization.ayahTo})`
-                          : currentDayItem.status === 'completed'
-                          ? 'مكتمل وفق المقرر'
-                          : 'بانتظار التسميع'}
-                      </span>
-                    </div>
+                    {setupPlanType !== 'memorization' && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                          إزاحة بدء المراجعة:
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={setupRevisionOffset}
+                          onChange={(e) => handleRevisionOffsetChange(parseInt(e.target.value) || 0)}
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
+                          placeholder="0 حصص"
+                        />
+                      </div>
+                    )}
                   </div>
+                  <p className="text-[10px] text-slate-400">
+                    * يتم تفعيل إزاحة واحدة فقط بالتناوب الإقصائي.
+                  </p>
                 </div>
-              )}
 
-              {/* Comprehensive Day-by-Day Table Grouped by Week */}
-              <div className="space-y-2.5">
-                {weeks.map(([weekNum, days]) => {
-                  const weekDone = days.filter(
-                    (d) => d.status === 'completed' || d.status === 'overachieved'
-                  ).length;
-                  const open = isWeekOpen(weekNum);
-                  const isCurrent = weekNum === currentWeek;
-
-                  return (
-                    <div
-                      key={weekNum}
-                      id={`quran-plan-week-${weekNum}`}
-                      className={`bg-white border rounded-xl overflow-hidden transition-all shadow-xs ${
-                        isCurrent ? 'border-emerald-600 ring-2 ring-emerald-500/20' : 'border-slate-200'
-                      }`}
-                    >
-                      {/* Week Accordion Header */}
-                      <button
-                        type="button"
-                        onClick={() => toggleWeek(weekNum)}
-                        className={`w-full px-3 py-2 flex items-center justify-between text-xs font-black cursor-pointer transition-colors ${
-                          isCurrent
-                            ? 'bg-emerald-50 text-emerald-950'
-                            : 'bg-slate-50 text-slate-800 hover:bg-slate-100'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <ChevronDown
-                            className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`}
-                          />
-                          <span>الأسبوع {weekNum}</span>
-                          {calendar !== 'none' && days.length > 0 && (
-                            <span className="text-[10px] text-slate-500 font-normal">
-                              ({fmtDate(days[0].date)} ← {fmtDate(days[days.length - 1].date)})
-                            </span>
-                          )}
-                          {isCurrent && (
-                            <span className="text-[10px] bg-emerald-800 text-white px-2 py-0.5 rounded-full font-bold">
-                              الأسبوع الحالي
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 text-[11px] font-bold">
-                          <span className="text-slate-500">
-                            {weekDone} / {days.length} حصص منجزة
-                          </span>
-                          <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-600 rounded-full transition-all"
-                              style={{
-                                width: days.length
-                                  ? `${(weekDone / days.length) * 100}%`
-                                  : '0%',
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Day Rows Table */}
-                      {open && (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-right text-[11px]">
-                            <thead className="bg-slate-50/80 text-slate-600 border-b border-slate-200 text-[10px]">
-                              <tr>
-                                {calendar !== 'none' ? (
-                                  <th className="py-2 px-2.5 font-bold">اليوم والتاريخ</th>
-                                ) : (
-                                  <th className="py-2 px-2.5 font-bold">الحصة</th>
-                                )}
-                                <th className="py-2 px-2.5 font-bold">
-                                  {revisionOnlyPlan ? 'مقرر المراجعة' : 'مقرر الحفظ'}
-                                </th>
-                                {revisionTrackOn && (
-                                  <th className="py-2 px-2.5 font-bold">مقرر المراجعة</th>
-                                )}
-                                {spellingTrackOn && (
-                                  <th className="py-2 px-2.5 font-bold">الهجاء</th>
-                                )}
-                                <th className="py-2 px-2.5 font-bold">الإنجاز الفعلي</th>
-                                <th className="py-2 px-2.5 font-bold">التقييم</th>
-                                <th className="py-2 px-2.5 font-bold">الحالة</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {days.map((day) => {
-                                const rec = recordsByDate.get(day.date);
-                                const isToday = day.date === todayIso;
-                                const isHoliday = day.dayType === 'holiday';
-
-                                if (isHoliday && calendar !== 'none') {
-                                  return (
-                                    <tr key={day.id} className="bg-purple-50/70 border-y border-purple-100/90 text-purple-950 font-bold text-xs">
-                                      <td className="py-2 px-2.5">
-                                        {fmtDate(day.date)}
-                                      </td>
-                                      <td colSpan={(spellingTrackOn ? 6 : 5) - (revisionTrackOn ? 0 : 1)} className="py-2 px-2.5 text-center">
-                                        🏖️ إجازة رسمية معتمدة
-                                      </td>
-                                    </tr>
-                                  );
-                                }
-
-                                const actualSurah = rec?.memorization?.surahTo;
-                                const actualAyah = rec?.memorization?.ayahTo;
-                                const hasActual = Boolean(actualSurah);
-                                const statusKey = rec?.status || day.status || 'pending';
-                                const statusMeta = STATUS_META[statusKey] || STATUS_META.pending;
-
-                                return (
-                                  <tr
-                                    key={day.id}
-                                    className={`hover:bg-slate-50/80 transition-colors ${
-                                      isToday ? 'bg-amber-50/50 font-bold' : ''
-                                    }`}
-                                  >
-                                    {/* Date / Day Number */}
-                                    <td className="py-2 px-2.5 whitespace-nowrap">
-                                      <div className="font-bold text-slate-900">
-                                        {calendar !== 'none' ? (
-                                          <>
-                                            {new Date(day.date).toLocaleDateString('ar-SA', {
-                                              weekday: 'short',
-                                            })}{' '}
-                                            <span className="text-slate-500 font-normal">
-                                              {fmtDate(day.date)}
-                                            </span>
-                                          </>
-                                        ) : (
-                                          <span>الحصة {day.itemIndex}</span>
-                                        )}
-                                      </div>
-                                      {day.isConsolidationDay && (
-                                        <span className="text-[9px] text-amber-700 block font-bold">
-                                          تثبيت {day.consolidationDayIndex}/
-                                          {effectivePlan?.consolidationDays || 3}
-                                        </span>
-                                      )}
-                                    </td>
-
-                                    {/* Memorization Target */}
-                                    <td className="py-2 px-2.5">
-                                      <div className="font-bold text-slate-900">
-                                        {day.targetUnit?.displayLabel || '—'}
-                                      </div>
-                                    </td>
-
-                                    {/* Revision Target */}
-                                    {revisionTrackOn && (
-                                      <td className="py-2 px-2.5">
-                                        <div className="text-slate-700">
-                                          {day.revisionDisplayLabel || '—'}
-                                        </div>
-                                      </td>
-                                    )}
-
-                                    {/* Spelling */}
-                                    {spellingTrackOn && (
-                                      <td className="py-2 px-2.5 text-slate-600">
-                                        {day.spellingAssignment?.title || '—'}
-                                      </td>
-                                    )}
-
-                                    {/* Actual Recitation */}
-                                    <td className="py-2 px-2.5 whitespace-nowrap">
-                                      {hasActual ? (
-                                        <span className="font-bold text-emerald-800">
-                                          {actualSurah} ({actualAyah})
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-400">—</span>
-                                      )}
-                                    </td>
-
-                                    {/* Evaluation */}
-                                    <td className="py-2 px-2.5 whitespace-nowrap">
-                                      {rec?.memorization?.evaluation ? (
-                                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
-                                          {EVAL_LABELS[rec.memorization.evaluation] ||
-                                            rec.memorization.evaluation}
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-400">—</span>
-                                      )}
-                                    </td>
-
-                                    {/* Status Badge */}
-                                    <td className="py-2 px-2.5 whitespace-nowrap">
-                                      <span
-                                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${statusMeta.cls}`}
-                                      >
-                                        {statusMeta.label}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Document Signatures Footer */}
-              <div className="pt-4 border-t border-slate-200 grid grid-cols-3 gap-4 text-center text-[10px] text-slate-600 font-bold">
-                <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
-                  <span className="text-slate-400 block mb-3">توقيع المعلم</span>
-                  <span>{teacherName}</span>
-                </div>
-                <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
-                  <span className="text-slate-400 block mb-3">توقيع المشرف التربوي</span>
-                  <span>المشرف المسؤول</span>
-                </div>
-                <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
-                  <span className="text-slate-400 block mb-3">اعتماد إدارة المجمع</span>
-                  <span>{activeTenant?.name || 'المجمع القرآني'}</span>
+                {/* Working Days */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <label className="block text-xs font-black text-slate-800">
+                    أيام الدراسة الأسبوعية للحلقة:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { day: 0, label: 'الأحد' },
+                      { day: 1, label: 'الاثنين' },
+                      { day: 2, label: 'الثلاثاء' },
+                      { day: 3, label: 'الأربعاء' },
+                      { day: 4, label: 'الخميس' },
+                      { day: 5, label: 'الجمعة' },
+                      { day: 6, label: 'السبت' },
+                    ].map(({ day, label }) => {
+                      const active = setupWorkingDays.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => {
+                            if (active) {
+                              if (setupWorkingDays.length > 1) {
+                                setSetupWorkingDays(setupWorkingDays.filter((d) => d !== day));
+                              }
+                            } else {
+                              setSetupWorkingDays([...setupWorkingDays, day].sort((a, b) => a - b));
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            active
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
           )}
-        </div>
 
-        {/* Archive Confirmation Dialog */}
-        {showArchiveDialog && activePlan && (
-          <div className="fixed inset-0 z-60 bg-black/60 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl border border-slate-200">
-              <div className="flex items-center gap-2.5 text-rose-800">
-                <Archive className="w-5 h-5 shrink-0" />
-                <h4 className="text-sm font-black">أرشفة الخطة القرآنية للطالب</h4>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                هل أنت متأكد من رغبتك في أرشفة الخطة الحالية؟ لا يتم حذف أي سجل من قاعدة البيانات، بل تُحفظ كأرشيف تاريخي موثق.
-              </p>
-
-              <div className="space-y-2 text-xs">
-                <label className="flex items-start gap-2 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
-                  <input
-                    type="radio"
-                    name="archive_mode"
-                    value="plan_only"
-                    checked={archiveMode === 'plan_only'}
-                    onChange={() => setArchiveMode('plan_only')}
-                    className="mt-0.5 accent-rose-600"
-                  />
-                  <div>
-                    <span className="font-bold text-slate-800 block">أرشفة الخطة فقط</span>
-                    <span className="text-[10px] text-slate-500">
-                      تبقى إنجازات التسميع كما هي، وتبدأ الخطة الجديدة من آخر إنجاز فعلي للطالب.
-                    </span>
-                  </div>
-                </label>
-                <label className="flex items-start gap-2 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
-                  <input
-                    type="radio"
-                    name="archive_mode"
-                    value="plan_and_achievements"
-                    checked={archiveMode === 'plan_and_achievements'}
-                    onChange={() => setArchiveMode('plan_and_achievements')}
-                    className="mt-0.5 accent-rose-600"
-                  />
-                  <div>
-                    <span className="font-bold text-slate-800 block">أرشفة الخطة مع الإنجازات السابقة</span>
-                    <span className="text-[10px] text-slate-500">
-                      تعتبر جلسات الخطة كأرشيف تاريخي وتبدأ الخطة الجديدة من نقطة بداية مستقلة.
-                    </span>
-                  </div>
-                </label>
+          {/* 2. THE UNIFIED OFFICIAL PLAN DOCUMENT (Always Visible & Printable) */}
+          <div
+            ref={printRef}
+            className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-7 space-y-6 text-slate-900"
+          >
+            {/* Document Header with Logos & Identification */}
+            <div className="flex items-start justify-between border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-100 text-emerald-900 rounded-2xl">
+                  <Award className="w-7 h-7" />
+                </div>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                    وثيقة الخطة القرآنية المعتمدة
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    {activeTenant?.name || 'مجمع حلقات القرآن الكريم'} • {studentHalaqah?.name || 'الحلقة'}
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowArchiveDialog(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="button"
-                  onClick={handleArchivePlan}
-                  disabled={isArchiving}
-                  className="px-5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-md cursor-pointer disabled:opacity-50"
-                >
-                  {isArchiving ? 'جارٍ الأرشفة...' : 'تأكيد الأرشفة'}
-                </button>
+              <div className="text-left text-xs font-bold space-y-0.5">
+                <div className="text-emerald-800 font-black text-sm">{student.name}</div>
+                <div className="text-slate-500">المعلم: {teacherName}</div>
+                <div className="text-slate-400 text-[10px]">
+                  {effectivePlan?.startDate && fmtDate(effectivePlan.startDate)} — {effectivePlan?.endDate && fmtDate(effectivePlan.endDate)}
+                </div>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Stage Configs Modal */}
-        {showStageConfigsModal && (
-          <StageConfigModal
-            isOpen={showStageConfigsModal}
-            onClose={() => setShowStageConfigsModal(false)}
-          />
-        )}
+            {/* Plan Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 block mb-0.5">مسار الخطة</span>
+                <span className="text-xs font-black text-slate-900">
+                  {effectivePlan?.planType === 'revision'
+                    ? 'مراجعة فقط'
+                    : effectivePlan?.planType === 'memorization' || effectivePlan?.revisionMode === 'none'
+                    ? 'حفظ فقط'
+                    : 'حفظ ومراجعة'}
+                </span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 block mb-0.5">المستهدف الدراسي</span>
+                <span className="text-xs font-black text-emerald-800">
+                  {effectivePlan?.originalTarget?.displayTarget || 'قيد الاحتساب...'}
+                </span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 block mb-0.5">إجمالي الحصص الدراسية</span>
+                <span className="text-xs font-black text-slate-900">
+                  {dailyPlans.filter((d) => d.dayType !== 'holiday').length} حصة فعلية
+                </span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 block mb-0.5">أيام الإجازات المعتمدة</span>
+                <span className="text-xs font-black text-purple-900">
+                  {rawDailyPlans.filter((d) => d.dayType === 'holiday').length} يوم إجازة
+                </span>
+              </div>
+            </div>
+
+            {/* Diagnostic Alert if Plan is At Risk */}
+            {effectivePlan?.status === 'at_risk' && effectivePlan.targetAtRiskDiagnostic && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-black text-amber-950">
+                    {effectivePlan.targetAtRiskDiagnostic.warningMessage}
+                  </div>
+                  <ul className="list-disc list-inside text-[11px] space-y-0.5 text-amber-800">
+                    {effectivePlan.targetAtRiskDiagnostic.actionableRecommendations?.map((rec, i) => (
+                      <li key={i}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* WEEKS ACCORDION / SCHEDULE TABLE */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-emerald-700" />
+                  <span>الجدول التفصيلي للأسابيع والحصص الدراسية</span>
+                </h4>
+                <div className="text-[11px] text-slate-400">
+                  {weeks.length} أسابيع دراسية
+                </div>
+              </div>
+
+              {weeks.map(([weekNum, days]) => {
+                const isOpenWeek = isWeekOpen(weekNum);
+                const weekTotalAyahs = days.reduce((sum, d) => sum + (d.targetUnit?.totalAyahs || 0), 0);
+                const isCurrent = weekNum === currentWeek;
+
+                return (
+                  <div
+                    key={weekNum}
+                    id={`quran-plan-week-${weekNum}`}
+                    className={`rounded-xl border transition-all overflow-hidden ${
+                      isCurrent
+                        ? 'border-emerald-500 shadow-sm'
+                        : 'border-slate-200'
+                    }`}
+                  >
+                    {/* Week Accordion Header */}
+                    <div
+                      onClick={() => toggleWeek(weekNum)}
+                      className={`px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                        isCurrent
+                          ? 'bg-emerald-50 text-emerald-950'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-black text-xs sm:text-sm">
+                        <span>الأسبوع {weekNum}</span>
+                        {isCurrent && (
+                          <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                            الأسبوع الحالي
+                          </span>
+                        )}
+                        <span className="text-[11px] font-normal text-slate-500">
+                          ({days.length} أيام • {weekTotalAyahs} آية)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-slate-400 text-[11px] hidden sm:inline">
+                          {calendar !== 'none' && `${fmtDate(days[0].date)} - ${fmtDate(days[days.length - 1].date)}`}
+                        </span>
+                        {isOpenWeek ? (
+                          <ChevronUp className="w-4 h-4 text-slate-500" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-slate-500" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Week Days Table */}
+                    {isOpenWeek && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right text-xs">
+                          <thead className="bg-slate-50/80 text-slate-600 border-y border-slate-200 font-black text-[11px]">
+                            <tr>
+                              <th className="py-2 px-3 w-28">اليوم / التاريخ</th>
+                              <th className="py-2 px-3">الورد القرآني المقرر</th>
+                              <th className="py-2 px-3 w-32">المراجعة والتثبيت</th>
+                              {spellingTrackOn && (
+                                <th className="py-2 px-3 w-32">مسار الهجاء</th>
+                              )}
+                              <th className="py-2 px-3 w-24 text-center">حالة الإنجاز</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium">
+                            {days.map((day) => {
+                              const isToday = day.date === todayIso;
+                              const isHoliday = day.dayType === 'holiday';
+
+                              // HOLIDAY ROW RENDERING
+                              if (isHoliday) {
+                                if (calendar === 'none') return null; // filtered out in sequential view
+                                return (
+                                  <tr
+                                    key={day.id}
+                                    className="bg-purple-50/70 border-y border-purple-100 text-purple-950 font-bold text-xs"
+                                  >
+                                    <td className="py-2 px-3">
+                                      {day.dayName} {fmtDate(day.date)}
+                                    </td>
+                                    <td
+                                      colSpan={spellingTrackOn ? 4 : 3}
+                                      className="py-2 px-3 text-center text-purple-800"
+                                    >
+                                      🏖️ إجازة رسمية معتمدة
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              const rec = recordsByDate.get(day.date);
+                              const statusKey = rec?.status || day.status || 'pending';
+                              const meta = STATUS_META[statusKey] || STATUS_META.pending;
+
+                              return (
+                                <tr
+                                  key={day.id}
+                                  className={`hover:bg-slate-50/60 transition-colors ${
+                                    isToday ? 'bg-amber-50/40 font-bold' : ''
+                                  }`}
+                                >
+                                  {/* Date / Item Index */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-900">
+                                    {calendar !== 'none' ? (
+                                      <div>
+                                        <span className="font-black">{day.dayName}</span>{' '}
+                                        <span className="text-slate-500 font-normal">
+                                          {fmtDate(day.date)}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="font-black">الحصة {day.itemIndex}</span>
+                                    )}
+                                  </td>
+
+                                  {/* Target Memorization Unit */}
+                                  <td className="py-2.5 px-3">
+                                    {day.isConsolidationDay ? (
+                                      <div className="flex items-center gap-1.5 text-amber-800 font-bold">
+                                        <RotateCcw className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        <span>{day.targetUnit.displayLabel}</span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-slate-900 font-bold">
+                                        {day.targetUnit.displayLabel || (
+                                          <span className="text-slate-400 font-normal">—</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Revision Assignment */}
+                                  <td className="py-2.5 px-3 text-slate-700">
+                                    {day.revisionDisplayLabel ? (
+                                      <span className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                        {day.revisionDisplayLabel}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* Spelling Lesson (If active) */}
+                                  {spellingTrackOn && (
+                                    <td className="py-2.5 px-3 text-slate-700">
+                                      {day.spellingAssignment?.title ? (
+                                        <span className="text-[11px] text-teal-800 font-bold">
+                                          {day.spellingAssignment.title}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </td>
+                                  )}
+
+                                  {/* Status */}
+                                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                    <span
+                                      className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black border ${meta.cls}`}
+                                    >
+                                      {meta.label}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Footer Bar */}
+        <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between shrink-0">
+          <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>نظام الخطط المعتمد • QRMS Unified Engine</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {canManagePlan && previewPlan && (
+              <button
+                type="button"
+                onClick={handleApprovePlan}
+                disabled={isApproving}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isApproving ? 'جاري الاعتماد...' : 'اعتماد وتثبيت الخطة'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              إغلاق
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Archive Confirmation Dialog */}
+      {showArchiveDialog && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 text-right">
+            <div className="flex items-center gap-2 text-rose-600 font-black text-sm">
+              <AlertTriangle className="w-5 h-5" />
+              <span>تأكيد أرشفة الخطة الحالية</span>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              هل أنت متأكد من رغبتك في أرشفة الخطة النشطة الحالية للطالب (<strong>{student.name}</strong>)؟
+              سيتم نقل الخطة للأرشيف التاريخي مع الاحتفاظ بسجلات الإنجاز السابقة كاملة.
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => setShowArchiveDialog(false)}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleArchivePlan}
+                disabled={isArchiving}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isArchiving ? 'جاري الأرشفة...' : 'نعم، أرشف الخطة'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-export default ComprehensiveQuranPlanModal;

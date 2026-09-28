@@ -19,6 +19,7 @@ import { IQuranDataProvider } from '../providers/IQuranDataProvider';
 import { RangeCalculator } from './rangeCalculator';
 import {
   generateWorkingDates,
+  generateScheduleDates,
   getDayOfWeekFromDate,
   getArabicDayName,
   computeWeekNumber,
@@ -81,7 +82,6 @@ export class QuranMemorizationPlanningEngine {
     const consolidationDays = params.consolidationDaysPerSurah !== undefined ? params.consolidationDaysPerSurah : 3;
     const revisionDailyPages = params.revisionDailyPages !== undefined ? params.revisionDailyPages : 1;
     const autoMinorRevision = params.autoMinorRevisionMode !== false; // ON by default for newly created plans
-
     const revisionDirection: 'forward' | 'backward' = params.revisionDirection || 'backward';
     const revisionUnitKind: 'page' | 'surah' = params.revisionUnitKind || 'page';
 
@@ -142,7 +142,7 @@ export class QuranMemorizationPlanningEngine {
       throw new Error('فشل تقسيم النطاق القرآني إلى وحدات حفظ.');
     }
 
-    // 3. Generate working dates
+    // 3. Generate working dates (excluding holidays for study count)
     const workingDates = generateWorkingDates(params.startDate, params.endDate, params.schedule);
     if (workingDates.length === 0) {
       throw new Error('لا توجد أيام عمل في النطاق الزمني المحدد وفق جدول الأيام.');
@@ -152,13 +152,11 @@ export class QuranMemorizationPlanningEngine {
     const totalUnits = units.length;
     const availableWorkingDays = workingDates.length;
     const isAtRisk = totalUnits > availableWorkingDays;
-
     let targetAtRiskDiagnostic: TargetAtRiskDiagnostic | undefined = undefined;
 
     // Snapshot of the original target
     const startVerse = verses[0];
     const endVerse = verses[verses.length - 1];
-
     const displayTarget = formatQuranRange(startVerse, endVerse, { includeSurahWord: true });
 
     const originalSnapshot: OriginalTargetSnapshot = {
@@ -209,23 +207,61 @@ export class QuranMemorizationPlanningEngine {
       return `مراجعة: ${pages} صفحات`;
     };
     const defaultRevDisplay = formatRevisionLabel(revisionDailyPages);
+
     const savingOffset = Math.max(0, params.savingOffset || 0);
     const revisionOffset = Math.max(0, params.revisionOffset || 0);
     const isRevisionDisabled = params.revisionMode === 'none';
 
-    // 5. Construct DailyPlanItems
+    // 5. Construct DailyPlanItems (including Official Holidays occurring on schedule days)
+    const scheduleDates = generateScheduleDates(params.startDate, params.endDate, params.schedule);
     const dailyPlans: DailyPlanItem[] = [];
+    let studyDayCounter = 0;
 
-    for (let i = 0; i < workingDates.length; i++) {
-      const dateStr = workingDates[i];
+    for (let i = 0; i < scheduleDates.length; i++) {
+      const { date: dateStr, isHoliday } = scheduleDates[i];
       const dayOfWeek = getDayOfWeekFromDate(dateStr);
       const dayName = getArabicDayName(dateStr);
       const weekNumber = computeWeekNumber(dateStr, params.startDate);
       const monthNumber = computeMonthNumber(dateStr, params.startDate);
 
+      if (isHoliday) {
+        dailyPlans.push({
+          id: `day_${planId}_hol_${dateStr}`,
+          date: dateStr,
+          dayOfWeek,
+          dayName,
+          weekNumber,
+          monthNumber,
+          itemIndex: Math.max(1, studyDayCounter),
+          planType: 'revision',
+          dayType: 'holiday',
+          unitType: params.unitType,
+          targetUnit: {
+            type: params.unitType,
+            start: params.targetStart,
+            end: params.targetStart,
+            totalAyahs: 0,
+            displayLabel: 'إجازة رسمية معتمدة',
+            isConsolidation: false,
+            revisionPages: 0,
+            revisionDisplay: undefined,
+          },
+          isConsolidationDay: false,
+          revisionPagesAmount: 0,
+          revisionDisplayLabel: undefined,
+          isHistorical: false,
+          isLocked: false,
+          status: 'pending',
+        });
+        continue;
+      }
+
+      const studyDayIndex = studyDayCounter;
+      studyDayCounter++;
+
       // Check saving offset (delayed memorization start)
-      const isSavingDelayed = savingOffset > 0 && i < savingOffset;
-      const effectiveUnitIndex = isSavingDelayed ? -1 : i - savingOffset;
+      const isSavingDelayed = savingOffset > 0 && studyDayIndex < savingOffset;
+      const effectiveUnitIndex = isSavingDelayed ? -1 : studyDayIndex - savingOffset;
       const hasUnit = effectiveUnitIndex >= 0 && effectiveUnitIndex < units.length;
 
       let unitForDay: PlanningUnit;
@@ -235,7 +271,7 @@ export class QuranMemorizationPlanningEngine {
           start: params.targetStart,
           end: params.targetStart,
           totalAyahs: 0,
-          displayLabel: `تمهيد وتلقين ومراجعة (حصة ${i + 1} من ${savingOffset})`,
+          displayLabel: `تمهيد وتلقين ومراجعة (حصة ${studyDayIndex + 1} من ${savingOffset})`,
           isConsolidation: false,
           revisionPages: isRevisionDisabled ? 0 : revisionDailyPages,
           revisionDisplay: isRevisionDisabled ? undefined : defaultRevDisplay,
@@ -256,19 +292,17 @@ export class QuranMemorizationPlanningEngine {
       }
 
       const isConsolidation = Boolean(unitForDay.isConsolidation);
-
-      // Check revision offset (delayed revision start) or disabled revision
-      const isRevDelayed = revisionOffset > 0 && i < revisionOffset;
+      const isRevDelayed = revisionOffset > 0 && studyDayIndex < revisionOffset;
       const skipRevision = isRevisionDisabled || isRevDelayed;
 
       dailyPlans.push({
-        id: `day_${planId}_${i + 1}_${dateStr}`,
+        id: `day_${planId}_${studyDayIndex + 1}_${dateStr}`,
         date: dateStr,
         dayOfWeek,
         dayName,
         weekNumber,
         monthNumber,
-        itemIndex: i + 1,
+        itemIndex: studyDayIndex + 1,
         planType: isConsolidation ? 'revision' : isSavingDelayed ? 'revision' : 'memorization',
         dayType: isConsolidation ? 'consolidation' : isSavingDelayed ? 'revision' : hasUnit ? 'memorization' : 'general_revision',
         unitType: params.unitType,
@@ -299,7 +333,7 @@ export class QuranMemorizationPlanningEngine {
       const firstDayUnit = days[0].targetUnit;
       const lastDayUnit = days[days.length - 1].targetUnit;
       const totalAyahs = days.reduce((sum, d) => sum + d.targetUnit.totalAyahs, 0);
-      const totalUnits = days.filter((d) => d.targetUnit.totalAyahs > 0).length;
+      const totalUnits = days.filter((d) => d.dayType !== 'holiday' && d.targetUnit.totalAyahs > 0).length;
 
       weeklyPlans.push({
         weekNumber: wNum,
