@@ -426,7 +426,7 @@ export class RangeCalculator {
     revisionDailyPages = 1,
     initialMemorizedVerses: Ayah[] = [],
     revisionDirection: 'forward' | 'backward' = 'backward',
-    revisionUnitKind: 'page' | 'surah' = 'page',
+    revisionUnitKind: 'page' | 'surah' | 'line' = 'page',
     revisionUnitsPerWindow?: number,
     autoMinorRevisionMode = true,
     cycleAnchorSurah?: number
@@ -687,7 +687,7 @@ export class RangeCalculator {
     revisionDailyPages: number,
     currentOffset: number,
     revisionDirection: 'forward' | 'backward' = 'forward',
-    unitKind: 'page' | 'surah' = 'page',
+    unitKind: 'page' | 'surah' | 'line' = 'page',
     unitsPerWindow?: number,
     restartAtSurah?: number
   ): {
@@ -700,6 +700,23 @@ export class RangeCalculator {
       return {
         displayLabel: 'مراجعة: ما تم حفظه',
         nextOffset: 0,
+      };
+    }
+
+    if (unitKind === 'line') {
+      const targetLines = Math.max(1, Math.round(unitsPerWindow ?? revisionDailyPages ?? 5));
+      const lineChunks = partitionVersesByLines(memorizedVerses, targetLines);
+      if (lineChunks.length === 0) {
+        return { displayLabel: 'مراجعة: ما تم حفظه', nextOffset: 0 };
+      }
+      const orderedChunks = revisionDirection === 'backward' ? [...lineChunks].reverse() : lineChunks;
+      const safeOffset = currentOffset % orderedChunks.length;
+      const chosen = orderedChunks[safeOffset];
+      return {
+        displayLabel: `مراجعة: ${chosen.displayLabel}`,
+        pageStart: chosen.pageStart,
+        pageEnd: chosen.pageEnd,
+        nextOffset: (safeOffset + 1) % orderedChunks.length,
       };
     }
 

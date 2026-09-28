@@ -278,7 +278,7 @@ export interface StudentQuranPlan {
   revisionDailyPages?: number;
   consolidationDaysPerSurah?: number;
   /** Backwards compatibility alias for revisionSettings.mode */
-  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
   /** Backwards compatibility alias for revisionDailyPages */
   dailyRevisionPages?: number;
   /** Backwards compatibility alias for consolidationDaysPerSurah */
@@ -359,11 +359,11 @@ export interface StudentQuranPlan {
 
   // Specific for Revision (e.g. revision by surahs)
   revisionSettings?: {
-    mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+    mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
     surahList?: number[]; // Specific surah numbers when revising by surah
     surahsPerDay?: number;
     /** Rolling-window granularity actually used by the engine */
-    unitType?: 'page' | 'surah';
+    unitType?: 'page' | 'surah' | 'line';
     /** Independent revision direction snapshot persisted with the plan */
     direction?: PlanDirection;
   };

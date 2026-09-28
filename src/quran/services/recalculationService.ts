@@ -497,7 +497,7 @@ export class PlanRecalculationService {
   ): Promise<PlanningUnit[]> {
     const revisionDirection = this.resolveRevisionDirection(plan);
     const revisionPages = plan.revisionDailyPages ?? 1;
-    const revisionUnitKind = (plan.revisionSettings?.unitType as 'page' | 'surah') || 'page';
+    const revisionUnitKind = (plan.revisionSettings?.unitType as 'page' | 'surah' | 'line') || 'page';
     const revisionUnitsPerWindow = plan.revisionSettings?.surahsPerDay;
 
     const seed = await this.buildRevisionSeed(plan, achievedPositionForSeed);
@@ -539,7 +539,7 @@ export class PlanRecalculationService {
     seed: Ayah[],
     revisionDirection: 'forward' | 'backward',
     revisionPages: number,
-    revisionUnitKind: 'page' | 'surah',
+    revisionUnitKind: 'page' | 'surah' | 'line',
     revisionUnitsPerWindow?: number
   ): Promise<PlanningUnit[]> {
     const consolidationDays = plan.consolidationDaysPerSurah ?? 3;

@@ -27,7 +27,7 @@ export interface StageQuranConfig {
 
   // Default Revision Settings
   revision: {
-    mode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom';
+    mode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
     unitType: PlanningUnitType;
     defaultDailyAmount: number;
     defaultDailyPages?: number; // Independent daily revision in pages (starts from 0.5, 1, 2, 3...)

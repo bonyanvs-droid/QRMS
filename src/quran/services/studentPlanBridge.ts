@@ -99,7 +99,7 @@ export interface CreateRealStudentPlanParams {
   /** Explicit revision direction override (independent of memorization direction) */
   customRevisionDirection?: PlanDirection;
   /** Explicit revision mode override (e.g. 'pages', 'surahs', or 'none' to disable) */
-  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
   /** Delay starting memorization by N sessions (focus on revision/prep) */
   savingOffset?: number;
   /** Delay starting revision by N sessions */
@@ -329,8 +329,8 @@ export interface ResolvedPlanConfiguration {
   /** The academic-year grade target when it exists (for warnings/preview) */
   academicTarget?: QuranPosition;
   // Revision (independent configuration)
-  revisionMode: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
-  revisionUnitKind: 'page' | 'surah';
+  revisionMode: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionUnitKind: 'page' | 'surah' | 'line';
   revisionDailyPages: number;
   revisionUnitsPerWindow?: number;
   revisionDirection: PlanDirection;
@@ -504,8 +504,8 @@ export function resolveQuranPlanConfiguration(
   const revCfg = stageConfig.revision || ({} as StageQuranConfig['revision']);
   const revisionMode = params.revisionMode || revCfg.mode || 'pages';
   const isRevisionDisabled = revisionMode === 'none';
-  const revisionUnitKind: 'page' | 'surah' =
-    revisionMode === 'surahs' ? 'surah' : 'page';
+  const revisionUnitKind: 'page' | 'surah' | 'line' =
+    revisionMode === 'surahs' ? 'surah' : revisionMode === 'lines' || (revisionMode as any) === 'line' ? 'line' : 'page';
   if (
     !isRevisionDisabled &&
     revCfg.unitType &&

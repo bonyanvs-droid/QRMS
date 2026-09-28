@@ -54,11 +54,11 @@ export interface CreateMemorizationPlanParams {
    */
   revisionDirection?: 'forward' | 'backward';
   /** Rolling-window granularity: 'page' (default) or 'surah' (surah-mode revision) */
-  revisionUnitKind?: 'page' | 'surah';
+  revisionUnitKind?: 'page' | 'surah' | 'line';
   /** Units per rolling window when revisionUnitKind = 'surah' (template surahsPerDay) */
   revisionUnitsPerWindow?: number;
   /** Template revision mode persisted into plan.revisionSettings */
-  revisionMode?: 'pages' | 'surahs' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
+  revisionMode?: 'pages' | 'surahs' | 'lines' | 'quarters' | 'hizb' | 'juz' | 'custom' | 'none';
   /** Delay starting memorization by N sessions */
   savingOffset?: number;
   /** Delay starting revision by N sessions */
@@ -83,7 +83,7 @@ export class QuranMemorizationPlanningEngine {
     const revisionDailyPages = params.revisionDailyPages !== undefined ? params.revisionDailyPages : 1;
     const autoMinorRevision = params.autoMinorRevisionMode !== false; // ON by default for newly created plans
     const revisionDirection: 'forward' | 'backward' = params.revisionDirection || 'backward';
-    const revisionUnitKind: 'page' | 'surah' = params.revisionUnitKind || 'page';
+    const revisionUnitKind: 'page' | 'surah' | 'line' = params.revisionUnitKind || 'page';
 
     // Seed the revision pool with prior memorization (before plan start) when Auto Minor
     // Revision is enabled — prior + new memorization form one revision set.

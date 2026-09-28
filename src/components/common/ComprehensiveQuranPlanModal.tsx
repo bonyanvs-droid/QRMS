@@ -163,6 +163,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
   const [isApproving, setIsApproving] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const initializedStudentIdRef = useRef<string | null>(null);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [showStageConfigsModal, setShowStageConfigsModal] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{
@@ -199,7 +200,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
   // Revision parameters (Cumulative toggle FIRST)
   const [setupAutoMinorRevision, setSetupAutoMinorRevision] = useState<boolean>(true);
-  const [setupRevisionMode, setSetupRevisionMode] = useState<'pages' | 'surahs' | 'none'>('pages');
+  const [setupRevisionMode, setSetupRevisionMode] = useState<'pages' | 'surahs' | 'lines' | 'none'>('pages');
   const [setupRevisionDailyPages, setSetupRevisionDailyPages] = useState<number>(1);
   const [setupRevisionUnitsPerWindow, setSetupRevisionUnitsPerWindow] = useState<number>(2);
   const [setupRevisionDirection, setSetupRevisionDirection] = useState<PlanDirection>('backward');
@@ -232,10 +233,17 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
   // Effective plan to display (preview takes precedence, then active)
   const effectivePlan: StudentQuranPlan | undefined = previewPlan || activePlan;
+  const isRevisionActive = (effectivePlan?.planType || setupPlanType) !== 'memorization' && (effectivePlan?.revisionMode || setupRevisionMode) !== 'none';
 
-  // Auto-fill setup defaults on first load
+  // Auto-fill setup defaults ONLY once per student modal session
   useEffect(() => {
-    if (student) {
+    if (!isOpen) {
+      initializedStudentIdRef.current = null;
+      return;
+    }
+    if (student && initializedStudentIdRef.current !== student.id) {
+      initializedStudentIdRef.current = student.id;
+
       const latestMemRec = sessionRecords
         .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
         .sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -275,7 +283,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
           setSetupDirection(matchedConfig.memorization.defaultDirection);
         }
         if (matchedConfig.revision) {
-          const mode = (matchedConfig.revision.mode as 'pages' | 'surahs' | 'none') || 'pages';
+          const mode = (matchedConfig.revision.mode as 'pages' | 'surahs' | 'lines' | 'none') || 'pages';
           setSetupRevisionMode(mode);
           setSetupRevisionDailyPages(matchedConfig.revision.defaultDailyPages ?? 1);
           if (matchedConfig.revision.surahsPerDay) {
@@ -293,7 +301,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         }
       }
     }
-  }, [student, quranStageConfigs, sessionRecords]);
+  }, [isOpen, student?.id]);
 
   // Reactive Debounced Plan Preview Generator
   const generateReactivePreview = useCallback(async () => {
@@ -871,6 +879,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                         className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                       >
                         <option value="page">صفحة مصحف كاملة</option>
+                        <option value="line">أسطر مصحف المدينة (15 سطر/صفحة)</option>
                         <option value="ayah">آيات محددة</option>
                         <option value="surah">سورة كاملة</option>
                         <option value="quarter">ربع حزب</option>
@@ -961,6 +970,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                           className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800"
                         >
                           <option value="pages">صفحات مصحف المدينة</option>
+                          <option value="lines">أسطر مصحف المدينة (15 سطر/صفحة)</option>
                           <option value="surahs">سور كاملة</option>
                         </select>
                       </div>
@@ -1291,7 +1301,9 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                             <tr>
                               <th className="py-2 px-3 w-28">اليوم / التاريخ</th>
                               <th className="py-2 px-3">الورد القرآني المقرر</th>
-                              <th className="py-2 px-3 w-32">المراجعة والتثبيت</th>
+                              {isRevisionActive && (
+                                <th className="py-2 px-3 min-w-[200px]">المراجعة والتثبيت</th>
+                              )}
                               {spellingTrackOn && (
                                 <th className="py-2 px-3 w-32">مسار الهجاء</th>
                               )}
@@ -1315,7 +1327,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                       {day.dayName} {fmtDate(day.date)}
                                     </td>
                                     <td
-                                      colSpan={spellingTrackOn ? 4 : 3}
+                                      colSpan={spellingTrackOn ? (isRevisionActive ? 4 : 3) : (isRevisionActive ? 3 : 2)}
                                       className="py-2 px-3 text-center text-purple-800"
                                     >
                                       🏖️ إجازة رسمية معتمدة
@@ -1366,15 +1378,17 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                   </td>
 
                                   {/* Revision Assignment */}
-                                  <td className="py-2.5 px-3 text-slate-700">
-                                    {day.revisionDisplayLabel ? (
-                                      <span className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                                        {day.revisionDisplayLabel}
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-400">—</span>
-                                    )}
-                                  </td>
+                                  {isRevisionActive && (
+                                    <td className="py-2.5 px-3 text-slate-700 min-w-[200px]">
+                                      {day.revisionDisplayLabel ? (
+                                        <span className="inline-block whitespace-nowrap text-[11px] font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs">
+                                          {day.revisionDisplayLabel}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </td>
+                                  )}
 
                                   {/* Spelling Lesson (If active) */}
                                   {spellingTrackOn && (
