@@ -314,6 +314,11 @@ export class RangeCalculator {
     revisionUnitsPerWindow?: number,
     autoMinorRevisionMode = true,
     cycleAnchorSurah?: number,
+    // Recalculation resumes with a just-completed surah already inside the
+    // seed pool — its consolidation days count as its first turn, so the
+    // rebuilt cycle skips it on the first window (same consumed-anchor
+    // semantics as a mid-plan eligibility event).
+    skipCycleAnchorSurah = false,
     outRevisionState?: { memorizedPool: Ayah[]; revisionWindowOffset: number }
   ): Promise<PlanningUnit[]> {
     const surahs = getSurahsInRangeByDirection(start.surahNumber, end.surahNumber, direction);
@@ -324,7 +329,15 @@ export class RangeCalculator {
     // Track all unique verses memorized so far in chronological learning sequence.
     // Auto Minor Revision: seeded with the student's prior memorization so the rolling
     // window rotates across prior + new memorization as one pool.
-    const memorizedVersesAccumulator: Ayah[] = [...initialMemorizedVerses];
+    // The FIRST partitioned surah is still in this plan's memorization/
+    // consolidation phase — its verses are excluded from the seed so the
+    // staging/eligibility pipeline owns its lifecycle. This keeps
+    // recalculation identical to fresh generation: a just-completed surah
+    // joins the pool only after its consolidation days, never early.
+    const firstSurahNo = surahs[0].number;
+    const memorizedVersesAccumulator: Ayah[] = initialMemorizedVerses.filter(
+      (v) => v.surahNumber !== firstSurahNo
+    );
     // Verses of the surah currently in its memorization/consolidation phase are
     // staged here and only join the revision pool AFTER the surah's
     // consolidation cycle completes — an incomplete (or still-consolidating)
@@ -344,13 +357,17 @@ export class RangeCalculator {
     // Offset 0 always targets the first revision window in the resolved
     // revision direction — 'backward' walks the pool newest → oldest.
     let revisionWindowOffset = 0;
-    // Auto Minor Revision: when a surah finishes memorization + consolidation
-    // and becomes eligible, the minor cycle restarts anchored at that newest
-    // eligible unit (recent memorization is revised promptly, not whenever a
-    // stale offset happens to reach it). Manual revision never gets this
-    // anchor — the user's configured cycle stays stable when the pool grows.
+    // Auto Minor Revision (backward only): when a surah finishes memorization
+    // + consolidation and becomes eligible, the minor cycle is rebuilt
+    // anchored at it — newest eligible content takes priority in order. Its
+    // consolidation days count as its first revision turn, so the next window
+    // starts right after it (pendingAnchorSkip). Forward mode never rebuilds:
+    // the surah simply waits its turn at the end of the traversal order.
+    // Manual revision never gets this anchor — the user's configured cycle
+    // stays stable.
     let pendingCycleAnchor: number | undefined =
       autoMinorRevisionMode ? cycleAnchorSurah : undefined;
+    let pendingAnchorSkip = skipCycleAnchorSurah;
 
     for (let sIdx = 0; sIdx < surahs.length; sIdx++) {
       const surahEntry = surahs[sIdx];
@@ -441,9 +458,11 @@ export class RangeCalculator {
           revisionDirection,
           revisionUnitKind,
           revisionUnitsPerWindow,
-          pendingCycleAnchor
+          pendingCycleAnchor,
+          pendingAnchorSkip
         );
         pendingCycleAnchor = undefined;
+        pendingAnchorSkip = false;
         revisionWindowOffset = revisionInfo.nextOffset;
 
         const totalAyahs = currEndAyah;
@@ -485,9 +504,11 @@ export class RangeCalculator {
             revisionDirection,
             revisionUnitKind,
             revisionUnitsPerWindow,
-            pendingCycleAnchor
+            pendingCycleAnchor,
+            pendingAnchorSkip
           );
           pendingCycleAnchor = undefined;
+          pendingAnchorSkip = false;
           revisionWindowOffset = revisionInfo.nextOffset;
 
           units.push({
@@ -510,12 +531,24 @@ export class RangeCalculator {
       }
 
       // Surah memorization + its consolidation cycle are done → its verses are
-      // now revision-eligible and join the rolling pool in learning order.
-      // The rolling offset continues untouched — the just-consolidated surah
-      // was already repeated by its own consolidation days, so it waits for
-      // its natural turn in the cycle instead of being re-revised next day.
+      // now revision-eligible. Auto Minor only: the revision pool is exactly
+      // the memorized+consolidated set. A manually configured pool stays the
+      // chosen range — fully separate from memorization progress.
       if (pendingEligibleVerses.length > 0) {
-        memorizedVersesAccumulator.push(...pendingEligibleVerses.splice(0));
+        if (autoMinorRevisionMode) {
+          memorizedVersesAccumulator.push(...pendingEligibleVerses.splice(0));
+          // Backward revision rebuilds the cycle anchored at the newest
+          // eligible surah (priority to fresh memorization). Its consolidation
+          // days already counted as its first turn → the next window starts
+          // after it. With no consolidation configured it was never revised →
+          // anchor directly at it (no skip).
+          if (revisionDirection === 'backward') {
+            pendingCycleAnchor = surahEntry.number;
+            pendingAnchorSkip = consolidationDays > 0;
+          }
+        } else {
+          pendingEligibleVerses.length = 0;
+        }
       }
     }
 
@@ -578,7 +611,11 @@ export class RangeCalculator {
     revisionDirection: 'forward' | 'backward' = 'forward',
     unitKind: RevisionUnitKind = 'page',
     unitsPerWindow?: number,
-    restartAtSurah?: number
+    restartAtSurah?: number,
+    // When a newly eligible surah anchors the cycle in backward mode, its
+    // consolidation days already counted as its first revision turn — the
+    // rebuild keeps it first in order but the next window starts after it.
+    skipAnchoredSurah = false
   ): {
     displayLabel: string;
     pageStart?: number;
@@ -612,7 +649,21 @@ export class RangeCalculator {
           const anchored = orderedChunks.findIndex(
             (c) => anchorVerse.globalIndex >= c.start.globalIndex && anchorVerse.globalIndex <= c.end.globalIndex
           );
-          if (anchored >= 0) safeOffset = anchored;
+          if (anchored >= 0) {
+            safeOffset = anchored;
+            if (skipAnchoredSurah) {
+              // Chunks are contiguous spans: a chunk holds verses of the
+              // anchored surah when its number lies inside [start,end] surahs.
+              while (
+                safeOffset < orderedChunks.length &&
+                orderedChunks[safeOffset].start.surahNumber <= restartAtSurah &&
+                restartAtSurah <= orderedChunks[safeOffset].end.surahNumber
+              ) {
+                safeOffset++;
+              }
+              if (safeOffset >= orderedChunks.length) safeOffset = 0;
+            }
+          }
         }
       }
       const chosen = orderedChunks[safeOffset];
@@ -680,7 +731,22 @@ export class RangeCalculator {
         restartAtSurah,
         unitKind
       );
-      if (anchored >= 0) safeOffset = anchored;
+      if (anchored >= 0) {
+        safeOffset = anchored;
+        if (skipAnchoredSurah) {
+          // The anchored surah's consolidation served as its first turn —
+          // advance past every unit key it still occupies.
+          while (
+            safeOffset < orderedKeys.length &&
+            memorizedVerses.some(
+              (v) => v.surahNumber === restartAtSurah && structuralKeyOf(v) === orderedKeys[safeOffset]
+            )
+          ) {
+            safeOffset++;
+          }
+          if (safeOffset >= orderedKeys.length) safeOffset = 0;
+        }
+      }
     }
     // Cycle boundary rule: a daily window NEVER crosses the end of the
     // revision cycle — it takes only what remains of the current cycle, and

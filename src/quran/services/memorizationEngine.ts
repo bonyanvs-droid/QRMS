@@ -141,6 +141,7 @@ export class QuranMemorizationPlanningEngine {
         params.revisionUnitsPerWindow,
         autoMinorRevision,
         undefined,
+        false,
         revisionRollState
       );
     const revisionRollState = { memorizedPool: [] as Ayah[], revisionWindowOffset: 0 };

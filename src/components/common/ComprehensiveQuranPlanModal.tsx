@@ -555,8 +555,8 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[94vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 flex bg-slate-900/70 backdrop-blur-xs overflow-hidden">
+      <div className="relative w-full h-full bg-white shadow-2xl flex flex-col overflow-hidden">
         {/* Modal Top Bar */}
         <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 text-white px-4 py-3 flex items-center justify-between shadow-md shrink-0">
           <div className="flex items-center gap-3 min-w-0">

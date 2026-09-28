@@ -525,6 +525,13 @@ export class PlanRecalculationService {
     const revisionUnitsPerWindow = plan.revisionSettings?.surahsPerDay;
 
     const seed = await this.buildRevisionSeed(plan, achievedPositionForSeed);
+    // A just-completed surah already sits in the seed — anchor the rebuilt
+    // backward cycle at it with the consumed-anchor skip (its prepended
+    // consolidation days count as its first turn), matching generation.
+    const completedSurahAnchor =
+      plan.autoMinorRevisionMode && revisionDirection === 'backward' && justCompletedEnd
+        ? justCompletedEnd.surahNumber
+        : undefined;
     const repartition = (endPos: QuranPosition) =>
       this.rangeCalculator.partitionSurahsWithCumulativePaceAndConsolidation(
         startPos,
@@ -538,7 +545,9 @@ export class PlanRecalculationService {
         revisionDirection,
         revisionUnitKind,
         revisionUnitsPerWindow,
-        plan.autoMinorRevisionMode
+        plan.autoMinorRevisionMode,
+        completedSurahAnchor,
+        (plan.consolidationDaysPerSurah ?? 3) > 0
       );
     let rawUnits = await repartition(plan.targetEnd);
 
