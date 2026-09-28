@@ -87,21 +87,15 @@ export function estimateAyahLineWeight(ayah: {
   
   const text = ayah.cleanText || ayah.text || '';
   const charCount = text.replace(/\s+/g, '').length;
-  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
 
-  // In 15-line Madani Mushaf, a standard line holds ~8 to 9 words (~38 to 44 characters).
-  // In Juz 30 (short verses), a line holds ~2 to 3 short verses.
-  if (pageNumber >= 582) {
-    // Juz 30 (Amma):
-    if (wordCount <= 3) return 0.33; // ~3 verses per line (e.g. Al-Kawthar, An-Nas)
-    if (wordCount <= 6) return 0.5;  // ~2 verses per line
-    if (wordCount <= 11) return 1.0; // ~1 verse per line
-    return Math.max(1, Math.round((wordCount / 8.5) * 10) / 10);
-  }
-
-  // General Quran calculation:
-  const lineWeight = Math.max(0.4, Math.round((wordCount / 8.6) * 10) / 10);
-  return lineWeight;
+  // Unified density model: a 15-line Madani line holds ~38 chars of clean
+  // (spaceless) text. Every ayah additionally leaves its line's tail partially
+  // empty (~0.3 line padding on average), so weight = padding + chars / 38.
+  // Calibrated so that 15 lines == 1 full page: e.g. Al-Ghashiyah's 26 ayahs
+  // (avg ~16 chars) total ~18 lines ≈ its real ~1.2 pages; Al-Kawthar's
+  // 3 short ayahs ≈ 2 lines; a 38-char ayah ≈ 1.3 lines.
+  const lineWeight = Math.max(0.3, 0.3 + charCount / 38);
+  return Math.round(lineWeight * 10) / 10;
 }
 
 /**
