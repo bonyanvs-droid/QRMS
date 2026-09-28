@@ -7,6 +7,7 @@ import { PublicDashboard } from './components/public/PublicDashboard';
 import { TeacherDashboard } from './components/teacher/TeacherDashboard';
 import { SpellingBankView } from './components/spelling/SpellingBankView';
 import { QuranOutcomesView } from './components/quran/QuranOutcomesView';
+import { StageKnightsAndDailyPulseView } from './components/quran/StageKnightsAndDailyPulseView';
 import { EducationalPlanView } from './components/educational/EducationalPlanView';
 import { SeasonalProgramsView } from './components/educational/SeasonalProgramsView';
 import { ReportsCenterView } from './components/reports/ReportsCenterView';
@@ -637,6 +638,9 @@ const MainLayout: React.FC = () => {
 
           {/* Quran Engine Module */}
           <Route path="/quran" element={<QuranOutcomesView />} />
+          <Route path="/knights-pulse" element={<StageKnightsAndDailyPulseView />} />
+          <Route path="/stage-knights" element={<Navigate to="/knights-pulse" replace />} />
+          <Route path="/pulse" element={<Navigate to="/knights-pulse" replace />} />
 
           {/* Educational Plan Module (البرنامج التربوي العام) */}
           <Route

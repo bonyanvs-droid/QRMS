@@ -1,5 +1,5 @@
 import { 
-  LayoutDashboard, BookOpen, Users, FileText, Calendar, 
+  LayoutDashboard, Trophy, BookOpen, Users, FileText, Calendar, 
   ShieldCheck, Server, Database, Activity, Sliders, 
   Image as ImageIcon, History, Award, UserPlus, 
   DollarSign, ShieldAlert, Sparkles, Compass, 
@@ -80,6 +80,7 @@ export const UNIFIED_NAV_ITEMS: NavigationItem[] = [
 
   // 3. Quran & Curriculum (قسم الشؤون التعليمية (الأكاديمية))
   { id: 'quran', label: 'المخرج القرآني', shortLabel: 'المخرج', path: '/quran', icon: FileText, category: 'quran_curriculum', requiredModule: 'quran', requiredPermission: ['view_quran', 'manage_quran'] },
+  { id: 'stage_knights', label: '🏆 فرسان المرحلة والنبض اليومي', shortLabel: 'فرسان والنبض', path: '/knights-pulse', icon: Trophy, category: 'quran_curriculum', requiredModule: 'quran' },
   { id: 'spelling', label: 'الهجاء القرآني', shortLabel: 'الهجاء', path: '/spelling', icon: Sparkles, category: 'quran_curriculum', requiredModule: 'spelling', requiredPermission: ['view_spelling', 'manage_spelling', 'view_quran'] },
   { id: 'curriculum_templates', label: 'قوالب الخطط القرآنية', shortLabel: 'قوالب الخطط', path: '/admin/curriculum', icon: Compass, category: 'quran_curriculum', requiredPermission: ['view_curriculum', 'manage_curriculum', 'manage_programs'] },
   { id: 'tracks', label: 'المسارات التعليمية', shortLabel: 'المسارات', path: '/admin/tracks', icon: Layers, category: 'quran_curriculum', requiredPermission: ['view_tracks', 'manage_tracks', 'manage_programs'], badgeKey: 'tracks' },

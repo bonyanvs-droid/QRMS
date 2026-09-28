@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import {
-  BookOpen,
+  BookOpen, Trophy, Zap,
   Target,
   Search,
   Eye,
@@ -27,6 +28,7 @@ import { StudentQuranPlanModal } from './StudentQuranPlanModal';
 import { Student } from '../../types';
 
 export const QuranOutcomesView: React.FC = () => {
+  const navigate = useNavigate();
   const {
     currentRole,
     currentUser,
