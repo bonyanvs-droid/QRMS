@@ -647,7 +647,9 @@ export class RangeCalculator {
         const anchorVerse = memorizedVerses.find((v) => v.surahNumber === restartAtSurah);
         if (anchorVerse) {
           const anchored = orderedChunks.findIndex(
-            (c) => anchorVerse.globalIndex >= c.start.globalIndex && anchorVerse.globalIndex <= c.end.globalIndex
+            (c) =>
+              (anchorVerse.globalIndex ?? -1) >= (c.start.globalIndex ?? -1) &&
+              (anchorVerse.globalIndex ?? -1) <= (c.end.globalIndex ?? -1)
           );
           if (anchored >= 0) {
             safeOffset = anchored;

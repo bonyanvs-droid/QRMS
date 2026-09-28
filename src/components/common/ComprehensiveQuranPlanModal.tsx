@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+  import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   X,
   Printer,
@@ -110,7 +110,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
   // Active persisted plan
   const activePlan: StudentQuranPlan | undefined = useMemo(
-    () => getActiveStudentQuranPlan(student.id),
+    () => getActiveStudentQuranPlan(student.id) ?? undefined,
     [getActiveStudentQuranPlan, student.id]
   );
 
@@ -274,7 +274,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
 
       const matchedConfig =
         quranStageConfigs.find(
-          (c) => c.targetGrades.includes(student.grade) && c.isActive
+          (c) => c.targetGrades?.includes(student.grade) && c.isActive
         ) || quranStageConfigs[0];
 
       if (matchedConfig) {
