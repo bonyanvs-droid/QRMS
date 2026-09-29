@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useApp } from '../../context/AppContext';
 import {
   Settings,
@@ -6,6 +8,7 @@ import {
   Navigation,
   MapPin,
   Locate,
+  CalendarDays,
   CheckCircle2,
   AlertTriangle,
   Loader2,
@@ -113,6 +116,44 @@ export const AttendanceSettingsTab: React.FC = () => {
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
+  // Interactive map state
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const circleRef = useRef<L.Circle | null>(null);
+  const userMarkerRef = useRef<L.CircleMarker | null>(null);
+
+  // Baseline = persisted config merged over defaults — drives dirty detection.
+  const baselineCfg = useMemo(() => {
+    const defaults = {
+      latitude: 21.56466,
+      longitude: 39.1442,
+      radiusMeters: 200,
+      regularDays: [0, 1, 2, 3, 4],
+      welcomeMessage: 'أهلاً بك في مقر المجمع القرآني. يرجى تسجيل حضورك الذكي عند تواجدك داخل النطاق المحدد.',
+      startTime: '16:00',
+      endTime: '18:00',
+      lateThresholdMinutes: 15,
+      attendanceScope: 'general',
+    };
+    return { ...defaults, ...(activeTenant?.attendanceConfig || {}) };
+  }, [activeTenant?.attendanceConfig]);
+
+  const isDirty = useMemo(() => {
+    const sameDays = (a: number[], b: number[]) =>
+      a.length === b.length && [...a].sort().every((v, i) => v === [...b].sort()[i]);
+    return (
+      (parseFloat(latInput) || 0) !== (baselineCfg.latitude || 0) ||
+      (parseFloat(lngInput) || 0) !== (baselineCfg.longitude || 0) ||
+      (parseInt(radiusInput) || 0) !== (baselineCfg.radiusMeters || 0) ||
+      (startTimeInput || '16:00') !== (baselineCfg.startTime || '16:00') ||
+      (endTimeInput || '18:00') !== (baselineCfg.endTime || '18:00') ||
+      (parseInt(lateThresholdInput) || 15) !== (baselineCfg.lateThresholdMinutes || 15) ||
+      !sameDays(regularDays, baselineCfg.regularDays || [0, 1, 2, 3, 4]) ||
+      welcomeMsgInput !== (baselineCfg.welcomeMessage || '')
+    );
+  }, [latInput, lngInput, radiusInput, startTimeInput, endTimeInput, lateThresholdInput, regularDays, welcomeMsgInput, baselineCfg]);
+
   // Update inputs if activeTenant changes
   useEffect(() => {
     if (activeTenant?.attendanceConfig) {
@@ -202,6 +243,109 @@ export const AttendanceSettingsTab: React.FC = () => {
       }
     );
   };
+
+  // Initialize the interactive Leaflet map once (draggable pin + radius circle).
+  useEffect(() => {
+    const el = mapContainerRef.current;
+    if (!el || mapRef.current) return;
+
+    const initLat = parseFloat(latInput);
+    const initLng = parseFloat(lngInput);
+    const center: L.LatLngExpression = [
+      !isNaN(initLat) ? initLat : 21.56466,
+      !isNaN(initLng) ? initLng : 39.1442,
+    ];
+
+    const mosquePin = L.divIcon({
+      className: '',
+      html: `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44">
+        <path d="M17 1C8.7 1 2 7.7 2 16c0 11.2 14 26.4 14.6 27 .4.4 1 .4 1.4 0C18.6 42.4 32 27.2 32 16 32 7.7 25.3 1 17 1z" fill="#047857" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="17" cy="15.5" r="5.5" fill="#ffffff"/>
+      </svg>`,
+      iconSize: [34, 44],
+      iconAnchor: [17, 43],
+    });
+
+    const map = L.map(el, { center, zoom: 16, scrollWheelZoom: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(map);
+
+    const marker = L.marker(center, { draggable: true, icon: mosquePin }).addTo(map);
+    const circle = L.circle(center, {
+      radius: parseInt(radiusInput) || 200,
+      color: '#047857',
+      weight: 2,
+      fillColor: '#10b981',
+      fillOpacity: 0.12,
+    }).addTo(map);
+
+    const dropPin = (p: L.LatLng) => {
+      setLatInput(p.lat.toFixed(6));
+      setLngInput(p.lng.toFixed(6));
+    };
+    marker.on('dragend', () => dropPin(marker.getLatLng()));
+    map.on('click', (e: L.LeafletMouseEvent) => dropPin(e.latlng));
+
+    mapRef.current = map;
+    markerRef.current = marker;
+    circleRef.current = circle;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+      circleRef.current = null;
+      userMarkerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep pin + geofence circle in sync with the coordinate inputs.
+  useEffect(() => {
+    const map = mapRef.current;
+    const marker = markerRef.current;
+    const circle = circleRef.current;
+    if (!map || !marker || !circle) return;
+    const lat = parseFloat(latInput);
+    const lng = parseFloat(lngInput);
+    if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
+    const ll = L.latLng(lat, lng);
+    marker.setLatLng(ll);
+    circle.setLatLng(ll);
+    // Recenter only on meaningful jumps (detected location, big edits) —
+    // not for micro-changes while typing or clicks already on-screen.
+    if (map.distance(map.getCenter(), ll) > 500) {
+      map.setView(ll, map.getZoom(), { animate: true });
+    }
+  }, [latInput, lngInput]);
+
+  // Keep the geofence circle in sync with the radius input.
+  useEffect(() => {
+    const r = parseInt(radiusInput);
+    if (circleRef.current && !isNaN(r) && r > 0) {
+      circleRef.current.setRadius(r);
+    }
+  }, [radiusInput]);
+
+  // Show the admin's own detected position as a blue dot.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !currentGps) return;
+    const ll = L.latLng(currentGps.latitude, currentGps.longitude);
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng(ll);
+    } else {
+      userMarkerRef.current = L.circleMarker(ll, {
+        radius: 7,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#2563eb',
+        fillOpacity: 1,
+      }).addTo(map);
+    }
+  }, [currentGps]);
 
   const daysOfWeek = [
     { index: 0, label: 'الأحد' },
@@ -548,42 +692,16 @@ export const AttendanceSettingsTab: React.FC = () => {
     <div className="space-y-6 max-w-5xl mx-auto pb-10">
       {/* Top Header Card */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center shadow-inner">
-              <Settings className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">إعدادات الحضور والانصراف وأوقات الدوام</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                تحديد نطاق الحضور الجغرافي، وأيام الدوام، وأوقات البداية والنهاية، ووقت التأخير المعتمد (عام للمجمع، مخصص لمرحلة، أو مخصص لحلقة).
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center shadow-inner">
+            <Settings className="w-6 h-6" />
           </div>
-
-          {/* Quick GPS Location Button */}
-          <button
-            type="button"
-            onClick={handleDetectCurrentLocation}
-            disabled={isLocating}
-            className={`cursor-pointer px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-sm ${
-              isLocating
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                : 'bg-emerald-700 hover:bg-emerald-800 text-white active:scale-95'
-            }`}
-          >
-            {isLocating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                <span>جارٍ رصد إشارة GPS...</span>
-              </>
-            ) : (
-              <>
-                <Locate className="w-4 h-4" />
-                <span>رصد الموقع الحقيقي الآن</span>
-              </>
-            )}
-          </button>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">إعدادات الحضور والانصراف وأوقات الدوام</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              تحديد موقع المجمع ونطاق الحضور الجغرافي، أيام الدوام، وأوقات البداية والنهاية، ووقت التأخير المعتمد.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -609,29 +727,36 @@ export const AttendanceSettingsTab: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 0: PRAYER TIMES & TIMING SYSTEM FOR MOSQUE */}
-      {activeTenant && (
-        <MosquePrayerSettingsCard
-          tenant={activeTenant}
-          onSaveConfig={updatePrayerConfig}
-        />
-      )}
-
-      {/* SECTION 1: HALAQAH SCHEDULES & BULK TIMING MANAGER (INLINE) */}
-      <BulkHalaqahScheduleModal
-        inline={true}
-        halaqahs={halaqahs}
-        stages={stages}
-        prayerTimesToday={prayerTimesToday}
-        onApply={handleApplyBulkSchedule}
-      />
-
       <form onSubmit={handleSaveSettings} className="space-y-6">
-                {/* SECTION 2: GEOFENCING & GPS COORDINATES */}
+        {/* SECTION 1: GEOFENCING & GPS COORDINATES */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <MapPin className="w-5 h-5 text-emerald-700" />
-            <h4 className="text-base font-bold text-slate-800">إحداثيات الموقع ونطاق التحضير الذكي (GPS)</h4>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-emerald-700" />
+              <h4 className="text-base font-bold text-slate-800">إحداثيات الموقع ونطاق التحضير الذكي (GPS)</h4>
+            </div>
+            <button
+              type="button"
+              onClick={handleDetectCurrentLocation}
+              disabled={isLocating}
+              className={`cursor-pointer px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-sm shrink-0 ${
+                isLocating
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                  : 'bg-emerald-700 hover:bg-emerald-800 text-white active:scale-95'
+              }`}
+            >
+              {isLocating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                  <span>جارٍ رصد إشارة GPS...</span>
+                </>
+              ) : (
+                <>
+                  <Locate className="w-4 h-4" />
+                  <span>رصد الموقع الحقيقي الآن</span>
+                </>
+              )}
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -722,40 +847,131 @@ export const AttendanceSettingsTab: React.FC = () => {
             </div>
           )}
 
-          {/* Interactive OpenStreetMap preview */}
-          {!isNaN(parsedTargetLat) && !isNaN(parsedTargetLng) && (
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">معاينة موقع المجمع على الخريطة:</span>
+          {/* Interactive map — drop the pin to set the mosque location */}
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-slate-700">
+                حدّد موقع المجمع: انقر على الخريطة لإسقاط الدبوس أو اسحبه مباشرة
+              </span>
+              {!isNaN(parsedTargetLat) && !isNaN(parsedTargetLng) && (
                 <a
                   href={`https://www.google.com/maps?q=${parsedTargetLat},${parsedTargetLng}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] font-bold text-emerald-700 hover:underline flex items-center gap-1"
+                  className="text-[11px] font-bold text-emerald-700 hover:underline flex items-center gap-1 shrink-0"
                 >
                   <span>فتح في الخرائط</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
-              </div>
-              <div className="w-full rounded-xl overflow-hidden border border-slate-200 relative bg-slate-100">
-                <iframe
-                  title="Mosque Location Map"
-                  width="100%"
-                  height="220"
-                  className="w-full border-0"
-                  loading="lazy"
-                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${
-                    parsedTargetLng - 0.005
-                  }%2C${parsedTargetLat - 0.003}%2C${parsedTargetLng + 0.005}%2C${
-                    parsedTargetLat + 0.003
-                  }&layer=mapnik&marker=${parsedTargetLat}%2C${parsedTargetLng}`}
-                />
-                <div className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-md text-[10px] text-slate-600 font-mono shadow-xs border border-slate-200">
-                  {parsedTargetLat.toFixed(6)}, {parsedTargetLng.toFixed(6)} | نطاق: {parsedRadius}م
-                </div>
-              </div>
+              )}
             </div>
-          )}
+            <div
+              ref={mapContainerRef}
+              className="relative z-0 w-full h-[280px] rounded-xl overflow-hidden border border-slate-200 bg-slate-100"
+            />
+            {!isNaN(parsedTargetLat) && !isNaN(parsedTargetLng) && (
+              <div className="text-[10px] text-slate-500 font-mono text-left">
+                {parsedTargetLat.toFixed(6)}, {parsedTargetLng.toFixed(6)} | نطاق: {parsedRadius}م — الدائرة الخضراء = منطقة التحضير
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* SECTION 2: WORK DAYS & ATTENDANCE TIMES */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <CalendarDays className="w-5 h-5 text-emerald-700" />
+            <h4 className="text-base font-bold text-slate-800">أيام الدوام وأوقات الحضور</h4>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2">أيام الدوام الأسبوعية المعتمدة:</label>
+            <div className="flex flex-wrap items-center gap-2">
+              {daysOfWeek.map((d) => (
+                <button
+                  key={d.index}
+                  type="button"
+                  onClick={() => toggleGeneralDay(d.index)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                    regularDays.includes(d.index)
+                      ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500">إعداد سريع:</span>
+              <button
+                type="button"
+                onClick={() => setRegularDays([0, 1, 2, 3, 4])}
+                className="px-3 py-1 rounded-lg text-[11px] font-bold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+              >
+                الأحد - الخميس
+              </button>
+              <button
+                type="button"
+                onClick={() => setRegularDays([0, 1, 2, 3, 4, 6])}
+                className="px-3 py-1 rounded-lg text-[11px] font-bold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+              >
+                السبت - الخميس
+              </button>
+              <button
+                type="button"
+                onClick={() => setRegularDays([0, 1, 2, 3, 4, 5, 6])}
+                className="px-3 py-1 rounded-lg text-[11px] font-bold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+              >
+                طوال الأسبوع
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-emerald-700" />
+                وقت بداية الدوام:
+              </label>
+              <input
+                type="time"
+                value={startTimeInput}
+                onChange={(e) => setStartTimeInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 font-mono"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-emerald-700" />
+                وقت نهاية الدوام:
+              </label>
+              <input
+                type="time"
+                value={endTimeInput}
+                onChange={(e) => setEndTimeInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 font-mono"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">عتبة التأخير المسموحة (بالدقائق):</label>
+              <input
+                type="number"
+                min="0"
+                max="120"
+                value={lateThresholdInput}
+                onChange={(e) => setLateThresholdInput(e.target.value)}
+                placeholder="15"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 font-mono"
+                required
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            تُستخدم هذه القيم في تحديد ما إذا كان يوم التسجيل يوم دوام اعتيادي، وكمصدر للتوقيت العام عند تعميم مواعيد الحلقات.
+          </p>
         </div>
 
         {/* SECTION 3: WELCOME MESSAGE CARD */}
@@ -780,31 +996,54 @@ export const AttendanceSettingsTab: React.FC = () => {
           </div>
         </div>
 
-        {/* SUBMIT SAVE BUTTON */}
-        <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="text-xs text-slate-500 font-medium">
-            * سيتم حفظ وتطبيق التغييرات فوراً على نظام الحضور والغياب الذكي لجميع الكوادر.
+        {/* STICKY SAVE BAR — saves the attendance domain only (map + days/times + welcome) */}
+        <div className="sticky bottom-4 z-30">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-lg px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <span className="text-xs text-slate-500 font-medium">
+              * يحفظ إعدادات الموقع والنطاق وأيام الدوام والأوقات ورسالة الترحيب، وتُطبَّق فوراً على التحضير الذكي.
+            </span>
+            <button
+              type="submit"
+              disabled={isSaving || !isDirty}
+              className="w-full sm:w-auto px-8 py-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>جارٍ الحفظ...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>{isDirty ? 'حفظ إعدادات الحضور' : 'لا تغييرات للحفظ'}</span>
+                </>
+              )}
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 disabled:opacity-50"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>جارٍ حفظ الإعدادات...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                <span>حفظ جميع الإعدادات</span>
-              </>
-            )}
-          </button>
         </div>
       </form>
 
+      {/* STANDALONE TOOLS — each saves/applies independently of the form above */}
+      <div className="pt-4 border-t border-slate-200">
+        <p className="text-xs font-bold text-slate-400 mb-4">
+          أدوات مستقلة للمجمع — لكل بطاقة إجراؤها الخاص المنفصل عن إعدادات الحضور أعلاه
+        </p>
+        <div className="space-y-6">
+          {activeTenant && (
+            <MosquePrayerSettingsCard
+              tenant={activeTenant}
+              onSaveConfig={updatePrayerConfig}
+            />
+          )}
+          <BulkHalaqahScheduleModal
+            inline={true}
+            halaqahs={halaqahs}
+            stages={stages}
+            prayerTimesToday={prayerTimesToday}
+            onApply={handleApplyBulkSchedule}
+          />
+        </div>
+      </div>
 
     </div>
   );

@@ -93,7 +93,7 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
     "url": "index.html",
-    "revision": "d74e98cdc866b089184a589318858b34"
+    "revision": "183e7030d40d2dc1fd877187a535f36d"
   }, {
     "url": "favicon.ico",
     "revision": "8e6ce27415c832a5f5f2d4d742620c8b"
@@ -119,22 +119,25 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/vendor-lucide-C4HlnKi_.js",
     "revision": null
   }, {
-    "url": "assets/vendor-firebase-DMD9BDTk.js",
+    "url": "assets/vendor-firebase-B0qSXXF1.js",
     "revision": null
   }, {
-    "url": "assets/vendor-export-Dfb2eZ1p.js",
+    "url": "assets/vendor-export-DuSizkdj.js",
     "revision": null
   }, {
-    "url": "assets/vendor-common-C1kVHX9k.js",
+    "url": "assets/vendor-common-CIGW-MKW.css",
+    "revision": null
+  }, {
+    "url": "assets/vendor-common-BZVb8RZy.js",
     "revision": null
   }, {
     "url": "assets/quran-json-BXqiKKVS.js",
     "revision": null
   }, {
-    "url": "assets/index-iVKA600w.js",
+    "url": "assets/index-kuEHnswV.css",
     "revision": null
   }, {
-    "url": "assets/index-18rgcbN4.css",
+    "url": "assets/index-D9C2cCic.js",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",
