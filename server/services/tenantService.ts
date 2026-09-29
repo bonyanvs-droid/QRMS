@@ -375,6 +375,36 @@ export async function getPublicTenants(): Promise<(Partial<MosqueComplexTenant> 
   }
 }
 
+/**
+ * Full tenant records for authenticated app sessions. The public directory
+ * list intentionally strips operational config (attendance_config,
+ * prayer_config, modules_config, admissions_config, subscription...), which
+ * left the app permanently on hardcoded defaults — including the geo
+ * perimeter used by smart attendance. Authenticated sessions get SELECT *.
+ */
+export async function getAllTenantsForApp(): Promise<(Partial<MosqueComplexTenant> & { stats?: TenantPublicStats })[]> {
+  if (config.apiRuntimeMode === 'remote-proxy') {
+    // Dev proxy mode: the remote directory is authoritative — reuse it.
+    return getPublicTenants();
+  }
+  try {
+    const tenants = await executeQuery<MosqueComplexTenant>(
+      `SELECT * FROM tenants WHERE is_active = TRUE ORDER BY name ASC`
+    );
+    const enriched = await Promise.all(
+      tenants.map(async (t) => {
+        if (!t.id) return t;
+        const stats = await getTenantPublicStats(t.id).catch(() => null);
+        return { ...t, stats: stats || undefined };
+      })
+    );
+    return enriched;
+  } catch (err) {
+    console.warn('[tenantService] getAllTenantsForApp error:', err);
+    return [];
+  }
+}
+
 export async function getTenantByIdOrSlug(idOrSlug: string): Promise<(MosqueComplexTenant & { stats?: TenantPublicStats }) | null> {
   const canonicalId = (await resolveCanonicalTenantId(idOrSlug)) || idOrSlug;
 

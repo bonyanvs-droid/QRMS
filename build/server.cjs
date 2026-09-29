@@ -804,6 +804,27 @@ async function getPublicTenants() {
     return [];
   }
 }
+async function getAllTenantsForApp() {
+  if (config.apiRuntimeMode === "remote-proxy") {
+    return getPublicTenants();
+  }
+  try {
+    const tenants = await executeQuery(
+      `SELECT * FROM tenants WHERE is_active = TRUE ORDER BY name ASC`
+    );
+    const enriched = await Promise.all(
+      tenants.map(async (t) => {
+        if (!t.id) return t;
+        const stats = await getTenantPublicStats(t.id).catch(() => null);
+        return { ...t, stats: stats || void 0 };
+      })
+    );
+    return enriched;
+  } catch (err) {
+    console.warn("[tenantService] getAllTenantsForApp error:", err);
+    return [];
+  }
+}
 async function getTenantByIdOrSlug(idOrSlug) {
   const canonicalId = await resolveCanonicalTenantId(idOrSlug) || idOrSlug;
   if (config.apiRuntimeMode === "remote-proxy") {
@@ -3170,7 +3191,7 @@ async function deleteRecord(collectionName, id, tenantId) {
 var tenantRouter = (0, import_express3.Router)();
 tenantRouter.get("/", async (req, res, next) => {
   try {
-    const tenants = await getPublicTenants();
+    const tenants = req.sessionUser ? await getAllTenantsForApp() : await getPublicTenants();
     res.json({
       ok: true,
       count: tenants.length,

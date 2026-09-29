@@ -2,7 +2,7 @@ import { Router } from 'express';
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
-import { getPublicTenants, getTenantByIdOrSlug, getTenantPublicStats } from '../services/tenantService';
+import { getPublicTenants, getAllTenantsForApp, getTenantByIdOrSlug, getTenantPublicStats } from '../services/tenantService';
 import { upsert, deleteRecord } from '../services/entityService';
 
 export const tenantRouter = Router();
@@ -13,7 +13,12 @@ export const tenantRouter = Router();
  */
 tenantRouter.get('/', async (req, res, next) => {
   try {
-    const tenants = await getPublicTenants();
+    // Authenticated app sessions receive full tenant records (operational
+    // configs included); anonymous directory visitors keep the lean public
+    // shape — attendance/prayer/module configs never leak publicly.
+    const tenants = req.sessionUser
+      ? await getAllTenantsForApp()
+      : await getPublicTenants();
     res.json({
       ok: true,
       count: tenants.length,
