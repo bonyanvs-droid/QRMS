@@ -69,6 +69,7 @@ export const SupervisorDashboard: React.FC = () => {
     seasonalParticipations,
     getActiveStudentQuranPlan,
     quranStageConfigs,
+    staffAttendanceRecords,
   } = useApp();
 
   // Active Scope State (Role + Scope Architecture)
@@ -471,7 +472,8 @@ export const SupervisorDashboard: React.FC = () => {
       }
     });
 
-    const averageMastery = recordsCount > 0 ? Math.round(totalScoreSum / recordsCount) : 92;
+    // null when nothing has been recorded — never show an invented number
+    const averageMastery = recordsCount > 0 ? Math.round(totalScoreSum / recordsCount) : null;
     return {
       lessonsCount,
       activeLessonsCount: activeLessons.length,
@@ -479,20 +481,154 @@ export const SupervisorDashboard: React.FC = () => {
     };
   }, [spellingLessons, sessionRecords]);
 
-  // Educational Plan Metrics
+  // Educational Plan Metrics — scoped to the supervisor's assigned stages
+  // (stage supervisors see only their own stage's plan weeks)
   const educationalMetrics = useMemo(() => {
-    const totalWeeks = educationalPlan.length;
-    const completedWeeks = educationalPlan.filter((w) => w.status === 'completed').length;
-    const inProgressWeeks = educationalPlan.filter((w) => w.status === 'in_progress').length;
-    const currentWeekPlan = educationalPlan.find((w) => w.weekNumber === academicConfig.currentWeek);
-
+    const tenantWeeks = educationalPlan.filter(
+      (w) => !activeTenantId || !w.tenantId || w.tenantId === activeTenantId
+    );
+    let weeks = tenantWeeks;
+    if (selectedScopeType === 'stage_supervisor') {
+      const stageIds = new Set([
+        ...(currentUser?.supervisorScope?.stageIds || []),
+        ...(currentUser?.assignedStageIds || []),
+      ]);
+      if (stageIds.size > 0) {
+        const scoped = tenantWeeks.filter(
+          (w) =>
+            (w.stageId && stageIds.has(w.stageId)) ||
+            (w.targetStageIds || []).some((id) => stageIds.has(id))
+        );
+        // Fall back to the whole tenant plan when weeks carry no stage info
+        weeks = scoped.length > 0 ? scoped : tenantWeeks;
+      }
+    }
+    const isDone = (w: (typeof weeks)[number]) =>
+      w.status === 'completed' || w.executionStatus === 'completed';
     return {
-      totalWeeks,
-      completedWeeks,
-      inProgressWeeks,
-      currentWeekPlan,
+      totalWeeks: weeks.length,
+      completedWeeks: weeks.filter(isDone).length,
+      inProgressWeeks: weeks.filter((w) => w.status === 'in_progress').length,
+      currentWeekPlan: weeks.find((w) => w.weekNumber === academicConfig.currentWeek),
     };
-  }, [educationalPlan, academicConfig]);
+  }, [educationalPlan, activeTenantId, selectedScopeType, currentUser, academicConfig]);
+
+  // Today's attendance inside the supervisor's scope — students recorded
+  // present/late today, plus the supervisor's own check-in status
+  const attendanceStats = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const scopedIds = new Set(scopedStudents.map((s) => s.id));
+    const presentIds = new Set(
+      sessionRecords
+        .filter(
+          (r) =>
+            r.date === todayStr &&
+            (r.attendance === 'present' || r.attendance === 'late') &&
+            scopedIds.has(r.studentId)
+        )
+        .map((r) => r.studentId)
+    );
+    const selfMarked = staffAttendanceRecords.some(
+      (r) => r.userId === currentUser?.id && r.date === todayStr
+    );
+    return { present: presentIds.size, total: scopedStudents.length, selfMarked };
+  }, [sessionRecords, staffAttendanceRecords, scopedStudents, currentUser]);
+
+  // Unified navigation — every tab is a card carrying its own live stat.
+  // Visibility mirrors the rules the old tab buttons used; the radar card
+  // additionally shows for stage supervisors since their trackIds include
+  // the quran track (the old tab button wrongly hid it from them while a
+  // KPI card still linked to it).
+  const navCards = [
+    {
+      tab: 'overview' as SupTab,
+      label: 'المتابعة الشاملة',
+      stat: String(radarBuckets.reached.length),
+      sub: 'بلغوا مستهدف الصف',
+      Icon: BookOpen,
+      iconClass: 'text-emerald-400',
+      visible: true,
+    },
+    {
+      tab: 'attendance' as SupTab,
+      label: 'الحضور الذكي',
+      stat: `${attendanceStats.present}/${attendanceStats.total}`,
+      sub: attendanceStats.selfMarked
+        ? 'حالتك مسجَّلة اليوم'
+        : 'حالتك لم تُسجَّل بعد',
+      Icon: Navigation,
+      iconClass: 'text-blue-400',
+      visible: true,
+    },
+    {
+      tab: 'students' as SupTab,
+      label: 'الطلاب',
+      stat: String(scopedStudents.length),
+      sub: 'في نطاق الإشراف',
+      Icon: Users,
+      iconClass: 'text-emerald-400',
+      visible: true,
+    },
+    {
+      tab: 'spelling' as SupTab,
+      label: 'دروس الهجاء',
+      stat:
+        spellingMetrics.averageMastery === null
+          ? '—'
+          : `${spellingMetrics.averageMastery}%`,
+      sub: `من ${spellingMetrics.activeLessonsCount} دروس نشطة`,
+      Icon: Sparkles,
+      iconClass: 'text-amber-400',
+      visible:
+        (selectedScopeType === 'general_supervisor' ||
+          selectedScopeType === 'spelling_supervisor' ||
+          selectedScopeType === 'stage_supervisor') &&
+        isSpellingActive,
+    },
+    {
+      tab: 'educational' as SupTab,
+      label: 'الخطة القيمية',
+      stat: `${educationalMetrics.completedWeeks}/${educationalMetrics.totalWeeks}`,
+      sub: 'أهداف قيمية منجزة',
+      Icon: Heart,
+      iconClass: 'text-purple-400',
+      visible:
+        (selectedScopeType === 'general_supervisor' ||
+          selectedScopeType === 'educational_supervisor' ||
+          selectedScopeType === 'stage_supervisor') &&
+        isEducationalActive,
+    },
+    {
+      tab: 'interventions' as SupTab,
+      label: 'رادار التدخل',
+      stat: String(followUpCount + radarBuckets.none.length),
+      sub: 'يحتاجون تدخلاً',
+      Icon: AlertTriangle,
+      iconClass: 'text-amber-400',
+      visible:
+        selectedScopeType === 'general_supervisor' ||
+        selectedScopeType === 'quran_supervisor' ||
+        selectedScopeType === 'stage_supervisor',
+    },
+    {
+      tab: 'nominations' as SupTab,
+      label: 'الترشيحات',
+      stat: String(pendingNominationsCount),
+      sub: 'بانتظار الاعتماد',
+      Icon: Award,
+      iconClass: 'text-teal-400',
+      visible: isAssociationActive,
+    },
+    {
+      tab: 'halaqahs' as SupTab,
+      label: 'جودة الحلقات',
+      stat: String(tenantHalaqahs.length),
+      sub: 'حلقات في النطاق',
+      Icon: Layers,
+      iconClass: 'text-slate-400',
+      visible: true,
+    },
+  ];
 
   return (
     <div className="space-y-8 animate-in fade-in pb-12">
@@ -518,15 +654,13 @@ export const SupervisorDashboard: React.FC = () => {
               <ShieldCheck className="w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black font-serif leading-snug">
-                مرحباً بك {currentUser?.name || 'أيها المشرف'}
+              <h1 className="text-lg sm:text-2xl font-black font-serif leading-snug flex flex-wrap items-baseline gap-x-2">
+                <span>مرحباً بك {currentUser?.name || 'أيها المشرف'}</span>
+                <span className="text-emerald-400">في {portalTitle}</span>
+                <span className="text-[11px] sm:text-xs text-slate-400 font-bold font-sans">
+                  · الأسبوع الأكاديمي {academicConfig.currentWeek}
+                </span>
               </h1>
-              <p className="text-sm sm:text-base font-black text-emerald-400 mt-1">
-                في {portalTitle}
-              </p>
-              <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-2">
-                <span>الأسبوع الأكاديمي {academicConfig.currentWeek}</span>
-              </div>
             </div>
           </div>
 
@@ -563,211 +697,53 @@ export const SupervisorDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Dynamic High-Level KPIs Based on Scope — clickable, each card
-            jumps to the tab that shows its underlying detail */}
-        <div className="mt-8 grid grid-cols-2 sm:grid-cols-5 gap-4 pt-6 border-t border-slate-800">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
-          >
-            <div className="text-slate-400 text-xs font-semibold mb-1">الحلقات المشمولة بالنطاق</div>
-            <div className="text-2xl font-black text-white font-mono">{tenantHalaqahs.length}</div>
-            <div className="text-[11px] text-emerald-400 mt-1">حلقات مرصودة بنشاط</div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('students')}
-            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
-          >
-            <div className="text-slate-400 text-xs font-semibold mb-1">الطلاب في نطاق الإشراف</div>
-            <div className="text-2xl font-black text-white font-mono">{scopedStudents.length}</div>
-            <div className="text-[11px] text-slate-300 mt-1">
-              {selectedScopeType === 'spelling_supervisor'
-                ? 'طلاب مسار التأسيس'
-                : selectedScopeType === 'educational_supervisor'
-                ? 'مشمولون بالقيم'
-                : 'في مسارات الحفظ والمراجعة'}
-            </div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('interventions')}
-            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
-          >
-            <div className="text-slate-400 text-xs font-semibold mb-1">
-              {selectedScopeType === 'spelling_supervisor'
-                ? 'معدل إتقان الهجاء والتأسيس'
-                : selectedScopeType === 'educational_supervisor'
-                ? 'إنجاز الخطة القيمية'
-                : 'خطط تحتاج متابعة'}
-            </div>
-            <div
-              className={`text-2xl font-black font-mono ${
-                selectedScopeType === 'educational_supervisor'
-                  ? 'text-purple-400'
-                  : 'text-amber-400'
-              }`}
-            >
-              {selectedScopeType === 'spelling_supervisor'
-                ? `${spellingMetrics.averageMastery}%`
-                : selectedScopeType === 'educational_supervisor'
-                ? `${Math.round((educationalMetrics.completedWeeks / Math.max(1, educationalMetrics.totalWeeks)) * 100)}%`
-                : followUpCount}
-            </div>
-            <div className="text-[11px] text-slate-300 mt-1">
-              {selectedScopeType === 'spelling_supervisor'
-                ? `من ${spellingMetrics.activeLessonsCount} دروس نشطة`
-                : selectedScopeType === 'educational_supervisor'
-                ? `${educationalMetrics.completedWeeks} أسبوعاً مكتملاً`
-                : 'هدف ناقص أو إيقاع متعثر'}
-            </div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('interventions')}
-            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
-          >
-            <div className="text-slate-400 text-xs font-semibold mb-1">بلغوا مستهدف الصف</div>
-            <div className="text-2xl font-black text-emerald-400 font-mono">
-              {radarBuckets.reached.length}
-            </div>
-            <div className="text-[11px] text-slate-300 mt-1">إنجاز مكتمل للمرحلة</div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('nominations')}
-            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
-          >
-            <div className="text-slate-400 text-xs font-semibold mb-1">ترشيحات بانتظار الاعتماد</div>
-            <div className="text-2xl font-black text-white font-mono">{pendingNominationsCount}</div>
-            <div className="text-[11px] text-slate-300 mt-1">
-              {selectedScopeType === 'general_supervisor'
-                ? 'كافة مسارات المجمع'
-                : `في ${activeRoleConfig.label}`}
-            </div>
-          </button>
+        {/* Unified nav-cards — each card is a tab carrying its own live
+            stat. The old KPI row and the separate tab bar merged into this
+            single strip. */}
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 border-t border-slate-800">
+          {navCards
+            .filter((c) => c.visible)
+            .map(({ tab, label, stat, sub, Icon, iconClass }) => {
+              const isActive = activeTab === tab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-emerald-600 border-emerald-500 shadow-lg shadow-emerald-950/50'
+                      : 'bg-slate-800/80 border-slate-700/80 hover:bg-slate-700/60'
+                  }`}
+                >
+                  <div
+                    className={`flex items-center gap-1.5 text-[11px] font-bold ${
+                      isActive ? 'text-emerald-100' : 'text-slate-400'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        isActive ? 'text-white' : iconClass
+                      }`}
+                    />
+                    <span className="truncate">{label}</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono mt-1.5 text-white">
+                    {stat}
+                  </div>
+                  <div
+                    className={`text-[10px] mt-0.5 ${
+                      isActive ? 'text-emerald-100/90' : 'text-slate-500'
+                    }`}
+                  >
+                    {sub}
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
 
-      {/* 2. TAB CONTROLS */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-4">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'overview'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>المتابعة الشاملة</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('attendance')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'attendance'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Navigation className="w-4 h-4 text-emerald-600" />
-          <span>الحضور الذكي بالموقع</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('students')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'students'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4 text-emerald-600" />
-          <span>الطلاب ({scopedStudents.length})</span>
-        </button>
-
-        {/* Spelling Tab: available for General, Spelling, and Stage supervisors */}
-        {(selectedScopeType === 'general_supervisor' ||
-          selectedScopeType === 'spelling_supervisor' ||
-          selectedScopeType === 'stage_supervisor') &&
-          isSpellingActive && (
-            <button
-              onClick={() => setActiveTab('spelling')}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'spelling'
-                  ? 'bg-amber-600 text-white shadow-sm'
-                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>بنك دروس الهجاء ({spellingLessons.length})</span>
-            </button>
-          )}
-
-        {/* Educational Tab: available for General, Educational, and Stage supervisors */}
-        {(selectedScopeType === 'general_supervisor' ||
-          selectedScopeType === 'educational_supervisor' ||
-          selectedScopeType === 'stage_supervisor') &&
-          isEducationalActive && (
-            <button
-              onClick={() => setActiveTab('educational')}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'educational'
-                  ? 'bg-purple-700 text-white shadow-sm'
-                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              <Heart className="w-4 h-4 text-rose-400" />
-              <span>الخطة القيمية والأنشطة ({educationalPlan.length})</span>
-            </button>
-          )}
-
-        {/* Interventions Radar: Quran & General */}
-        {(selectedScopeType === 'general_supervisor' || selectedScopeType === 'quran_supervisor') && (
-          <button
-            onClick={() => setActiveTab('interventions')}
-            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'interventions'
-                ? 'bg-emerald-700 text-white shadow-sm'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-            <span>رادار التدخل والخطط ({followUpCount + radarBuckets.none.length})</span>
-          </button>
-        )}
-
-        {/* Nominations & Association Tab */}
-        {isAssociationActive && (
-          <button
-            onClick={() => setActiveTab('nominations')}
-            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'nominations'
-                ? 'bg-teal-700 text-white shadow-sm'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            <Award className="w-4 h-4 text-teal-400" />
-            <span>ترشيحات واختبارات المسارات ({pendingNominationsCount})</span>
-          </button>
-        )}
-
-        {/* Halaqahs Quality */}
-        <button
-          onClick={() => setActiveTab('halaqahs')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'halaqahs'
-              ? 'bg-slate-800 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          <span>تقييم جودة الحلقات</span>
-        </button>
-      </div>
-
-      {/* 3. TAB VIEWS */}
+      {/* 2. TAB VIEWS */}
 
       {activeTab === 'attendance' && <SmartAttendanceWidget />}
 
