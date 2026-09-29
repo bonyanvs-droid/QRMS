@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { calculateDistanceMeters, isRegularAttendanceDay, getLocalDateString, isRecordForDate } from '../../utils/geoAttendance';
 import { getHalaqahActiveDays } from '../../utils/scheduleCalculator';
-import { CheckCircle2, MapPin, X, Navigation, Building2, Sparkles } from 'lucide-react';
+import { CheckCircle2, MapPin, X, Navigation, Building2, Sparkles, AlertTriangle } from 'lucide-react';
 
 interface AutoAttSuccessInfo {
   distance?: number;
@@ -52,6 +52,7 @@ function playSuccessChime() {
 export const AutoAttendanceTracker: React.FC = () => {
   const { currentUser, activeTenant, staffAttendanceRecords, recordGeoAttendance, halaqahs = [] } = useApp();
   const [successInfo, setSuccessInfo] = useState<AutoAttSuccessInfo | null>(null);
+  const [failureInfo, setFailureInfo] = useState<{ title: string; detail: string } | null>(null);
   const isCheckingRef = useRef(false);
   const lastCheckTimestampRef = useRef<number>(0);
 
@@ -98,6 +99,20 @@ export const AutoAttendanceTracker: React.FC = () => {
   }, [localDoneKey, hasLocalGuardToday, isAlreadyCheckedToday]);
 
   const isManagerOrAdmin = currentUser && ['campus_admin', 'system_admin', 'admin', 'manager'].includes(currentUser.role);
+
+  // Surface geo-attendance failures to non-admin staff — each reason shows
+  // once per day (localStorage guard) so the warning informs without nagging.
+  const warnOnce = (reasonKey: string, title: string, detail: string) => {
+    if (!currentUser || !activeTenant) return;
+    const warnKey = `smart_att_warn_${activeTenant.id}_${currentUser.id}_${todayStr}_${reasonKey}`;
+    try {
+      if (window.localStorage?.getItem(warnKey) === 'true') return;
+      window.localStorage?.setItem(warnKey, 'true');
+    } catch {
+      /* storage unavailable — show anyway */
+    }
+    setFailureInfo({ title, detail });
+  };
 
   const performAutoAttendanceCheck = async () => {
     // Immediate return if attendance is already recorded or user not eligible
@@ -155,6 +170,11 @@ export const AutoAttendanceTracker: React.FC = () => {
         }
         return;
       }
+      warnOnce(
+        'no_geo',
+        'التحضير الذكي غير متاح',
+        'متصفحك لا يدعم تحديد الموقع الجغرافي — سجّل حضورك يدوياً من لوحة التحضير.'
+      );
       isCheckingRef.current = false;
       return;
     }
@@ -199,6 +219,12 @@ export const AutoAttendanceTracker: React.FC = () => {
             if (result.success) {
               markAttendanceSuccess(distance, reason, false);
             }
+          } else {
+            warnOnce(
+              'out_of_range',
+              'أنت خارج نطاق التحضير الذكي',
+              `موقعك الحالي يبعد نحو ${Math.round(distance)} متراً عن المجمع، والنطاق المسموح ${attendanceCfg.radiusMeters} متر. إن كنت داخل المقر فعلاً فسجّل حضورك يدوياً وأبلغ الإدارة.`
+            );
           }
         } catch (err) {
           console.error('Error during auto geo-attendance check:', err);
@@ -215,6 +241,27 @@ export const AutoAttendanceTracker: React.FC = () => {
             if (result.success) {
               markAttendanceSuccess(undefined, reason, false);
             }
+          } else {
+            let key = 'geo_error';
+            let title = 'تعذر تسجيل الحضور الذكي';
+            let detail = 'تعذر تحديد موقعك الجغرافي — سجّل حضورك يدوياً من لوحة التحضير.';
+            switch (error.code) {
+              case error.PERMISSION_DENIED:
+                key = 'geo_denied';
+                title = 'إذن الموقع الجغرافي مرفوض';
+                detail =
+                  'فعّل إذن الموقع للمتصفح من إعداداته ثم أعد فتح الصفحة ليُسجَّل حضورك تلقائياً، أو سجّل يدوياً الآن.';
+                break;
+              case error.POSITION_UNAVAILABLE:
+                key = 'geo_unavailable';
+                detail = 'إشارة الموقع غير متوفرة حالياً — تأكد من تفعيل GPS في جهازك أو سجّل حضورك يدوياً.';
+                break;
+              case error.TIMEOUT:
+                key = 'geo_timeout';
+                detail = 'انتهت مهلة رصد الموقع دون استجابة — جرّب في مكان مكشوف أو سجّل حضورك يدوياً.';
+                break;
+            }
+            warnOnce(key, title, detail);
           }
         } catch (err) {
           console.error('Error recording admin presence fallback:', err);
@@ -282,7 +329,48 @@ export const AutoAttendanceTracker: React.FC = () => {
     }
   }, [successInfo]);
 
-  if (!successInfo) return null;
+  // Auto-dismiss the failure warning after 12 seconds
+  useEffect(() => {
+    if (failureInfo) {
+      const dismissTimer = setTimeout(() => {
+        setFailureInfo(null);
+      }, 12000);
+      return () => clearTimeout(dismissTimer);
+    }
+  }, [failureInfo]);
+
+  if (!successInfo && !failureInfo) return null;
+
+  if (!successInfo && failureInfo) {
+    return (
+      <div
+        id="auto-attendance-failure-toast"
+        className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md animate-in fade-in slide-in-from-top-4 duration-300"
+        dir="rtl"
+      >
+        <div className="bg-white/95 backdrop-blur-md border-2 border-amber-400 rounded-2xl p-4 shadow-2xl shadow-amber-900/10 text-slate-800">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-slate-900">{failureInfo.title}</h4>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">{failureInfo.detail}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setFailureInfo(null)}
+              className="text-slate-400 hover:text-slate-600 transition shrink-0 cursor-pointer"
+              aria-label="إغلاق التنبيه"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isWithin = successInfo.isWithinPerimeter ?? (successInfo.distance !== undefined && successInfo.distance <= 200);
 
