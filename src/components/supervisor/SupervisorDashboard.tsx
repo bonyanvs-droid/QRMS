@@ -190,6 +190,44 @@ export const SupervisorDashboard: React.FC = () => {
     return Array.from(set);
   }, [tenantHalaqahs, scopedStudents]);
 
+  // Stage names actually assigned to this supervisor — used to personalize
+  // the portal title ("بوابة مشرف مرحلة البراعم" instead of the generic
+  // "بوابة مشرف المرحلة التعليمية"). Falls back to the stages discovered
+  // inside their effective scope when nothing is assigned explicitly.
+  const assignedStageNames = useMemo(() => {
+    const explicit = new Set<string>([
+      ...(currentUser?.supervisorScope?.stageIds || []),
+      ...(currentUser?.assignedStageIds || []),
+    ]);
+    const ids = explicit.size > 0 ? Array.from(explicit) : scopedStageIds;
+    return ids
+      .map((id) => stages.find((st) => st.id === id)?.name)
+      .filter((n): n is string => Boolean(n));
+  }, [currentUser, stages, scopedStageIds]);
+
+  // Personalized portal title — resolved per role, with the real stage
+  // name embedded for stage supervisors.
+  const portalTitle = useMemo(() => {
+    if (selectedScopeType === 'stage_supervisor' && assignedStageNames.length > 0) {
+      const names = assignedStageNames.map((n) =>
+        n.startsWith('مرحل') ? n : `مرحلة ${n}`
+      );
+      return `بوابة مشرف ${names.join(' و')}`;
+    }
+    switch (selectedScopeType) {
+      case 'quran_supervisor':
+        return 'بوابة المشرف القرآني التخصصي';
+      case 'spelling_supervisor':
+        return 'بوابة مشرف الهجاء القرآني والتأسيس';
+      case 'educational_supervisor':
+        return 'بوابة المشرف التربوي والقيمي';
+      case 'stage_supervisor':
+        return 'بوابة مشرف المرحلة التعليمية';
+      default:
+        return 'بوابة الإشراف العام الشامل';
+    }
+  }, [selectedScopeType, assignedStageNames]);
+
   // Plan action button — shared by the desktop table row and the mobile card.
   // Renders nothing when the supervisor lacks view_quran on this student.
   const renderPlanAction = (s: Student) => {
@@ -480,22 +518,12 @@ export const SupervisorDashboard: React.FC = () => {
               <ShieldCheck className="w-8 h-8" />
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black font-serif">
-                  {selectedScopeType === 'quran_supervisor'
-                    ? 'بوابة المشرف القرآني التخصصي'
-                    : selectedScopeType === 'spelling_supervisor'
-                    ? 'بوابة مشرف الهجاء القرآني والتأسيس'
-                    : selectedScopeType === 'educational_supervisor'
-                    ? 'بوابة المشرف التربوي والقيمي'
-                    : selectedScopeType === 'stage_supervisor'
-                    ? 'بوابة مشرف المرحلة التعليمية'
-                    : 'بوابة الإشراف العام الشامل'}
-                </h1>
-                <span className="text-[11px] font-black px-3 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-emerald-500/40">
-                  {activeRoleConfig.label}
-                </span>
-              </div>
+              <h1 className="text-xl sm:text-2xl font-black font-serif leading-snug">
+                مرحباً بك {currentUser?.name || 'أيها المشرف'}
+              </h1>
+              <p className="text-sm sm:text-base font-black text-emerald-400 mt-1">
+                في {portalTitle}
+              </p>
               <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
                 {activeRoleConfig.description}
               </p>
@@ -503,8 +531,6 @@ export const SupervisorDashboard: React.FC = () => {
                 <span>{activeTenant?.name || ''}</span>
                 <span>•</span>
                 <span>الأسبوع الأكاديمي {academicConfig.currentWeek}</span>
-                <span>•</span>
-                <span>المشرف: {currentUser?.name || 'المشرف المعتمد'}</span>
               </div>
             </div>
           </div>
