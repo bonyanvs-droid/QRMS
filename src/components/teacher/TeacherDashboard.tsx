@@ -61,6 +61,11 @@ interface TeacherDashboardProps {
   onSelectStudentProfile?: (studentId: string) => void;
 }
 
+// Local-calendar YYYY-MM-DD — record/plan dates are calendar days, so comparing
+// against a UTC-derived ISO date would slip a full day near midnight.
+const localIsoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 interface ToolModalProps {
   title: string;
   icon?: React.ReactNode;
@@ -255,9 +260,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   const [attendanceSaved, setAttendanceSaved] = useState(false);
   // Day being viewed in the attendance sheet — defaults to today; ‹ browses
   // back to yesterday then older days (each loads its saved sheet).
-  const [attendanceViewDate, setAttendanceViewDate] = useState<string>(() =>
-    new Date().toISOString().split('T')[0]
-  );
+  const [attendanceViewDate, setAttendanceViewDate] = useState<string>(() => localIsoDate(new Date()));
 
   // Determine strict halaqah ID based on role (Teacher is restricted to their halaqahs)
 
@@ -350,7 +353,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
   // Students who already have a session record TODAY — they sink to the bottom
   // of the roster (the queue = who hasn't been recorded yet).
-  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayIso = useMemo(() => localIsoDate(new Date()), []);
   const recordedTodayIds = useMemo(() => {
     const ids = new Set<string>();
     for (const r of sessionRecords || []) {
@@ -456,7 +459,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   };
 
   const openAttendanceModal = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localIsoDate(new Date());
     setAttendanceViewDate(today);
     seedAttendanceForDate(today);
     setAttendanceSaved(false);
@@ -466,7 +469,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
   const shiftAttendanceView = (days: number) => {
     const d = new Date(`${attendanceViewDate}T00:00:00`);
     d.setDate(d.getDate() + days);
-    const iso = d.toISOString().split('T')[0];
+    const iso = localIsoDate(d);
     if (iso > todayIso) return; // never browse into the future
     setAttendanceViewDate(iso);
     seedAttendanceForDate(iso);

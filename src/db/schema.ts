@@ -105,10 +105,15 @@ export function snakeToCamelCase<T = any>(obj: any, parentKey?: string): T {
     }
     const iso = obj.toISOString();
     // For pure DATE columns (or midnight UTC), format as YYYY-MM-DD
-    const isPureDateKey = parentKey && /(?:^|[a-z])(Date|date)$/.test(parentKey);
+    const isPureDateKey = parentKey && /(?:^|[a-z])(Dates?|dates?)$/.test(parentKey);
     const isMidnight = iso.endsWith('T00:00:00.000Z');
     if (isPureDateKey || isMidnight) {
-      return iso.split('T')[0] as unknown as T;
+      // pg returns DATE columns as a Date at server-local midnight — format in
+      // local time, since toISOString() would shift the day back in UTC.
+      const y = obj.getFullYear();
+      const m = String(obj.getMonth() + 1).padStart(2, '0');
+      const d = String(obj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}` as unknown as T;
     }
     return iso as unknown as T;
   }

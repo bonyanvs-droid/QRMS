@@ -225,30 +225,42 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
   // Quran Planning Engine Integration — plan determines which tracks today's session needs
   const activeQuranPlan = getActiveStudentQuranPlan(student.id);
-  const todayIso = new Date().toISOString().split('T')[0];
+  const toLocalIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const todayIso = toLocalIso(new Date());
 
-  // Update-mode: if a session record already exists for today, reopening must show
-  // THAT recorded achievement (editable) — never the next milestone's prefilled range.
-  const todayRecord = useMemo(
-    () => (sessionRecords || []).find((r) => r.studentId === student.id && r.date === todayIso),
-    [sessionRecords, student.id, todayIso]
-  );
+  // Update-mode: if today's session already carries a genuine achievement, reopening
+  // must show THAT recorded entry (editable) — never the next milestone's prefilled
+  // range. An attendance-only record is NOT an achievement and must not lock the day.
+  const todayRecord = useMemo(() => {
+    const hasTrackData = (r: DailySessionRecord) =>
+      Boolean(
+        r.memorization ||
+          r.revision ||
+          r.spelling ||
+          (r.customTracks && Object.keys(r.customTracks).length > 0)
+      );
+    return (sessionRecords || [])
+      .filter((r) => r.studentId === student.id && r.date === todayIso && hasTrackData(r))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+  }, [sessionRecords, student.id, todayIso]);
 
-  // Intelligent Floating Milestone: Look for today's date first; if absent/past or student was away,
-  // find the first uncompleted (pending) milestone so the student resumes from their exact stopping point!
+  // Intelligent Floating Milestone: when today's achievement exists, reopen today's
+  // milestone for update. Otherwise resume from the OLDEST unfulfilled milestone —
+  // yesterday's debt surfaces before today's target.
   const todayDailyItem = useMemo(() => {
     const dailyPlans = activeQuranPlan?.generatedPlan?.dailyPlans;
     if (!dailyPlans || dailyPlans.length === 0) return undefined;
 
-    // 1. Direct match with today's calendar date if still pending — or when a record
-    //    exists for today (update-mode keeps today's milestone so saving UPDATES it
-    //    and rebuilds the future plan, instead of silently consuming tomorrow's).
     const exactToday = dailyPlans.find((d) => d.date === todayIso);
-    if (exactToday && (exactToday.status === 'pending' || todayRecord)) {
+
+    // 1. Achievement already recorded today → today's milestone in update-mode
+    //    (saving UPDATES it and rebuilds the future plan — never consumes tomorrow).
+    if (todayRecord && exactToday) {
       return exactToday;
     }
 
-    // 2. Floating Milestone Queue: Find the first pending milestone in chronological sequence
+    // 2. Floating Milestone Queue: first pending milestone in chronological sequence
     const firstPending = dailyPlans.find((d) => !d.isHistorical && d.status === 'pending');
     if (firstPending) {
       return firstPending;
@@ -556,7 +568,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const handlePrevStep = () => setStepIndex((i) => Math.max(i - 1, 0));
 
   const handleSave = async (andSendReport = false) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = toLocalIso(new Date());
 
     const isSpellingUnachieved = Boolean(unachievedTracks['spelling']);
     const isMemUnachieved = Boolean(unachievedTracks['memorization']);
