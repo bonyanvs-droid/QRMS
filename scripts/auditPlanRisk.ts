@@ -107,7 +107,18 @@ async function main() {
         )
       : 0;
 
-    const honestRisk = units.length > remainingDays;
+    // A position already past the target has zero remaining units — the
+    // partitioner doesn't know direction semantics, so guard it here like
+    // recalculationService does.
+    const pos = plan.currentPosition;
+    const tEnd = plan.targetEnd;
+    const passedTarget =
+      plan.direction === 'backward'
+        ? pos.surahNumber < tEnd.surahNumber ||
+          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber)
+        : pos.surahNumber > tEnd.surahNumber ||
+          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber);
+    const honestRisk = !passedTarget && units.length > remainingDays;
     const storedDiag = plan.targetAtRiskDiagnostic;
     const storedRisk = row.status === 'at_risk' || storedDiag?.isAtRisk === true;
     const cur = `${getSurahArabicName(plan.currentPosition.surahNumber)}:${plan.currentPosition.ayahNumber}`;

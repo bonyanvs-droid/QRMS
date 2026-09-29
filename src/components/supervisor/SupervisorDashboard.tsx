@@ -117,6 +117,23 @@ export const SupervisorDashboard: React.FC = () => {
     };
   }, [selectedScopeType, activeRoleConfig]);
 
+  // Scope pills are limited to the role(s) actually granted on the account —
+  // a stage supervisor sees only "مشرف مرحلة", while a general supervisor can
+  // look through every lens (data is still filtered by their real scope).
+  const allowedScopeTypes = useMemo<SupervisorType[]>(() => {
+    const t = currentUser?.supervisorScope?.type;
+    if (!t || t === 'general_supervisor') {
+      return [
+        'general_supervisor',
+        'quran_supervisor',
+        'spelling_supervisor',
+        'educational_supervisor',
+        'stage_supervisor',
+      ];
+    }
+    return [t];
+  }, [currentUser]);
+
   // Filter students for active tenant
   const tenantStudents = useMemo(() => {
     return students.filter((s) => !activeTenantId || s.tenantId === activeTenantId);
@@ -196,48 +213,11 @@ export const SupervisorDashboard: React.FC = () => {
     );
     if (!canOpenPlan) return null;
 
-    const plan = quranPlans.find(
-      (p) =>
-        p.studentId === s.id &&
-        (p.status === 'active' ||
-          p.status === 'at_risk' ||
-          p.status === 'paused' ||
-          p.status === 'completed')
-    );
-    const hasPlan = Boolean(plan);
-    // "بلغ المستهدف": plan completed, or the recorded position passed the
-    // target end along the plan's own traversal direction (backward descends
-    // surah numbers).
-    const pos = plan?.currentPosition;
-    const tEnd = plan?.targetEnd ?? plan?.originalTarget?.targetEnd;
-    const passedTarget =
-      !!pos &&
-      !!tEnd &&
-      (plan!.direction === 'backward'
-        ? pos.surahNumber < tEnd.surahNumber ||
-          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber)
-        : pos.surahNumber > tEnd.surahNumber ||
-          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber));
-    const reachedTarget = hasPlan && (plan!.status === 'completed' || passedTarget);
-    const isAtRisk =
-      plan?.status === 'at_risk' || plan?.targetAtRiskDiagnostic?.isAtRisk === true;
-    // "متابعة الخطة" carries the precise meaning: the student HAS a plan but
-    // the plan does NOT take him to his grade target — either the endpoint is
-    // below the required grade target, or the pace is infeasible (at_risk).
-    // A healthy in-progress plan gets a neutral "خطة جارية" instead.
-    const gradeTarget = resolveStudentGradeTargetPosition(
-      s,
-      academicConfig,
-      findStageConfigForStudent(s, quranStageConfigs)
-    );
-    const targetDeficient =
-      hasPlan &&
-      !planEndCoversTarget(
-        tEnd,
-        gradeTarget ?? undefined,
-        plan!.direction || 'backward'
-      );
-    const needsFollowUp = hasPlan && (targetDeficient || isAtRisk);
+    const health = planHealthMap.get(s.id) || planHealthFor(s);
+    const hasPlan = Boolean(health.plan);
+    const needsFollowUp =
+      health.state === 'deficient' || health.state === 'at_risk';
+    const reachedTarget = health.state === 'reached';
 
     return (
       <button
@@ -257,9 +237,9 @@ export const SupervisorDashboard: React.FC = () => {
           canEdit
             ? !hasPlan
               ? 'تأسيس واعتماد الخطة القرآنية للطالب'
-              : targetDeficient
+              : health.state === 'deficient'
               ? 'الخطة لا تصل إلى مستهدف الصف — تحتاج تعديل النطاق'
-              : isAtRisk
+              : health.state === 'at_risk'
               ? 'الخطة متعثرة عن المستهدف — تحتاج مراجعة وتحديثاً'
               : reachedTarget
               ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
@@ -299,13 +279,119 @@ export const SupervisorDashboard: React.FC = () => {
   const studentTeacherName = (s: Student, halObj?: { teacherName?: string }) =>
     s.teacherName || halObj?.teacherName || 'غير محدد';
 
-  // Interventions / At-risk plans
-  const atRiskPlans = useMemo(() => {
-    return (quranPlans || []).filter((p) => {
-      const isTenant = !activeTenantId || p.tenantId === activeTenantId;
-      return isTenant && (p.status === 'at_risk' || p.targetAtRiskDiagnostic);
-    });
-  }, [quranPlans, activeTenantId]);
+  // Quran-track students in scope (activities-only students never have plans)
+  const scopedQuranStudents = useMemo(() => {
+    return scopedStudents.filter(
+      (s) => getStudentCategory(s, admissionsRequests) !== 'activities'
+    );
+  }, [scopedStudents, admissionsRequests]);
+
+  // Unified plan-health resolver — the single source of truth shared by the
+  // students-tab button, the KPI counters, halaqah cards and the radar.
+  // States: none > reached > deficient > at_risk > healthy.
+  type PlanHealthState = 'none' | 'reached' | 'deficient' | 'at_risk' | 'healthy';
+  const planHealthFor = (s: Student) => {
+    const plan = quranPlans.find(
+      (p) =>
+        p.studentId === s.id &&
+        (p.status === 'active' ||
+          p.status === 'at_risk' ||
+          p.status === 'paused' ||
+          p.status === 'completed')
+    );
+    if (!plan) {
+      return { plan: undefined, state: 'none' as PlanHealthState };
+    }
+
+    const pos = plan.currentPosition;
+    const tEnd = plan.targetEnd ?? plan.originalTarget?.targetEnd;
+    const dir = plan.direction || 'backward';
+    const covers = (end: typeof pos, req: typeof pos) =>
+      !!end && !!req && planEndCoversTarget(end, req, dir);
+    const passedTarget = covers(pos, tEnd);
+    const reachedTarget = plan.status === 'completed' || passedTarget;
+    const isAtRisk =
+      plan.status === 'at_risk' || plan.targetAtRiskDiagnostic?.isAtRisk === true;
+    const gradeTarget = resolveStudentGradeTargetPosition(
+      s,
+      academicConfig,
+      findStageConfigForStudent(s, quranStageConfigs)
+    );
+    const targetDeficient = !planEndCoversTarget(tEnd, gradeTarget ?? undefined, dir);
+    const passedGradeTarget = covers(pos, gradeTarget ?? undefined);
+
+    // Achievement trumps everything: once the position passed the grade
+    // target the plan's endpoint no longer matters.
+    const state: PlanHealthState = passedGradeTarget
+      ? 'reached'
+      : targetDeficient
+      ? 'deficient'
+      : isAtRisk
+      ? 'at_risk'
+      : reachedTarget
+      ? 'reached'
+      : 'healthy';
+    return { plan, state, isAtRisk, targetDeficient, reachedTarget, passedGradeTarget };
+  };
+
+  const planHealthMap = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof planHealthFor>>();
+    for (const s of scopedQuranStudents) m.set(s.id, planHealthFor(s));
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedQuranStudents, quranPlans, academicConfig, quranStageConfigs]);
+
+  // Intervention radar buckets — non-archived plans of in-scope students only
+  const radarBuckets = useMemo(() => {
+    const buckets: Record<PlanHealthState, Student[]> = {
+      none: [],
+      deficient: [],
+      at_risk: [],
+      reached: [],
+      healthy: [],
+    };
+    for (const s of scopedQuranStudents) {
+      const h = planHealthMap.get(s.id);
+      if (h) buckets[h.state].push(s);
+    }
+    return buckets;
+  }, [scopedQuranStudents, planHealthMap]);
+
+  const followUpCount = radarBuckets.deficient.length + radarBuckets.at_risk.length;
+
+  // Per-halaqah real metrics: weekly recording coverage + plan health counts
+  const halaqahMetricsFor = (halId: string) => {
+    const halStudents = tenantStudents.filter((s) => s.halaqahId === halId);
+    const week = academicConfig.currentWeek;
+    const recs = sessionRecords.filter(
+      (r) => r.halaqahId === halId && r.weekNumber === week
+    );
+    const recordedStudents = new Set(recs.map((r) => r.studentId)).size;
+    const recordedDays = new Set(recs.map((r) => r.date)).size;
+    const planCounts: Record<PlanHealthState, number> = {
+      none: 0,
+      deficient: 0,
+      at_risk: 0,
+      reached: 0,
+      healthy: 0,
+    };
+    for (const s of halStudents) {
+      const h = planHealthMap.get(s.id);
+      if (h) planCounts[h.state]++;
+    }
+    return {
+      total: halStudents.length,
+      recordedStudents,
+      recordedDays,
+      planCounts,
+      quranTracked:
+        planCounts.none +
+        planCounts.deficient +
+        planCounts.at_risk +
+        planCounts.reached +
+        planCounts.healthy,
+    };
+  };
 
   // Scoped Nominations
   const scopedTrackNominations = useMemo(() => {
@@ -423,37 +509,29 @@ export const SupervisorDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Scope Selector Pills (Role + Scope Switcher) */}
+          {/* Scope Selector Pills — shows only the scopes actually granted to
+              this supervisor. A single-scope supervisor sees a static badge. */}
           <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2 shrink-0">
-            <div className="text-[10px] text-slate-400 font-bold px-2 mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <Sliders className="w-3 h-3 text-slate-400" />
-                <span>نطاق الإشراف النشط (Scope):</span>
-              </span>
-              <span className="text-emerald-400 font-mono">RBAC P8</span>
+            <div className="text-[10px] text-slate-400 font-bold px-2 mb-1.5 flex items-center gap-1">
+              <Sliders className="w-3 h-3 text-slate-400" />
+              <span>نطاق الإشراف النشط:</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-              {SUPERVISOR_ROLES_CONFIG.filter((c) => c.type !== 'admissions_supervisor').map((conf) => {
+              {SUPERVISOR_ROLES_CONFIG.filter((c) =>
+                allowedScopeTypes.includes(c.type)
+              ).map((conf) => {
                 const isSelected = selectedScopeType === conf.type;
                 return (
                   <button
                     key={conf.type}
                     onClick={() => setSelectedScopeType(conf.type)}
-                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all text-center cursor-pointer ${
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all text-center ${
                       isSelected
                         ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-300 hover:bg-slate-700/70 hover:text-white'
+                        : 'text-slate-300 hover:bg-slate-700/70 hover:text-white cursor-pointer'
                     }`}
                   >
-                    {conf.type === 'general_supervisor'
-                      ? 'إشراف عام'
-                      : conf.type === 'quran_supervisor'
-                      ? 'المسار القرآني'
-                      : conf.type === 'spelling_supervisor'
-                      ? 'مسار الهجاء'
-                      : conf.type === 'educational_supervisor'
-                      ? 'المسار القيمي'
-                      : 'مشرف مرحلة'}
+                    {conf.label}
                   </button>
                 );
               })}
@@ -461,15 +539,22 @@ export const SupervisorDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Dynamic High-Level KPIs Based on Scope */}
-        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 border-t border-slate-800">
-          <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+        {/* Dynamic High-Level KPIs Based on Scope — clickable, each card
+            jumps to the tab that shows its underlying detail */}
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-5 gap-4 pt-6 border-t border-slate-800">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
+          >
             <div className="text-slate-400 text-xs font-semibold mb-1">الحلقات المشمولة بالنطاق</div>
             <div className="text-2xl font-black text-white font-mono">{tenantHalaqahs.length}</div>
             <div className="text-[11px] text-emerald-400 mt-1">حلقات مرصودة بنشاط</div>
-          </div>
+          </button>
 
-          <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+          <button
+            onClick={() => setActiveTab('students')}
+            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
+          >
             <div className="text-slate-400 text-xs font-semibold mb-1">الطلاب في نطاق الإشراف</div>
             <div className="text-2xl font-black text-white font-mono">{scopedStudents.length}</div>
             <div className="text-[11px] text-slate-300 mt-1">
@@ -479,22 +564,23 @@ export const SupervisorDashboard: React.FC = () => {
                 ? 'مشمولون بالقيم'
                 : 'في مسارات الحفظ والمراجعة'}
             </div>
-          </div>
+          </button>
 
-          <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+          <button
+            onClick={() => setActiveTab('interventions')}
+            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
+          >
             <div className="text-slate-400 text-xs font-semibold mb-1">
               {selectedScopeType === 'spelling_supervisor'
                 ? 'معدل إتقان الهجاء والتأسيس'
                 : selectedScopeType === 'educational_supervisor'
                 ? 'إنجاز الخطة القيمية'
-                : 'تنبيهات التعثر القرآني'}
+                : 'خطط تحتاج متابعة'}
             </div>
             <div
               className={`text-2xl font-black font-mono ${
                 selectedScopeType === 'educational_supervisor'
                   ? 'text-purple-400'
-                  : selectedScopeType === 'spelling_supervisor'
-                  ? 'text-amber-400'
                   : 'text-amber-400'
               }`}
             >
@@ -502,18 +588,32 @@ export const SupervisorDashboard: React.FC = () => {
                 ? `${spellingMetrics.averageMastery}%`
                 : selectedScopeType === 'educational_supervisor'
                 ? `${Math.round((educationalMetrics.completedWeeks / Math.max(1, educationalMetrics.totalWeeks)) * 100)}%`
-                : atRiskPlans.length}
+                : followUpCount}
             </div>
             <div className="text-[11px] text-slate-300 mt-1">
               {selectedScopeType === 'spelling_supervisor'
                 ? `من ${spellingMetrics.activeLessonsCount} دروس نشطة`
                 : selectedScopeType === 'educational_supervisor'
                 ? `${educationalMetrics.completedWeeks} أسبوعاً مكتملاً`
-                : 'تتطلب مراجعة المشرف'}
+                : 'هدف ناقص أو إيقاع متعثر'}
             </div>
-          </div>
+          </button>
 
-          <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+          <button
+            onClick={() => setActiveTab('interventions')}
+            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
+          >
+            <div className="text-slate-400 text-xs font-semibold mb-1">بلغوا مستهدف الصف</div>
+            <div className="text-2xl font-black text-emerald-400 font-mono">
+              {radarBuckets.reached.length}
+            </div>
+            <div className="text-[11px] text-slate-300 mt-1">إنجاز مكتمل للمرحلة</div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('nominations')}
+            className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-right hover:bg-slate-700/60 transition-colors cursor-pointer"
+          >
             <div className="text-slate-400 text-xs font-semibold mb-1">ترشيحات بانتظار الاعتماد</div>
             <div className="text-2xl font-black text-white font-mono">{pendingNominationsCount}</div>
             <div className="text-[11px] text-slate-300 mt-1">
@@ -521,7 +621,7 @@ export const SupervisorDashboard: React.FC = () => {
                 ? 'كافة مسارات المجمع'
                 : `في ${activeRoleConfig.label}`}
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -610,7 +710,7 @@ export const SupervisorDashboard: React.FC = () => {
             }`}
           >
             <AlertTriangle className="w-4 h-4 text-amber-500" />
-            <span>رادار التدخل وإعادة الحساب ({atRiskPlans.length})</span>
+            <span>رادار التدخل والخطط ({followUpCount + radarBuckets.none.length})</span>
           </button>
         )}
 
@@ -994,6 +1094,9 @@ export const SupervisorDashboard: React.FC = () => {
                   const halStudents = tenantStudents.filter((s) => s.halaqahId === hal.id);
                   const teacher = teachers.find((t) => t.id === hal.teacherId);
                   const halNoms = scopedTrackNominations.filter((n) => n.halaqahId === hal.id);
+                  const halMetrics = halaqahMetricsFor(hal.id);
+                  const followUps =
+                    halMetrics.planCounts.deficient + halMetrics.planCounts.at_risk;
 
                   return (
                     <div
@@ -1026,16 +1129,48 @@ export const SupervisorDashboard: React.FC = () => {
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-600">انتظام التسميع الأسبوعي:</span>
-                          <strong className="text-emerald-700 font-mono">95%</strong>
+                          <span className="text-slate-600">انتظام التسميع هذا الأسبوع:</span>
+                          <strong
+                            className={`font-mono ${
+                              halMetrics.total > 0 &&
+                              halMetrics.recordedStudents / halMetrics.total >= 0.8
+                                ? 'text-emerald-700'
+                                : halMetrics.recordedStudents > 0
+                                ? 'text-amber-700'
+                                : 'text-slate-500'
+                            }`}
+                          >
+                            {halMetrics.total > 0
+                              ? `${Math.round(
+                                  (halMetrics.recordedStudents / halMetrics.total) * 100
+                                )}%`
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">طلاب رُصدوا هذا الأسبوع:</span>
+                          <span className="font-bold text-slate-800 font-mono">
+                            {halMetrics.recordedStudents}/{halMetrics.total}
+                          </span>
                         </div>
                       </div>
 
                       <div className="pt-2 flex items-center justify-between text-[11px]">
-                        <span className="text-slate-400">حالة الخطة: معتمدة ومقفلة</span>
-                        <span className="text-emerald-800 font-bold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> منتظمة
+                        <span className="text-slate-400">
+                          خطط: {halMetrics.planCounts.healthy + halMetrics.planCounts.reached} جارية
+                          {halMetrics.planCounts.none > 0 &&
+                            ` · ${halMetrics.planCounts.none} بلا خطة`}
                         </span>
+                        {followUps > 0 ? (
+                          <span className="text-amber-800 font-bold flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> {followUps}{' '}
+                            تحتاج متابعة
+                          </span>
+                        ) : (
+                          <span className="text-emerald-800 font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> منتظمة
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -1202,14 +1337,14 @@ export const SupervisorDashboard: React.FC = () => {
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-6">
           <div>
             <h3 className="text-lg font-bold text-slate-900 font-serif">
-              رادار التدخل المبكر وإعادة الحساب القرآني
+              رادار التدخل وصحة الخطط القرآنية
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              قائمة الطلاب الذين قام المحرك القرآني بإعادة جدولة خططهم أو الذين تأخروا عن وتيرة الحفظ
+              تصنيف طلاب النطاق حسب صحة خططهم: بلا خطة، هدف ناقص عن مستهدف الصف، إيقاع متعثر، أو بلغوا المستهدف
             </p>
           </div>
 
-          {atRiskPlans.length === 0 ? (
+          {followUpCount === 0 && radarBuckets.none.length === 0 && (
             <div className="p-8 text-center bg-emerald-50/50 rounded-2xl border border-emerald-200 text-xs text-emerald-900">
               <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
               <div className="font-bold text-sm">
@@ -1219,38 +1354,96 @@ export const SupervisorDashboard: React.FC = () => {
                 المحرك القرآني يراقب الحضور والتسميع بشكل مستمر ويعيد الحساب تلقائياً عند أي غياب.
               </p>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {atRiskPlans.map((plan) => {
-                const student = tenantStudents.find((s) => s.id === plan.studentId);
-                return (
-                  <div
-                    key={plan.id}
-                    className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 flex items-center justify-between gap-4"
-                  >
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        {student?.fullName || student?.name || plan.studentId}
-                      </h4>
-                      <p className="text-xs text-amber-800 mt-0.5">
-                        تشخيص المحرك:{' '}
-                        {typeof plan.targetAtRiskDiagnostic === 'object' &&
-                        plan.targetAtRiskDiagnostic !== null
-                          ? (plan.targetAtRiskDiagnostic as any).message ||
-                            (plan.targetAtRiskDiagnostic as any).reason ||
-                            'تراكم في ورد المراجعة يتطلب تدخلاً'
-                          : plan.targetAtRiskDiagnostic ||
-                            'تراكم في المراجعة الصغرى يتطلب تركيزاً إضافياً'}
-                      </p>
-                    </div>
-                    <span className="text-xs font-bold px-3 py-1 rounded-xl bg-amber-200 text-amber-900">
-                      معاد حسابه آلياً
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           )}
+
+          {/* Categorized buckets — same semantics as the students-tab button:
+              بلا خطة / هدف ناقص / إيقاع متعثر / بلغ المستهدف */}
+          {(
+            [
+              {
+                key: 'none' as const,
+                title: 'طلاب بلا خطة قرآنية',
+                hint: 'لم تُنشأ خططهم بعد — تحتاج تأسيساً واعتماداً',
+                badge: 'bg-rose-100 text-rose-800 border-rose-200',
+                row: 'bg-rose-50/60 border-rose-200',
+                action: 'تأسيس الخطة',
+              },
+              {
+                key: 'deficient' as const,
+                title: 'خطة لا تصل لمستهدف الصف',
+                hint: 'نهاية خطتهم أدنى من المستهدف المطلوب للصف — تحتاج تعديل النطاق',
+                badge: 'bg-amber-100 text-amber-900 border-amber-200',
+                row: 'bg-amber-50/60 border-amber-200',
+                action: 'تعديل النطاق',
+              },
+              {
+                key: 'at_risk' as const,
+                title: 'إيقاع متعثر عن المستهدف',
+                hint: 'الهدف صحيح لكن الوتيرة الحالية لا تكفي للوصول إليه في الفترة المتاحة',
+                badge: 'bg-amber-100 text-amber-900 border-amber-200',
+                row: 'bg-amber-50/60 border-amber-200',
+                action: 'مراجعة الإيقاع',
+              },
+              {
+                key: 'reached' as const,
+                title: 'بلغوا مستهدف الصف',
+                hint: 'أنجزوا المستهدف الأكاديمي لصفهم — إنجاز المرحلة',
+                badge: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                row: 'bg-emerald-50/60 border-emerald-200',
+                action: 'إدارة الخطة',
+              },
+            ] as const
+          ).map((bucket) => {
+            const list = radarBuckets[bucket.key];
+            if (list.length === 0) return null;
+            return (
+              <div key={bucket.key} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black text-slate-800">
+                    {bucket.title}
+                    <span className="text-slate-400 font-mono"> ({list.length})</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500">{bucket.hint}</p>
+                </div>
+                <div className="space-y-2">
+                  {list.map((student) => {
+                    const plan = planHealthMap.get(student.id)?.plan;
+                    return (
+                      <div
+                        key={student.id}
+                        className={`p-4 rounded-2xl border flex items-center justify-between gap-4 ${bucket.row}`}
+                      >
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900">
+                            {student.fullName || student.name}
+                          </h4>
+                          <p className="text-xs text-slate-600 mt-0.5">
+                            {student.halaqahName ||
+                              rawTenantHalaqahs.find((h) => h.id === student.halaqahId)?.name ||
+                              'بدون حلقة'}
+                            {bucket.key === 'at_risk' &&
+                            plan?.targetAtRiskDiagnostic &&
+                            typeof plan.targetAtRiskDiagnostic === 'object'
+                              ? ` — ${
+                                  (plan.targetAtRiskDiagnostic as any).warningMessage ||
+                                  'الوتيرة الحالية لا تكفي'
+                                }`
+                              : ''}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setComprehensiveStudent(student)}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl border cursor-pointer shrink-0 ${bucket.badge}`}
+                        >
+                          {bucket.action}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1276,6 +1469,9 @@ export const SupervisorDashboard: React.FC = () => {
           <div className="space-y-4">
             {tenantHalaqahs.map((hal) => {
               const teacher = teachers.find((t) => t.id === hal.teacherId);
+              const m = halaqahMetricsFor(hal.id);
+              const coverage = m.total > 0 ? m.recordedStudents / m.total : 0;
+              const followUps = m.planCounts.deficient + m.planCounts.at_risk;
               return (
                 <div
                   key={hal.id}
@@ -1289,11 +1485,35 @@ export const SupervisorDashboard: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-4 text-xs">
                     <div className="text-right">
-                      <span className="text-slate-500 block">رصد التسميع اليومي:</span>
-                      <strong className="text-emerald-700">مكتمل يومياً بنسبة 100%</strong>
+                      <span className="text-slate-500 block">رصد التسميع هذا الأسبوع:</span>
+                      <strong className="text-slate-800">
+                        {m.recordedStudents}/{m.total} طالباً · {m.recordedDays} يوماً
+                      </strong>
                     </div>
-                    <span className="px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
-                      ممتاز
+                    <div className="text-right">
+                      <span className="text-slate-500 block">حالة الخطط:</span>
+                      <strong className="text-slate-800">
+                        {followUps > 0
+                          ? `${followUps} تحتاج متابعة`
+                          : m.quranTracked > 0
+                          ? 'منتظمة'
+                          : '—'}
+                      </strong>
+                    </div>
+                    <span
+                      className={`px-3 py-1.5 rounded-xl font-bold border ${
+                        coverage >= 0.8 && followUps === 0
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          : coverage >= 0.5
+                          ? 'bg-amber-100 text-amber-800 border-amber-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      {coverage >= 0.8 && followUps === 0
+                        ? 'ممتاز'
+                        : coverage >= 0.5
+                        ? 'مقبول'
+                        : 'يحتاج تدخلاً'}
                     </span>
                   </div>
                 </div>
