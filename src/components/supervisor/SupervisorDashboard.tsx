@@ -585,42 +585,73 @@ export const SupervisorDashboard: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {canOpenPlan && (() => {
-                      const hasPlan = Boolean(
-                        quranPlans.some((p) => p.studentId === s.id && p.status === 'active')
+                      const plan = quranPlans.find(
+                        (p) =>
+                          p.studentId === s.id &&
+                          (p.status === 'active' ||
+                            p.status === 'at_risk' ||
+                            p.status === 'paused' ||
+                            p.status === 'completed')
                       );
+                      const hasPlan = Boolean(plan);
+                      // "بلغ المستهدف": plan completed, or the recorded
+                      // position passed the target end along the plan's own
+                      // traversal direction (backward descends surah numbers).
+                      const pos = plan?.currentPosition;
+                      const tEnd = plan?.targetEnd ?? plan?.originalTarget?.targetEnd;
+                      const passedTarget =
+                        !!pos &&
+                        !!tEnd &&
+                        (plan!.direction === 'backward'
+                          ? pos.surahNumber < tEnd.surahNumber ||
+                            (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber)
+                          : pos.surahNumber > tEnd.surahNumber ||
+                            (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber));
+                      const reachedTarget = hasPlan && (plan!.status === 'completed' || passedTarget);
+                      const isAtRisk = plan?.status === 'at_risk';
                       return (
                         <button
                           onClick={() => setComprehensiveStudent(s)}
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer border ${
-                            hasPlan
-                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                              : canEdit
-                              ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
-                              : 'bg-slate-100 text-slate-600 border-slate-300'
+                            !hasPlan
+                              ? canEdit
+                                ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
+                                : 'bg-slate-100 text-slate-600 border-slate-300'
+                              : reachedTarget
+                              ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                              : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                           }`}
                           title={
                             canEdit
-                              ? hasPlan
-                                ? 'إدارة وتعديل الخطة القرآنية الشاملة'
-                                : 'تأسيس واعتماد الخطة القرآنية للطالب'
+                              ? !hasPlan
+                                ? 'تأسيس واعتماد الخطة القرآنية للطالب'
+                                : reachedTarget
+                                ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
+                                : isAtRisk
+                                ? 'الخطة متعثرة عن المستهدف — تحتاج مراجعة وتحديثاً'
+                                : 'خطة جارية لم تبلغ المستهدف بعد — متابعة الخطة'
                               : 'عرض محددات الخطة القرآنية'
                           }
                         >
-                          {hasPlan ? (
-                            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
-                          ) : (
+                          {!hasPlan ? (
                             <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+                          ) : reachedTarget ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                          ) : (
+                            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
                           )}
                           <span>
-                            {hasPlan
+                            {!hasPlan
                               ? canEdit
-                                ? 'إدارة الخطة'
-                                : 'الخطة القرآنية'
-                              : canEdit
-                              ? 'تأسيس الخطة'
-                              : 'بانتظار الخطة'}
+                                ? 'تأسيس الخطة'
+                                : 'بانتظار الخطة'
+                              : !canEdit
+                              ? 'الخطة القرآنية'
+                              : reachedTarget
+                              ? 'إدارة الخطة'
+                              : 'متابعة الخطة'}
                           </span>
-                          {!hasPlan && canEdit && (
+                          {((!hasPlan && canEdit) || isAtRisk) && (
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
                           )}
                         </button>
