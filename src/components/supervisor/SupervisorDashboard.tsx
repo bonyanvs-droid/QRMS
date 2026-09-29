@@ -11,6 +11,7 @@ import {
 import { SupervisorType, SupervisorScope } from '../../types';
 import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
 import { filterStudentsByScope, filterHalaqahsByScope, hasPermission } from '../../lib/permissions';
+import { getStudentCategory } from '../../lib/studentCategory';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { Student } from '../../types';
 import {
@@ -55,6 +56,8 @@ export const SupervisorDashboard: React.FC = () => {
     currentUser,
     tracks,
     stages,
+    admissionsRequests,
+    seasonalParticipations,
   } = useApp();
 
   // Active Scope State (Role + Scope Architecture)
@@ -140,6 +143,17 @@ export const SupervisorDashboard: React.FC = () => {
       return true;
     });
   }, [scopedStudents, selectedHalaqahId, selectedStageFilter, searchQuery, rawTenantHalaqahs]);
+
+  // Split students by package: quran-track students (halaqah/full-package) get
+  // plan actions; activities-only students are listed separately without them.
+  const { quranStudents, activityStudents } = useMemo(() => {
+    const quran: Student[] = [];
+    const activity: Student[] = [];
+    for (const s of visibleStudents) {
+      (getStudentCategory(s, admissionsRequests) === 'activities' ? activity : quran).push(s);
+    }
+    return { quranStudents: quran, activityStudents: activity };
+  }, [visibleStudents, admissionsRequests]);
 
   const scopedStageIds = useMemo(() => {
     const set = new Set<string>();
@@ -541,12 +555,17 @@ export const SupervisorDashboard: React.FC = () => {
           </div>
 
           <div className="divide-y divide-slate-100 mt-2">
-            {visibleStudents.length === 0 && (
+            {quranStudents.length === 0 && activityStudents.length === 0 && (
               <div className="py-10 text-center text-sm text-slate-400 font-bold">
                 لا يوجد طلاب مطابقون داخل نطاق إشرافك
               </div>
             )}
-            {visibleStudents.map((s) => {
+            {quranStudents.length > 0 && activityStudents.length > 0 && (
+              <div className="py-2 text-[11px] font-black text-slate-500">
+                طلاب الحلقات والبرامج ({quranStudents.length})
+              </div>
+            )}
+            {quranStudents.map((s) => {
               const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
               const stageId = s.stageId || halObj?.stageId;
               const canOpenPlan = hasPermission(
@@ -662,6 +681,49 @@ export const SupervisorDashboard: React.FC = () => {
               );
             })}
           </div>
+
+          {activityStudents.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <h4 className="text-xs font-black text-slate-700">
+                  طلاب النشاط ({activityStudents.length})
+                </h4>
+                <span className="text-[10px] text-slate-400 font-bold">
+                  باقة الأنشطة والبرامج فقط — لا خطط قرآنية
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {activityStudents.map((s) => {
+                  const participationsCount = seasonalParticipations.filter(
+                    (p) => p.studentId === s.id
+                  ).length;
+                  return (
+                    <div key={s.id} className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-sm text-slate-900">{s.fullName}</span>
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5">
+                            {s.grade}
+                          </span>
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
+                            أنشطة فقط
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-bold mt-0.5 truncate">
+                          {s.registrationTypeLabel || 'باقة الأنشطة والبرامج'}
+                        </div>
+                      </div>
+                      {participationsCount > 0 && (
+                        <span className="shrink-0 text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1">
+                          {participationsCount} مشاركة
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
