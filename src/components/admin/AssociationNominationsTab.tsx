@@ -599,7 +599,7 @@ export const AssociationNominationsTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Banner - Compact & Mobile-Responsive */}
-      <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xs relative overflow-hidden">
+      <div className="bg-gradient-to-r from-emerald-50 via-white to-emerald-50 text-slate-900 dark:from-slate-900 dark:via-emerald-950 dark:to-slate-900 dark:text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xs relative overflow-hidden border border-emerald-100 dark:border-transparent">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div>
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
@@ -607,35 +607,35 @@ export const AssociationNominationsTab: React.FC = () => {
                 منصة الترشيح والاختبارات
               </span>
               {activeTenant?.name && (
-                <span className="text-emerald-300 text-[11px] sm:text-xs font-semibold">
+                <span className="text-emerald-700 dark:text-emerald-300 text-[11px] sm:text-xs font-semibold">
                   {activeTenant.name}
                 </span>
               )}
             </div>
-            <h2 className="text-base sm:text-lg md:text-xl font-black text-white tracking-tight">
+            <h2 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-white tracking-tight">
               ترشيحات الطلاب والاختبارات الداخلية والرسمية
             </h2>
-            <p className="text-[11px] sm:text-xs text-slate-300 mt-1 max-w-xl leading-relaxed hidden sm:block">
+            <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-300 mt-1 max-w-xl leading-relaxed hidden sm:block">
               سير عمل متكامل: رفع الترشيح، إسناد المختبر، رصد بنود الاستمارة التقييمية، واعتماد المشرف.
             </p>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 shrink-0">
-            <div className="bg-white/10 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 text-center">
-              <div className="text-base sm:text-lg md:text-xl font-black text-white">{metrics.total}</div>
-              <div className="text-[10px] text-slate-300 font-medium whitespace-nowrap">إجمالي المرشحين</div>
+            <div className="bg-slate-900/5 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-900/10 dark:bg-white/10 dark:border-white/10 text-center">
+              <div className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-white">{metrics.total}</div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-300 font-medium whitespace-nowrap">إجمالي المرشحين</div>
             </div>
-            <div className="bg-white/10 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 text-center">
-              <div className="text-base sm:text-lg md:text-xl font-black text-amber-300">{metrics.submitted + metrics.testing}</div>
-              <div className="text-[10px] text-amber-200 font-medium whitespace-nowrap">قيد التقييم</div>
+            <div className="bg-slate-900/5 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-900/10 dark:bg-white/10 dark:border-white/10 text-center">
+              <div className="text-base sm:text-lg md:text-xl font-black text-amber-600 dark:text-amber-300">{metrics.submitted + metrics.testing}</div>
+              <div className="text-[10px] text-amber-700 dark:text-amber-200 font-medium whitespace-nowrap">قيد التقييم</div>
             </div>
-            <div className="bg-white/10 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 text-center">
-              <div className="text-base sm:text-lg md:text-xl font-black text-emerald-300">{metrics.approved}</div>
-              <div className="text-[10px] text-emerald-200 font-medium whitespace-nowrap">معتمد للجمعية</div>
+            <div className="bg-slate-900/5 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-900/10 dark:bg-white/10 dark:border-white/10 text-center">
+              <div className="text-base sm:text-lg md:text-xl font-black text-emerald-700 dark:text-emerald-300">{metrics.approved}</div>
+              <div className="text-[10px] text-emerald-700 dark:text-emerald-200 font-medium whitespace-nowrap">معتمد للجمعية</div>
             </div>
-            <div className="bg-white/10 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 text-center">
-              <div className="text-base sm:text-lg md:text-xl font-black text-emerald-400">{metrics.completed}</div>
-              <div className="text-[10px] text-emerald-200 font-medium whitespace-nowrap">شهادات صادرة</div>
+            <div className="bg-slate-900/5 backdrop-blur-md px-2.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-900/10 dark:bg-white/10 dark:border-white/10 text-center">
+              <div className="text-base sm:text-lg md:text-xl font-black text-emerald-600 dark:text-emerald-400">{metrics.completed}</div>
+              <div className="text-[10px] text-emerald-700 dark:text-emerald-200 font-medium whitespace-nowrap">شهادات صادرة</div>
             </div>
           </div>
         </div>

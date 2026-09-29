@@ -36,9 +36,186 @@
   color: #e2e8f0 !important;
 }
 
+.dark .text-slate-400,
+.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.dark .border-slate-100,
 .dark .border-slate-200,
 .dark .border-slate-300 {
   border-color: #273449 !important;
+}
+
+/* Translucent white surfaces (sticky bars, overlays) */
+.dark [class~="bg-white/50"],
+.dark [class~="bg-white/60"],
+.dark [class~="bg-white/70"],
+.dark [class~="bg-white/80"],
+.dark [class~="bg-white/90"],
+.dark [class~="bg-white/95"] {
+  background-color: rgba(17, 24, 39, 0.9) !important;
+  color: #f3f4f6 !important;
+  border-color: #1f2937 !important;
+}
+
+/* Slate tint opacity variants */
+.dark [class~="bg-slate-50/50"],
+.dark [class~="bg-slate-50/60"],
+.dark [class~="bg-slate-50/70"],
+.dark [class~="bg-slate-50/80"],
+.dark [class~="bg-slate-100/50"],
+.dark [class~="bg-slate-100/70"],
+.dark [class~="bg-slate-100/80"],
+.dark [class~="bg-slate-100/90"] {
+  background-color: rgba(22, 30, 46, 0.85) !important;
+  color: #e2e8f0 !important;
+  border-color: #273449 !important;
+}
+
+/* ── Soft-tint panels ──────────────────────────────────────────────
+   Colored tint surfaces (bg-*-50 / bg-*-100 and opacity variants)
+   invert to translucent dark panels. [class~="x"] matches whole
+   class tokens only — hover:bg-x-50 and bg-x-500 stay untouched. */
+.dark [class~="bg-emerald-50"],
+.dark [class~="bg-emerald-50/50"],
+.dark [class~="bg-emerald-50/60"],
+.dark [class~="bg-emerald-50/70"],
+.dark [class~="bg-emerald-100"],
+.dark [class~="bg-emerald-100/50"],
+.dark [class~="bg-emerald-100/70"] {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+  color: #d1fae5 !important;
+  border-color: #065f46 !important;
+}
+.dark [class~="bg-amber-50"],
+.dark [class~="bg-amber-50/70"],
+.dark [class~="bg-amber-100"] {
+  background-color: rgba(120, 53, 15, 0.35) !important;
+  color: #fde68a !important;
+  border-color: #92400e !important;
+}
+.dark [class~="bg-yellow-50"],
+.dark [class~="bg-yellow-100"] {
+  background-color: rgba(113, 63, 18, 0.35) !important;
+  color: #fef08a !important;
+  border-color: #a16207 !important;
+}
+.dark [class~="bg-rose-50"],
+.dark [class~="bg-rose-50/70"],
+.dark [class~="bg-rose-100"] {
+  background-color: rgba(136, 19, 55, 0.35) !important;
+  color: #fecdd3 !important;
+  border-color: #9f1239 !important;
+}
+.dark [class~="bg-red-50"],
+.dark [class~="bg-red-100"] {
+  background-color: rgba(127, 29, 29, 0.35) !important;
+  color: #fecaca !important;
+  border-color: #b91c1c !important;
+}
+.dark [class~="bg-blue-50"],
+.dark [class~="bg-blue-50/70"],
+.dark [class~="bg-blue-100"] {
+  background-color: rgba(30, 58, 138, 0.35) !important;
+  color: #bfdbfe !important;
+  border-color: #1e40af !important;
+}
+.dark [class~="bg-sky-50"],
+.dark [class~="bg-sky-100"] {
+  background-color: rgba(12, 74, 110, 0.35) !important;
+  color: #bae6fd !important;
+  border-color: #0369a1 !important;
+}
+.dark [class~="bg-cyan-50"],
+.dark [class~="bg-cyan-100"] {
+  background-color: rgba(21, 94, 117, 0.35) !important;
+  color: #a5f3fc !important;
+  border-color: #0e7490 !important;
+}
+.dark [class~="bg-indigo-50"],
+.dark [class~="bg-indigo-100"] {
+  background-color: rgba(49, 46, 129, 0.35) !important;
+  color: #c7d2fe !important;
+  border-color: #3730a3 !important;
+}
+.dark [class~="bg-violet-50"],
+.dark [class~="bg-violet-100"] {
+  background-color: rgba(76, 29, 149, 0.35) !important;
+  color: #ddd6fe !important;
+  border-color: #5b21b6 !important;
+}
+.dark [class~="bg-purple-50"],
+.dark [class~="bg-purple-50/70"],
+.dark [class~="bg-purple-100"] {
+  background-color: rgba(88, 28, 135, 0.35) !important;
+  color: #e9d5ff !important;
+  border-color: #6b21a8 !important;
+}
+.dark [class~="bg-fuchsia-50"],
+.dark [class~="bg-fuchsia-100"] {
+  background-color: rgba(112, 26, 117, 0.35) !important;
+  color: #f5d0fe !important;
+  border-color: #a21caf !important;
+}
+.dark [class~="bg-pink-50"],
+.dark [class~="bg-pink-100"] {
+  background-color: rgba(131, 24, 67, 0.35) !important;
+  color: #fbcfe8 !important;
+  border-color: #be185d !important;
+}
+.dark [class~="bg-teal-50"],
+.dark [class~="bg-teal-100"] {
+  background-color: rgba(17, 94, 89, 0.35) !important;
+  color: #99f6e4 !important;
+  border-color: #0f766e !important;
+}
+.dark [class~="bg-green-50"],
+.dark [class~="bg-green-100"] {
+  background-color: rgba(20, 83, 45, 0.35) !important;
+  color: #bbf7d0 !important;
+  border-color: #15803d !important;
+}
+.dark [class~="bg-orange-50"],
+.dark [class~="bg-orange-100"] {
+  background-color: rgba(124, 45, 18, 0.35) !important;
+  color: #fed7aa !important;
+  border-color: #c2410c !important;
+}
+
+/* Dark-mode hover remaps — hovers stay dark instead of flashing light */
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-slate-200:hover {
+  background-color: #1f2937 !important;
+}
+.dark .hover\:bg-emerald-50:hover,
+.dark .hover\:bg-emerald-100:hover {
+  background-color: rgba(6, 78, 59, 0.45) !important;
+}
+.dark .hover\:bg-rose-50:hover,
+.dark .hover\:bg-rose-100:hover {
+  background-color: rgba(136, 19, 55, 0.4) !important;
+}
+.dark .hover\:bg-amber-50:hover,
+.dark .hover\:bg-amber-100:hover {
+  background-color: rgba(120, 53, 15, 0.4) !important;
+}
+.dark .hover\:bg-blue-50:hover,
+.dark .hover\:bg-blue-100:hover {
+  background-color: rgba(30, 58, 138, 0.4) !important;
+}
+.dark .hover\:bg-purple-50:hover,
+.dark .hover\:bg-purple-100:hover {
+  background-color: rgba(88, 28, 135, 0.4) !important;
+}
+.dark .hover\:bg-indigo-50:hover,
+.dark .hover\:bg-indigo-100:hover {
+  background-color: rgba(49, 46, 129, 0.4) !important;
+}
+.dark .hover\:bg-teal-50:hover,
+.dark .hover\:bg-teal-100:hover {
+  background-color: rgba(17, 94, 89, 0.4) !important;
 }
 
 /* Custom subtle scrollbar */

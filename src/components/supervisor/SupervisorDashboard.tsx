@@ -546,7 +546,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: String(radarBuckets.reached.length),
       sub: 'بلغوا مستهدف الصف',
       Icon: BookOpen,
-      iconClass: 'text-emerald-400',
+      iconClass: 'text-emerald-600 dark:text-emerald-400',
       visible: true,
     },
     {
@@ -557,7 +557,7 @@ export const SupervisorDashboard: React.FC = () => {
         ? 'حالتك مسجَّلة اليوم'
         : 'حالتك لم تُسجَّل بعد',
       Icon: Navigation,
-      iconClass: 'text-blue-400',
+      iconClass: 'text-blue-600 dark:text-blue-400',
       visible: true,
     },
     {
@@ -566,7 +566,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: String(scopedStudents.length),
       sub: 'في نطاق الإشراف',
       Icon: Users,
-      iconClass: 'text-emerald-400',
+      iconClass: 'text-emerald-600 dark:text-emerald-400',
       visible: true,
     },
     {
@@ -578,7 +578,7 @@ export const SupervisorDashboard: React.FC = () => {
           : `${spellingMetrics.averageMastery}%`,
       sub: `من ${spellingMetrics.activeLessonsCount} دروس نشطة`,
       Icon: Sparkles,
-      iconClass: 'text-amber-400',
+      iconClass: 'text-amber-600 dark:text-amber-400',
       visible:
         (selectedScopeType === 'general_supervisor' ||
           selectedScopeType === 'spelling_supervisor' ||
@@ -591,7 +591,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: `${educationalMetrics.completedWeeks}/${educationalMetrics.totalWeeks}`,
       sub: 'أهداف قيمية منجزة',
       Icon: Heart,
-      iconClass: 'text-purple-400',
+      iconClass: 'text-purple-600 dark:text-purple-400',
       visible:
         (selectedScopeType === 'general_supervisor' ||
           selectedScopeType === 'educational_supervisor' ||
@@ -604,7 +604,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: String(followUpCount + radarBuckets.none.length),
       sub: 'يحتاجون تدخلاً',
       Icon: AlertTriangle,
-      iconClass: 'text-amber-400',
+      iconClass: 'text-amber-600 dark:text-amber-400',
       visible:
         selectedScopeType === 'general_supervisor' ||
         selectedScopeType === 'quran_supervisor' ||
@@ -616,7 +616,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: String(pendingNominationsCount),
       sub: 'بانتظار الاعتماد',
       Icon: Award,
-      iconClass: 'text-teal-400',
+      iconClass: 'text-teal-600 dark:text-teal-400',
       visible: isAssociationActive,
     },
     {
@@ -625,7 +625,7 @@ export const SupervisorDashboard: React.FC = () => {
       stat: String(tenantHalaqahs.length),
       sub: 'حلقات في النطاق',
       Icon: Layers,
-      iconClass: 'text-slate-400',
+      iconClass: 'text-slate-500 dark:text-slate-400',
       visible: true,
     },
   ];
@@ -633,7 +633,7 @@ export const SupervisorDashboard: React.FC = () => {
   return (
     <div className="space-y-8 animate-in fade-in pb-12">
       {/* 1. SUPERVISOR HERO BANNER WITH SCOPE BADGE */}
-      <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800 relative overflow-hidden">
+      <div className="bg-white text-slate-900 dark:bg-slate-900 dark:text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-800 relative overflow-hidden">
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -641,14 +641,14 @@ export const SupervisorDashboard: React.FC = () => {
             <div
               className={`w-14 h-14 rounded-2xl flex items-center justify-center font-bold shadow-lg border ${
                 selectedScopeType === 'quran_supervisor'
-                  ? 'bg-emerald-600/30 text-emerald-400 border-emerald-500/40'
+                  ? 'bg-emerald-600/15 text-emerald-700 border-emerald-500/40 dark:bg-emerald-600/30 dark:text-emerald-400'
                   : selectedScopeType === 'spelling_supervisor'
-                  ? 'bg-amber-600/30 text-amber-400 border-amber-500/40'
+                  ? 'bg-amber-600/15 text-amber-700 border-amber-500/40 dark:bg-amber-600/30 dark:text-amber-400'
                   : selectedScopeType === 'educational_supervisor'
-                  ? 'bg-purple-600/30 text-purple-400 border-purple-500/40'
+                  ? 'bg-purple-600/15 text-purple-700 border-purple-500/40 dark:bg-purple-600/30 dark:text-purple-400'
                   : selectedScopeType === 'stage_supervisor'
-                  ? 'bg-indigo-600/30 text-indigo-400 border-indigo-500/40'
-                  : 'bg-blue-600/30 text-blue-400 border-blue-500/40'
+                  ? 'bg-indigo-600/15 text-indigo-700 border-indigo-500/40 dark:bg-indigo-600/30 dark:text-indigo-400'
+                  : 'bg-blue-600/15 text-blue-700 border-blue-500/40 dark:bg-blue-600/30 dark:text-blue-400'
               }`}
             >
               <ShieldCheck className="w-8 h-8" />
@@ -656,8 +656,8 @@ export const SupervisorDashboard: React.FC = () => {
             <div>
               <h1 className="text-lg sm:text-2xl font-black font-serif leading-snug flex flex-wrap items-baseline gap-x-2">
                 <span>مرحباً بك {currentUser?.name || 'أيها المشرف'}</span>
-                <span className="text-emerald-400">في {portalTitle}</span>
-                <span className="text-[11px] sm:text-xs text-slate-400 font-bold font-sans">
+                <span className="text-emerald-700 dark:text-emerald-400">في {portalTitle}</span>
+                <span className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-bold font-sans">
                   · الأسبوع الأكاديمي {academicConfig.currentWeek}
                 </span>
               </h1>
@@ -668,9 +668,9 @@ export const SupervisorDashboard: React.FC = () => {
               more than one role. A single-role supervisor's scope is already
               stated in the header badge, so the box is hidden entirely. */}
           {allowedScopeTypes.length > 1 && (
-            <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2 shrink-0">
-              <div className="text-[10px] text-slate-400 font-bold px-2 mb-1.5 flex items-center gap-1">
-                <Sliders className="w-3 h-3 text-slate-400" />
+            <div className="bg-slate-100/90 border border-slate-200 dark:bg-slate-800/90 dark:border-slate-700/80 rounded-2xl p-2 shrink-0">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold px-2 mb-1.5 flex items-center gap-1">
+                <Sliders className="w-3 h-3" />
                 <span>نطاق الإشراف النشط:</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
@@ -685,7 +685,7 @@ export const SupervisorDashboard: React.FC = () => {
                       className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all text-center ${
                         isSelected
                           ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-300 hover:bg-slate-700/70 hover:text-white cursor-pointer'
+                          : 'text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700/70 dark:hover:text-white cursor-pointer'
                       }`}
                     >
                       {conf.label}
@@ -700,7 +700,7 @@ export const SupervisorDashboard: React.FC = () => {
         {/* Unified nav-cards — each card is a tab carrying its own live
             stat. The old KPI row and the separate tab bar merged into this
             single strip. */}
-        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 border-t border-slate-800">
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 border-t border-slate-200 dark:border-slate-800">
           {navCards
             .filter((c) => c.visible)
             .map(({ tab, label, stat, sub, Icon, iconClass }) => {
@@ -712,12 +712,12 @@ export const SupervisorDashboard: React.FC = () => {
                   className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
                     isActive
                       ? 'bg-emerald-600 border-emerald-500 shadow-lg shadow-emerald-950/50'
-                      : 'bg-slate-800/80 border-slate-700/80 hover:bg-slate-700/60'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100 dark:bg-slate-800/80 dark:border-slate-700/80 dark:hover:bg-slate-700/60'
                   }`}
                 >
                   <div
                     className={`flex items-center gap-1.5 text-[11px] font-bold ${
-                      isActive ? 'text-emerald-100' : 'text-slate-400'
+                      isActive ? 'text-emerald-100' : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
                     <Icon
@@ -727,12 +727,12 @@ export const SupervisorDashboard: React.FC = () => {
                     />
                     <span className="truncate">{label}</span>
                   </div>
-                  <div className="text-2xl font-black font-mono mt-1.5 text-white">
+                  <div className="text-2xl font-black font-mono mt-1.5 text-slate-900 dark:text-white">
                     {stat}
                   </div>
                   <div
                     className={`text-[10px] mt-0.5 ${
-                      isActive ? 'text-emerald-100/90' : 'text-slate-500'
+                      isActive ? 'text-emerald-100/90' : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
                     {sub}
