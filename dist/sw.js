@@ -93,7 +93,7 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "revision": "a0cdfbcff7b12a06af907297853bd3f2"
   }, {
     "url": "index.html",
-    "revision": "183e7030d40d2dc1fd877187a535f36d"
+    "revision": "66eb3ba5458900371714664ec162f459"
   }, {
     "url": "favicon.ico",
     "revision": "8e6ce27415c832a5f5f2d4d742620c8b"
@@ -134,10 +134,10 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/quran-json-BXqiKKVS.js",
     "revision": null
   }, {
-    "url": "assets/index-kuEHnswV.css",
+    "url": "assets/index-CsM2wTyo.css",
     "revision": null
   }, {
-    "url": "assets/index-D9C2cCic.js",
+    "url": "assets/index-CqnLBZ-m.js",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",

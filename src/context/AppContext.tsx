@@ -1230,6 +1230,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [tenants, activeTenantId]);
 
+  // Full tenant records hydrated from the detail endpoint (SELECT *).
+  // The public /api/tenants list omits operational JSONB configs
+  // (attendanceConfig, prayerConfig, ...), and whenever the session cookie
+  // is stale — server sessions are in-memory and die on every restart —
+  // authenticated users silently fall back to that lean shape.
+  const hydratedTenantsRef = useRef<Map<string, MosqueComplexTenant>>(new Map());
+
+  // Hydrate the ACTIVE tenant's full record once its stripped public row
+  // arrives. Key-presence check (`in`) distinguishes "column not selected"
+  // from a legitimately NULL config, so no refetch loop occurs.
+  useEffect(() => {
+    if (!activeTenant || 'attendanceConfig' in activeTenant) return;
+    const tenantId = activeTenant.id;
+    let cancelled = false;
+    apiClient
+      .get(`/tenants/${tenantId}`)
+      .then((full) => {
+        if (cancelled || !full || typeof full !== 'object' || !full.id) return;
+        hydratedTenantsRef.current.set(full.id, full);
+        setTenants((prev) => prev.map((t) => (t.id === full.id ? { ...t, ...full } : t)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTenant]);
+
   // Keep the API client's tenant context synchronized with the active tenant so
   // every request carries X-Tenant-Id. Cross-tenant roles keep a null context
   // and continue passing tenant explicitly per query to preserve global views.
@@ -1572,14 +1599,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // P3 Subscriptions: Multi-Tenancy, Stages, and Archives
         unsubs.push(
           subscribeToTenants((remoteTenants) => {
-            setTenants(remoteTenants);
-            if (remoteTenants && remoteTenants.length > 0) {
+            // Overlay hydrated full records so periodic polls of the public
+            // (stripped) list don't drop the operational configs back out.
+            const hydrated = hydratedTenantsRef.current;
+            const mergedTenants = hydrated.size
+              ? remoteTenants.map((t) => {
+                  if (t && typeof t === 'object' && 'attendanceConfig' in t) {
+                    hydrated.set(t.id, t);
+                    return t;
+                  }
+                  const full = hydrated.get(t.id);
+                  return full ? { ...t, ...full } : t;
+                })
+              : remoteTenants;
+            setTenants(mergedTenants);
+            if (mergedTenants && mergedTenants.length > 0) {
               setActiveTenantIdState((prev) => {
-                if (!prev || prev === 'ghazzawi' || prev === 'ghazawi' || !remoteTenants.some((t) => t.id === prev)) {
-                  const ghazzawiTenant = remoteTenants.find(
+                if (!prev || prev === 'ghazzawi' || prev === 'ghazawi' || !mergedTenants.some((t) => t.id === prev)) {
+                  const ghazzawiTenant = mergedTenants.find(
                     (t) => matchesTenantIdentifier(t, 'ghazawi') || matchesTenantIdentifier(t, 'ghazzawi')
                   );
-                  return ghazzawiTenant ? ghazzawiTenant.id : remoteTenants[0].id;
+                  return ghazzawiTenant ? ghazzawiTenant.id : mergedTenants[0].id;
                 }
                 return prev;
               });
@@ -3403,6 +3443,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return next;
       });
+      // Keep the hydration cache in sync so the next public-list poll
+      // doesn't overwrite freshly saved config with a stripped row.
+      hydratedTenantsRef.current.set(tenant.id, tenant);
       // Saves tenant and synchronizes the campus_admin user in platform_users
       await saveTenantToDb(tenant, currentActor);
 
