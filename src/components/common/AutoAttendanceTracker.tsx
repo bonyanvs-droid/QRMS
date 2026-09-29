@@ -231,15 +231,22 @@ export const AutoAttendanceTracker: React.FC = () => {
   };
 
   // 1. Check automatically upon component mount / when user & tenant are ready
-  // Delay by 1500ms to allow Firestore initial subscriptions to settle
+  // Delay by 1500ms to allow initial subscriptions to settle.
+  // Gate on 'attendanceConfig' key presence: the public tenants list ships
+  // stripped rows, and the full record hydrates a moment later via
+  // GET /tenants/:id. Checking before hydration measures the geofence
+  // against hardcoded fallback coordinates and silently fails — and since
+  // attendanceConfig was missing from deps, the check never re-armed.
+  const isTenantConfigLoaded = Boolean(activeTenant && 'attendanceConfig' in activeTenant);
   useEffect(() => {
-    if (isStaff && activeTenant && !isAlreadyCheckedToday && !hasLocalGuardToday) {
+    if (isStaff && isTenantConfigLoaded && !isAlreadyCheckedToday && !hasLocalGuardToday) {
       const timer = setTimeout(() => {
         performAutoAttendanceCheck();
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [currentUser?.id, activeTenant?.id, isAlreadyCheckedToday, hasLocalGuardToday, isStaff]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, activeTenant?.id, activeTenant?.attendanceConfig, isTenantConfigLoaded, isAlreadyCheckedToday, hasLocalGuardToday, isStaff]);
 
   // 2. Also check when user returns to the tab or unlocks phone screen (e.g. walked into the mosque)
   useEffect(() => {
@@ -262,7 +269,8 @@ export const AutoAttendanceTracker: React.FC = () => {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isStaff, isAlreadyCheckedToday, hasLocalGuardToday, activeTenant?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStaff, isAlreadyCheckedToday, hasLocalGuardToday, activeTenant?.id, activeTenant?.attendanceConfig]);
 
   // Auto-dismiss the success banner after 9 seconds
   useEffect(() => {
