@@ -509,34 +509,37 @@ export const SupervisorDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Scope Selector Pills — shows only the scopes actually granted to
-              this supervisor. A single-scope supervisor sees a static badge. */}
-          <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2 shrink-0">
-            <div className="text-[10px] text-slate-400 font-bold px-2 mb-1.5 flex items-center gap-1">
-              <Sliders className="w-3 h-3 text-slate-400" />
-              <span>نطاق الإشراف النشط:</span>
+          {/* Scope Selector Pills — rendered only when the supervisor holds
+              more than one role. A single-role supervisor's scope is already
+              stated in the header badge, so the box is hidden entirely. */}
+          {allowedScopeTypes.length > 1 && (
+            <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2 shrink-0">
+              <div className="text-[10px] text-slate-400 font-bold px-2 mb-1.5 flex items-center gap-1">
+                <Sliders className="w-3 h-3 text-slate-400" />
+                <span>نطاق الإشراف النشط:</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
+                {SUPERVISOR_ROLES_CONFIG.filter((c) =>
+                  allowedScopeTypes.includes(c.type)
+                ).map((conf) => {
+                  const isSelected = selectedScopeType === conf.type;
+                  return (
+                    <button
+                      key={conf.type}
+                      onClick={() => setSelectedScopeType(conf.type)}
+                      className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all text-center ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-300 hover:bg-slate-700/70 hover:text-white cursor-pointer'
+                      }`}
+                    >
+                      {conf.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-              {SUPERVISOR_ROLES_CONFIG.filter((c) =>
-                allowedScopeTypes.includes(c.type)
-              ).map((conf) => {
-                const isSelected = selectedScopeType === conf.type;
-                return (
-                  <button
-                    key={conf.type}
-                    onClick={() => setSelectedScopeType(conf.type)}
-                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all text-center ${
-                      isSelected
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-300 hover:bg-slate-700/70 hover:text-white cursor-pointer'
-                    }`}
-                  >
-                    {conf.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Dynamic High-Level KPIs Based on Scope — clickable, each card
