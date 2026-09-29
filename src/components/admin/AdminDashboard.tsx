@@ -49,8 +49,11 @@ import {
 } from 'lucide-react';
 import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig, AcademicTerm, OfficialHoliday } from '../../types';
 import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../../lib/academicYearUtils';
-import { getSurahArabicName } from '../../quran/utils/positionFormatter';
-import { getStudentCategory as resolveStudentCategory } from '../../lib/studentCategory';
+import {
+  getStudentCategory as resolveStudentCategory,
+  getStudentRegistrationType as resolveRegistrationType,
+  resolveCurrentSurahLabel,
+} from '../../lib/studentCategory';
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
@@ -220,11 +223,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
   // Current surah source of truth: the ACTIVE plan's currentPosition when a
   // plan exists; the registered student field is only the fallback baseline.
   const studentCurrentSurahLabel = useCallback(
-    (s: Student): string => {
-      const pos = getActiveStudentQuranPlan(s.id)?.currentPosition;
-      const fromPlan = pos?.surahNumber ? getSurahArabicName(pos.surahNumber) : '';
-      return fromPlan || s.currentSurah || 'الفاتحة';
-    },
+    (s: Student): string => resolveCurrentSurahLabel(s, getActiveStudentQuranPlan(s.id)),
     [getActiveStudentQuranPlan]
   );
 
@@ -355,32 +354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
 
   // Resolves student registration package / type
   const getStudentRegistrationType = useCallback(
-    (student: Student) => {
-      if (student.registrationTypeLabel) return student.registrationTypeLabel;
-      if (student.registrationType) {
-        if (student.registrationType === 'full_package') return 'باقة الاشتراك الكامل';
-        if (student.registrationType === 'activities_only') return 'أنشطة وبرامج';
-        if (student.registrationType === 'quran_only') return 'قرآن فقط';
-        if (student.registrationType === 'scholarship') return 'منحة / إعفاء';
-        return student.registrationType;
-      }
-      // Match with admissions request if available
-      const matchedReq = admissionsRequests.find(
-        (r) =>
-          r.enrolledStudentId === student.id ||
-          (student.nationalId && r.nationalId && r.nationalId === student.nationalId) ||
-          (r.studentName && r.studentName.trim() === student.fullName.trim())
-      );
-      if (matchedReq?.registrationTypeLabel) return matchedReq.registrationTypeLabel;
-      if (matchedReq?.registrationType) {
-        if (matchedReq.registrationType === 'full_package') return 'باقة الاشتراك الكامل';
-        if (matchedReq.registrationType === 'activities_only') return 'أنشطة وبرامج';
-        if (matchedReq.registrationType === 'quran_only') return 'قرآن فقط';
-        if (matchedReq.registrationType === 'scholarship') return 'منحة / إعفاء';
-        return matchedReq.registrationType;
-      }
-      return null;
-    },
+    (student: Student) => resolveRegistrationType(student, admissionsRequests),
     [admissionsRequests]
   );
 

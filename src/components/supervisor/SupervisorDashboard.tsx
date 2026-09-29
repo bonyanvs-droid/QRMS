@@ -11,7 +11,11 @@ import {
 import { SupervisorType, SupervisorScope } from '../../types';
 import { SmartAttendanceWidget } from '../common/SmartAttendanceWidget';
 import { filterStudentsByScope, filterHalaqahsByScope, hasPermission } from '../../lib/permissions';
-import { getStudentCategory } from '../../lib/studentCategory';
+import {
+  getStudentCategory,
+  getStudentRegistrationType,
+  resolveCurrentSurahLabel,
+} from '../../lib/studentCategory';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { Student } from '../../types';
 import {
@@ -58,6 +62,7 @@ export const SupervisorDashboard: React.FC = () => {
     stages,
     admissionsRequests,
     seasonalParticipations,
+    getActiveStudentQuranPlan,
   } = useApp();
 
   // Active Scope State (Role + Scope Architecture)
@@ -161,6 +166,106 @@ export const SupervisorDashboard: React.FC = () => {
     for (const s of scopedStudents) if (s.stageId) set.add(s.stageId);
     return Array.from(set);
   }, [tenantHalaqahs, scopedStudents]);
+
+  // Plan action button — shared by the desktop table row and the mobile card.
+  // Renders nothing when the supervisor lacks view_quran on this student.
+  const renderPlanAction = (s: Student) => {
+    const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
+    const stageId = s.stageId || halObj?.stageId;
+    const canOpenPlan = hasPermission(
+      currentUser,
+      'view_quran',
+      s.halaqahId,
+      stageId,
+      rawTenantHalaqahs,
+      activeTenant
+    );
+    const canEdit = hasPermission(
+      currentUser,
+      'manage_quran_plan',
+      s.halaqahId,
+      stageId,
+      rawTenantHalaqahs,
+      activeTenant
+    );
+    if (!canOpenPlan) return null;
+
+    const plan = quranPlans.find(
+      (p) =>
+        p.studentId === s.id &&
+        (p.status === 'active' ||
+          p.status === 'at_risk' ||
+          p.status === 'paused' ||
+          p.status === 'completed')
+    );
+    const hasPlan = Boolean(plan);
+    // "بلغ المستهدف": plan completed, or the recorded position passed the
+    // target end along the plan's own traversal direction (backward descends
+    // surah numbers).
+    const pos = plan?.currentPosition;
+    const tEnd = plan?.targetEnd ?? plan?.originalTarget?.targetEnd;
+    const passedTarget =
+      !!pos &&
+      !!tEnd &&
+      (plan!.direction === 'backward'
+        ? pos.surahNumber < tEnd.surahNumber ||
+          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber)
+        : pos.surahNumber > tEnd.surahNumber ||
+          (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber));
+    const reachedTarget = hasPlan && (plan!.status === 'completed' || passedTarget);
+    const isAtRisk = plan?.status === 'at_risk';
+
+    return (
+      <button
+        onClick={() => setComprehensiveStudent(s)}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer border ${
+          !hasPlan
+            ? canEdit
+              ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
+              : 'bg-slate-100 text-slate-600 border-slate-300'
+            : reachedTarget
+            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+            : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+        }`}
+        title={
+          canEdit
+            ? !hasPlan
+              ? 'تأسيس واعتماد الخطة القرآنية للطالب'
+              : reachedTarget
+              ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
+              : isAtRisk
+              ? 'الخطة متعثرة عن المستهدف — تحتاج مراجعة وتحديثاً'
+              : 'خطة جارية لم تبلغ المستهدف بعد — متابعة الخطة'
+            : 'عرض محددات الخطة القرآنية'
+        }
+      >
+        {!hasPlan ? (
+          <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+        ) : reachedTarget ? (
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+        ) : (
+          <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+        )}
+        <span>
+          {!hasPlan
+            ? canEdit
+              ? 'تأسيس الخطة'
+              : 'بانتظار الخطة'
+            : !canEdit
+            ? 'الخطة القرآنية'
+            : reachedTarget
+            ? 'إدارة الخطة'
+            : 'متابعة الخطة'}
+        </span>
+        {((!hasPlan && canEdit) || isAtRisk) && (
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+        )}
+      </button>
+    );
+  };
+
+  const studentTeacherName = (s: Student, halObj?: { teacherName?: string }) =>
+    s.teacherName || halObj?.teacherName || 'غير محدد';
 
   // Interventions / At-risk plans
   const atRiskPlans = useMemo(() => {
@@ -554,176 +659,268 @@ export const SupervisorDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="divide-y divide-slate-100 mt-2">
-            {quranStudents.length === 0 && activityStudents.length === 0 && (
-              <div className="py-10 text-center text-sm text-slate-400 font-bold">
-                لا يوجد طلاب مطابقون داخل نطاق إشرافك
-              </div>
-            )}
-            {quranStudents.length > 0 && activityStudents.length > 0 && (
-              <div className="py-2 text-[11px] font-black text-slate-500">
-                طلاب الحلقات والبرامج ({quranStudents.length})
-              </div>
-            )}
-            {quranStudents.map((s) => {
-              const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
-              const stageId = s.stageId || halObj?.stageId;
-              const canOpenPlan = hasPermission(
-                currentUser,
-                'view_quran',
-                s.halaqahId,
-                stageId,
-                rawTenantHalaqahs,
-                activeTenant
-              );
-              const canEdit = hasPermission(
-                currentUser,
-                'manage_quran_plan',
-                s.halaqahId,
-                stageId,
-                rawTenantHalaqahs,
-                activeTenant
-              );
-              return (
-                <div key={s.id} className="flex items-center justify-between gap-3 py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-black text-sm text-slate-900">{s.fullName}</span>
-                      <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5">
-                        {s.grade}
-                      </span>
-                      {stageId && (
-                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-1.5 py-0.5">
-                          {stages.find((st) => st.id === stageId)?.name || stageId}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-bold mt-0.5 truncate">
-                      {halObj?.name || s.halaqahName || '—'} • المعلم: {s.teacherName || halObj?.teacherName || '—'}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {canOpenPlan && (() => {
-                      const plan = quranPlans.find(
-                        (p) =>
-                          p.studentId === s.id &&
-                          (p.status === 'active' ||
-                            p.status === 'at_risk' ||
-                            p.status === 'paused' ||
-                            p.status === 'completed')
-                      );
-                      const hasPlan = Boolean(plan);
-                      // "بلغ المستهدف": plan completed, or the recorded
-                      // position passed the target end along the plan's own
-                      // traversal direction (backward descends surah numbers).
-                      const pos = plan?.currentPosition;
-                      const tEnd = plan?.targetEnd ?? plan?.originalTarget?.targetEnd;
-                      const passedTarget =
-                        !!pos &&
-                        !!tEnd &&
-                        (plan!.direction === 'backward'
-                          ? pos.surahNumber < tEnd.surahNumber ||
-                            (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber)
-                          : pos.surahNumber > tEnd.surahNumber ||
-                            (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber));
-                      const reachedTarget = hasPlan && (plan!.status === 'completed' || passedTarget);
-                      const isAtRisk = plan?.status === 'at_risk';
+          {/* DESKTOP TABLE VIEW (MD, LG, XL, 2XL) — mirrors admin students page */}
+          <div className="hidden md:block overflow-x-auto mt-2">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3.5">الاسم الكامل</th>
+                  <th className="p-3.5">الصف</th>
+                  <th className="p-3.5">نوع التسجيل</th>
+                  <th className="p-3.5">الحلقة</th>
+                  <th className="p-3.5">المعلم المسؤول</th>
+                  <th className="p-3.5">جوال ولي الأمر</th>
+                  <th className="p-3.5">السورة الحالية</th>
+                  <th className="p-3.5 text-center">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {quranStudents.length === 0 && activityStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-slate-400">
+                      لا يوجد طلاب مطابقون داخل نطاق إشرافك
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {quranStudents.map((s) => {
+                      const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
+                      const stageId = s.stageId || halObj?.stageId;
+                      const regType = getStudentRegistrationType(s, admissionsRequests);
+                      const teacherDisplayName = studentTeacherName(s, halObj);
                       return (
-                        <button
-                          onClick={() => setComprehensiveStudent(s)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer border ${
-                            !hasPlan
-                              ? canEdit
-                                ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
-                                : 'bg-slate-100 text-slate-600 border-slate-300'
-                              : reachedTarget
-                              ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                              : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                          }`}
-                          title={
-                            canEdit
-                              ? !hasPlan
-                                ? 'تأسيس واعتماد الخطة القرآنية للطالب'
-                                : reachedTarget
-                                ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
-                                : isAtRisk
-                                ? 'الخطة متعثرة عن المستهدف — تحتاج مراجعة وتحديثاً'
-                                : 'خطة جارية لم تبلغ المستهدف بعد — متابعة الخطة'
-                              : 'عرض محددات الخطة القرآنية'
-                          }
-                        >
-                          {!hasPlan ? (
-                            <Sparkles className="w-3.5 h-3.5 text-rose-600" />
-                          ) : reachedTarget ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                          ) : (
-                            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
-                          )}
-                          <span>
-                            {!hasPlan
-                              ? canEdit
-                                ? 'تأسيس الخطة'
-                                : 'بانتظار الخطة'
-                              : !canEdit
-                              ? 'الخطة القرآنية'
-                              : reachedTarget
-                              ? 'إدارة الخطة'
-                              : 'متابعة الخطة'}
-                          </span>
-                          {((!hasPlan && canEdit) || isAtRisk) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                          )}
-                        </button>
+                        <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3.5 font-bold text-slate-900">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{s.fullName}</span>
+                              {stageId && (
+                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-1.5 py-0.5">
+                                  {stages.find((st) => st.id === stageId)?.name || stageId}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-slate-600">{s.grade}</td>
+                          <td className="p-3.5">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold ${
+                                regType
+                                  ? 'bg-indigo-50 text-indigo-800 border border-indigo-200/60'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {regType ? <Sparkles className="w-3 h-3 text-indigo-600" /> : null}
+                              <span>{regType || 'باقة عامة'}</span>
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-emerald-800 font-semibold">
+                            {halObj?.name || s.halaqahName || 'غير محدد'}
+                          </td>
+                          <td className="p-3.5 text-slate-700 font-medium">
+                            <span className={teacherDisplayName === 'غير محدد' ? 'text-amber-700 font-normal' : 'text-slate-800 font-bold'}>
+                              {teacherDisplayName}
+                            </span>
+                          </td>
+                          <td className="p-3.5 font-mono text-slate-600">{s.parentPhone}</td>
+                          <td className="p-3.5 font-bold text-blue-900">
+                            سورة {resolveCurrentSurahLabel(s, getActiveStudentQuranPlan(s.id))}
+                          </td>
+                          <td className="p-3.5 text-center">{renderPlanAction(s)}</td>
+                        </tr>
                       );
-                    })()}
-                  </div>
-                </div>
-              );
-            })}
+                    })}
+
+                    {activityStudents.length > 0 && (
+                      <tr className="bg-amber-50/40 border-t-2 border-amber-100">
+                        <td colSpan={8} className="p-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black text-amber-900">
+                              طلاب النشاط ({activityStudents.length})
+                            </span>
+                            <span className="text-[10px] text-amber-700/70 font-bold">
+                              باقة الأنشطة والبرامج فقط — لا خطط قرآنية
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {activityStudents.map((s) => {
+                      const participationsCount = seasonalParticipations.filter(
+                        (p) => p.studentId === s.id
+                      ).length;
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3.5 font-bold text-slate-900">{s.fullName}</td>
+                          <td className="p-3.5 text-slate-600">{s.grade}</td>
+                          <td className="p-3.5">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200/70">
+                              <Sparkles className="w-3 h-3 text-amber-600" />
+                              <span>{s.registrationTypeLabel || 'باقة الأنشطة والبرامج'}</span>
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-slate-400 italic text-[11px]">بدون حلقة (نشاط)</td>
+                          <td className="p-3.5 text-slate-400 italic text-[11px]">غير ملزم</td>
+                          <td className="p-3.5 font-mono text-slate-600">{s.parentPhone}</td>
+                          <td className="p-3.5 text-slate-400 italic text-[11px]">بدون حفظ</td>
+                          <td className="p-3.5 text-center">
+                            {participationsCount > 0 ? (
+                              <span className="inline-flex text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1">
+                                {participationsCount} مشاركة
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 text-[11px]">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </>
+                )}
+              </tbody>
+            </table>
           </div>
 
-          {activityStudents.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-slate-200">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
-                <h4 className="text-xs font-black text-slate-700">
-                  طلاب النشاط ({activityStudents.length})
-                </h4>
-                <span className="text-[10px] text-slate-400 font-bold">
-                  باقة الأنشطة والبرامج فقط — لا خطط قرآنية
-                </span>
+          {/* MOBILE CARDS VIEW (320px - 767px) — mirrors admin students page */}
+          <div className="block md:hidden mt-3 space-y-3">
+            {quranStudents.length === 0 && activityStudents.length === 0 ? (
+              <div className="p-6 text-center text-slate-400 text-xs">
+                لا يوجد طلاب مطابقون داخل نطاق إشرافك
               </div>
-              <div className="divide-y divide-slate-100">
-                {activityStudents.map((s) => {
-                  const participationsCount = seasonalParticipations.filter(
-                    (p) => p.studentId === s.id
-                  ).length;
+            ) : (
+              <>
+                {quranStudents.map((s) => {
+                  const halObj = rawTenantHalaqahs.find((h) => h.id === s.halaqahId);
+                  const stageId = s.stageId || halObj?.stageId;
+                  const regType = getStudentRegistrationType(s, admissionsRequests);
+                  const teacherDisplayName = studentTeacherName(s, halObj);
                   return (
-                    <div key={s.id} className="flex items-center justify-between gap-3 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-black text-sm text-slate-900">{s.fullName}</span>
-                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5">
-                            {s.grade}
-                          </span>
-                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
-                            أنشطة فقط
-                          </span>
+                    <div
+                      key={s.id}
+                      className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-xs hover:border-slate-300 transition-all space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
+                        <div>
+                          <h4 className="font-black text-slate-900 text-sm leading-tight">{s.fullName}</h4>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60">
+                              {s.grade || 'صف أول'}
+                            </span>
+                            {stageId && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
+                                {stages.find((st) => st.id === stageId)?.name || stageId}
+                              </span>
+                            )}
+                            {regType && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200/60 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-indigo-600" />
+                                <span>{regType}</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-slate-500 font-bold mt-0.5 truncate">
-                          {s.registrationTypeLabel || 'باقة الأنشطة والبرامج'}
+                        <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-blue-50 text-blue-900 border border-blue-200/80 font-serif shrink-0">
+                          سورة {resolveCurrentSurahLabel(s, getActiveStudentQuranPlan(s.id))}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 min-w-0">
+                          <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الحلقة القرآنية</span>
+                          <div className="font-bold text-emerald-900 truncate">
+                            {halObj?.name || s.halaqahName || 'غير محدد'}
+                          </div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 min-w-0">
+                          <span className="text-[10px] font-bold text-slate-500 block mb-0.5">المعلم المسؤول</span>
+                          <div className="font-bold text-slate-800 truncate" title={teacherDisplayName}>
+                            <span className={teacherDisplayName === 'غير محدد' ? 'text-amber-700 font-normal' : 'text-slate-800 font-bold'}>
+                              {teacherDisplayName}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="col-span-2 p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] font-bold text-slate-500 block">جوال ولي الأمر</span>
+                            <a
+                              href={`tel:${s.parentPhone}`}
+                              className="font-mono font-bold text-slate-800 hover:text-emerald-700 text-xs"
+                              dir="ltr"
+                            >
+                              {s.parentPhone || '—'}
+                            </a>
+                          </div>
                         </div>
                       </div>
-                      {participationsCount > 0 && (
-                        <span className="shrink-0 text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1">
-                          {participationsCount} مشاركة
-                        </span>
-                      )}
+
+                      <div className="pt-2 border-t border-slate-100">
+                        {renderPlanAction(s) || (
+                          <span className="block text-center text-[11px] text-slate-400 font-bold py-1.5">
+                            لا صلاحية عرض الخطة
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
+
+                {activityStudents.length > 0 && (
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between px-1 pb-2">
+                      <span className="text-[11px] font-black text-amber-900">
+                        طلاب النشاط ({activityStudents.length})
+                      </span>
+                      <span className="text-[10px] text-amber-700/70 font-bold">لا خطط قرآنية</span>
+                    </div>
+                    <div className="space-y-3">
+                      {activityStudents.map((s) => {
+                        const participationsCount = seasonalParticipations.filter(
+                          (p) => p.studentId === s.id
+                        ).length;
+                        return (
+                          <div
+                            key={s.id}
+                            className="bg-white rounded-2xl border border-amber-200/60 p-3.5 shadow-2xs space-y-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <h4 className="font-black text-slate-900 text-sm leading-tight">{s.fullName}</h4>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60">
+                                    {s.grade || 'صف أول'}
+                                  </span>
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/70 flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3 text-amber-600" />
+                                    <span>{s.registrationTypeLabel || 'باقة الأنشطة والبرامج'}</span>
+                                  </span>
+                                </div>
+                              </div>
+                              {participationsCount > 0 && (
+                                <span className="text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1 shrink-0">
+                                  {participationsCount} مشاركة
+                                </span>
+                              )}
+                            </div>
+                            <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-500 block">جوال ولي الأمر</span>
+                                <a
+                                  href={`tel:${s.parentPhone}`}
+                                  className="font-mono font-bold text-slate-800 hover:text-emerald-700"
+                                  dir="ltr"
+                                >
+                                  {s.parentPhone || '—'}
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 

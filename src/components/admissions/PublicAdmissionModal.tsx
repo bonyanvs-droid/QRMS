@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { isReadOnlyViewer } from '../../lib/permissions';
+import { normalizeGrade } from '../../lib/studentCategory';
 import { RegistrationRequest, StudentGrade, RegistrationPackageType } from '../../types';
 import {
   X,
@@ -42,8 +43,15 @@ export const GRADE_OPTIONS: StudentGrade[] = [
 ];
 
 export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOpen, onClose }) => {
-  const { activeTenant, submitRegistrationRequest, currentUser } = useApp();
+  const { activeTenant, submitRegistrationRequest, currentUser, stages } = useApp();
   const readOnlyViewer = isReadOnlyViewer(currentUser);
+
+  // Grade options come from the stages' targetGrades vocabulary so the public
+  // form can never produce values outside the system's canonical grade set.
+  const gradeOptions: string[] = (() => {
+    const fromStages = (stages || []).flatMap((s) => s.targetGrades || []);
+    return fromStages.length > 0 ? Array.from(new Set(fromStages)) : GRADE_OPTIONS;
+  })();
 
   const cfg = activeTenant?.admissionsConfig;
   const isRegistrationOpen = cfg ? cfg.isOpen : true;
@@ -130,7 +138,7 @@ export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOp
     parentName: '',
     parentPhone: '',
     motherPhone: '',
-    grade: 'الأول ابتدائي' as StudentGrade,
+    grade: (gradeOptions.includes('صف أول') ? 'صف أول' : gradeOptions[0]) as StudentGrade,
     registrationType: 'full_package' as RegistrationPackageType,
     feePledgeAccepted: false,
     previouslyRegistered: 'no' as 'yes' | 'no',
@@ -193,7 +201,7 @@ export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOp
         tenantId: activeTenant?.id || 'ghazzawi',
         studentName: formData.studentName.trim(),
         nationalId: formData.nationalId.trim() || undefined,
-        grade: formData.grade,
+        grade: (normalizeGrade(formData.grade) || formData.grade) as StudentGrade,
         parentName: formData.parentName.trim() || formData.studentName.trim(),
         parentPhone: formData.parentPhone.trim() || '0500000000',
         motherPhone: formData.motherPhone.trim() || undefined,
@@ -221,7 +229,7 @@ export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOp
       parentName: '',
       parentPhone: '',
       motherPhone: '',
-      grade: 'الأول ابتدائي',
+      grade: (gradeOptions.includes('صف أول') ? 'صف أول' : gradeOptions[0]) as StudentGrade,
       registrationType: 'full_package',
       feePledgeAccepted: false,
       previouslyRegistered: 'no',
@@ -423,7 +431,7 @@ export const PublicAdmissionModal: React.FC<PublicAdmissionModalProps> = ({ isOp
                           }
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm font-medium focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent"
                         >
-                          {GRADE_OPTIONS.map((g) => (
+                          {gradeOptions.map((g) => (
                             <option key={g} value={g}>
                               {g}
                             </option>

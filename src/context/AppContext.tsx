@@ -263,6 +263,7 @@ import { getAcademicOutcome } from '../quran/services/outcomeService';
 import { resolveContextIdentity, ResolvedIdentity } from '../lib/identityResolver';
 import { matchesTenantIdentifier } from '../lib/tenantResolver';
 import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../lib/academicYearUtils';
+import { normalizeGrade } from '../lib/studentCategory';
 import {
   subscribeToPublicSummary,
   updatePublicSummary,
@@ -4783,7 +4784,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: req.studentName,
         fullName: req.studentName,
         nationalId: req.nationalId,
-        grade: req.grade || 'صف أول',
+        grade: (normalizeGrade(req.grade) || req.grade || 'صف أول') as Student['grade'],
         halaqahId,
         halaqahName: targetHalaqah?.name || 'الحلقة القرآنية',
         teacherId: effectiveTeacherId,

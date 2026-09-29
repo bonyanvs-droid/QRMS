@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { MosqueComplexTenant, EducationalStage, TrackDefinition } from '../types';
+import { normalizeGrade } from '../lib/studentCategory';
 
 export interface ParsedHalaqahItem {
   name: string;
@@ -428,7 +429,7 @@ export function parseBulkImportJson(
       name: st.name || '',
       nationalId: st.nationalId || '',
       birthDate: st.birthDate || '',
-      grade: st.grade || 'صف أول',
+      grade: normalizeGrade(st.grade) || st.grade || 'صف أول',
       halaqahName: st.halaqahName || st.halaqah || '',
       stageName: st.stageName || '',
       stageId: st.stageId || matchStageId(st.stageName || st.grade, existingStages),
@@ -501,7 +502,8 @@ function parseHalaqahsSheet(
     const teacherName = String(findValue(row, ['اسم المعلم', 'المعلم', 'teacher_name', 'teacher', 'اسم_المعلم']) || '').trim();
     const teacherPhone = cleanPhoneNumber(findValue(row, ['جوال المعلم', 'هاتف المعلم', 'رقم المعلم', 'teacher_phone', 'جوال_المعلم']));
     const stageName = String(findValue(row, ['المرحلة', 'المرحلة الدراسية', 'stage', 'stage_name', 'المرحلة_الدراسية']) || '').trim();
-    const grade = (findValue(row, ['الصف', 'grade', 'الصف_الدراسي']) || 'صف أول') as any;
+    const gradeRawH = String(findValue(row, ['الصف', 'grade', 'الصف_الدراسي']) || '').trim();
+    const grade = (normalizeGrade(gradeRawH) || gradeRawH || 'صف أول') as any;
     const targetSurah = String(findValue(row, ['السورة المستهدفة', 'المستهدف', 'target_surah', 'السورة_المستهدفة']) || 'الغاشية').trim();
     const timeSlot = String(findValue(row, ['الوقت', 'الفترة', 'time_slot', 'الفترة_الزمنية']) || 'عصراً').trim();
 
@@ -632,7 +634,8 @@ function parseStudentsSheet(
     const parentName = String(findValue(row, ['اسم ولي الأمر', 'اسم ولي الامر', 'اسم الأب', 'ولي الأمر', 'ولي الامر', 'parent_name', 'اسم_ولي_الأمر']) || '').trim();
     const halaqahName = String(findValue(row, ['الحلقة', 'اسم الحلقة', 'الصف', 'halaqah', 'halaqah_name', 'اسم_الحلقة']) || '').trim();
     const stageName = String(findValue(row, ['المرحلة', 'المرحلة الدراسية', 'stage', 'المرحلة_الدراسية']) || '').trim();
-    const grade = String(findValue(row, ['الصف الدراسي', 'الصف', 'grade', 'الصف_الدراسي']) || 'صف أول').trim();
+    const gradeRaw = String(findValue(row, ['الصف الدراسي', 'الصف', 'grade', 'الصف_الدراسي']) || '').trim();
+    const grade = normalizeGrade(gradeRaw) || gradeRaw || 'صف أول';
     const nationalId = String(findValue(row, ['رقم الهوية', 'الهوية', 'السجل المدني', 'national_id', 'student_id', 'رقم_الهوية']) || '').trim();
     const currentSurah = String(findValue(row, ['السورة الحالية', 'آخر سورة', 'سورة الحفظ', 'المحفوظ', 'السورة', 'current_surah', 'السورة_الحالية']) || 'الفاتحة').trim();
     const currentAyah = Number(findValue(row, ['الآية', 'الاية', 'رقم الآية', 'current_ayah'])) || 1;
@@ -723,7 +726,8 @@ function processComprehensiveSheet(
     const parentName = String(findValue(row, ['اسم ولي الأمر', 'ولي الأمر', 'اسم الأب', 'parent_name', 'اسم_ولي_الأمر']) || '').trim();
     const parentPhone = cleanPhoneNumber(findValue(row, ['جوال ولي الأمر', 'رقم الأب', 'هاتف ولي الأمر', 'parent_phone', 'phone', 'جوال_ولي_الأمر', 'جوال']));
     const stageName = String(findValue(row, ['المرحلة', 'المرحلة الدراسية', 'stage', 'المرحلة_الدراسية']) || '').trim();
-    const grade = String(findValue(row, ['الصف', 'الصف الدراسي', 'grade', 'الصف_الدراسي']) || 'صف أول').trim();
+    const gradeRaw = String(findValue(row, ['الصف', 'الصف الدراسي', 'grade', 'الصف_الدراسي']) || '').trim();
+    const grade = normalizeGrade(gradeRaw) || gradeRaw || 'صف أول';
     const currentSurah = String(findValue(row, ['السورة', 'السورة الحالية', 'المحفوظ', 'current_surah', 'السورة_الحالية']) || 'الفاتحة').trim();
     const nationalId = String(findValue(row, ['رقم الهوية', 'الهوية', 'السجل المدني', 'national_id', 'id_number', 'رقم_الهوية']) || '').trim();
     const currentAyah = Number(findValue(row, ['الآية', 'الاية', 'رقم الآية', 'current_ayah'])) || 1;

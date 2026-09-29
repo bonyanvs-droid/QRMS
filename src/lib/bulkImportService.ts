@@ -1,5 +1,6 @@
 import { hashPasswordWithSalt } from './authService';
 import { recordAuditLog } from './auditService';
+import { normalizeGrade } from './studentCategory';
 import {
   BulkImportDataset,
 } from '../utils/bulkImportParser';
@@ -229,7 +230,7 @@ export async function executeBulkImport(
         fullName: st.name,
         name: st.name,
         nationalId: st.nationalId || '',
-        grade: (st.grade as any) || 'صف أول',
+        grade: (normalizeGrade(st.grade) || st.grade || 'صف أول') as any,
         halaqahId: halaqahId || '',
         halaqahName: isActivitiesOnly ? '' : (st.halaqahName || ''),
         teacherId: '',
