@@ -266,9 +266,12 @@ async function runPlanValidation() {
     },
   });
   const schedDates = customSchedPlan.generatedPlan.dailyPlans.map((d) => d.date);
+  const holidayEntry = customSchedPlan.generatedPlan.dailyPlans.find(
+    (d) => d.date === holiday
+  );
   assert(
     schedDates.includes('2026-09-06') &&
-      !schedDates.includes(holiday) &&
+      holidayEntry?.dayType === 'holiday' &&
       !schedDates.includes('2026-09-08'),
     13,
     'مرونة جدول أيام الدراسة الأسبوعية والعطلات المخصصة (Schedule & Holidays)'
@@ -348,7 +351,9 @@ async function runPlanValidation() {
   assert(
     acceleratedPlan.recalculationHistory.length === 1 &&
       acceleratedPlan.recalculationHistory[0].trigger === 'achievement_surplus' &&
-      acceleratedPlan.planVersion === 2,
+      // planVersion tracks teacher overrides only — daily recalculations are
+      // audited via recalculationHistory, not version bumps.
+      acceleratedPlan.planVersion === 1,
     17,
     'إعادة الحساب التلقائي عند تسارع إنجاز الطالب وتجاوز المقرر (Surplus Trigger)'
   );
