@@ -524,12 +524,7 @@ export const SupervisorDashboard: React.FC = () => {
               <p className="text-sm sm:text-base font-black text-emerald-400 mt-1">
                 في {portalTitle}
               </p>
-              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-                {activeRoleConfig.description}
-              </p>
               <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-2">
-                <span>{activeTenant?.name || ''}</span>
-                <span>•</span>
                 <span>الأسبوع الأكاديمي {academicConfig.currentWeek}</span>
               </div>
             </div>
