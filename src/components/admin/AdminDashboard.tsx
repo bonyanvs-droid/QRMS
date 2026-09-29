@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { Halaqah, Student, Teacher, ArchivedHalaqah, HalaqahDaySchedule, AcademicYearConfig, AcademicTerm, OfficialHoliday } from '../../types';
 import { generateDefaultAcademicTerms, syncAcademicConfigWithActiveTerm } from '../../lib/academicYearUtils';
+import { getSurahArabicName } from '../../quran/utils/positionFormatter';
 import { HalaqahScheduleEditor } from './HalaqahScheduleEditor';
 import { BulkHalaqahScheduleModal } from './BulkHalaqahScheduleModal';
 import { formatHalaqahWeeklySummary, formatHalaqahStructuredSummary } from '../../utils/scheduleCalculator';
@@ -212,7 +213,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
     tracks,
     prayerTimesToday,
     bulkUpdateHalaqahs,
+    getActiveStudentQuranPlan,
   } = useApp();
+
+  // Current surah source of truth: the ACTIVE plan's currentPosition when a
+  // plan exists; the registered student field is only the fallback baseline.
+  const studentCurrentSurahLabel = useCallback(
+    (s: Student): string => {
+      const pos = getActiveStudentQuranPlan(s.id)?.currentPosition;
+      const fromPlan = pos?.surahNumber ? getSurahArabicName(pos.surahNumber) : '';
+      return fromPlan || s.currentSurah || 'الفاتحة';
+    },
+    [getActiveStudentQuranPlan]
+  );
 
   const isSysAdmin = currentUser?.role === 'system_admin' || (currentUser?.role as any) === 'admin';
   const isCampAdmin = currentUser?.role === 'campus_admin';
@@ -2096,7 +2109,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                             )}
                           </td>
                           <td className="p-3.5 font-mono text-slate-600">{s.parentPhone}</td>
-                          <td className="p-3.5 font-bold text-blue-900">سورة {s.currentSurah || 'الفاتحة'}</td>
+                          <td className="p-3.5 font-bold text-blue-900">سورة {studentCurrentSurahLabel(s)}</td>
                           <td className="p-3.5 text-center">
                             <div className="flex items-center justify-center gap-1">
                               <button
@@ -2336,7 +2349,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ initialTab }) =>
                         </div>
 
                         <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-blue-50 text-blue-900 border border-blue-200/80 font-serif shrink-0">
-                          سورة {s.currentSurah || 'الفاتحة'}
+                          سورة {studentCurrentSurahLabel(s)}
                         </span>
                       </div>
 
