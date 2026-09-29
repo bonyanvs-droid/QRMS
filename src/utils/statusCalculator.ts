@@ -38,12 +38,24 @@ export function getExpectedSpellingLessonForWeek(weekNumber: number, totalLesson
   return Math.min(operationalWeekIndex, totalLessons);
 }
 
+export interface StudentStatusEvalOptions {
+  /** false when the student's halaqah doesn't run the spelling track — spelling
+   *  signals (lesson gap, mastery) then never degrade or elevate the status. */
+  spellingEnabled?: boolean;
+  /** Shared plan-health state (utils/planHealth) — 'at_risk'/'deficient' plans
+   *  floor the status at needs_support, matching the supervisor radar. */
+  planHealth?: 'none' | 'reached' | 'deficient' | 'at_risk' | 'healthy';
+  /** Pre-filtered session records for this student (skips O(n) filter per call). */
+  studentRecords?: DailySessionRecord[];
+}
+
 // Dynamic status calculation separating Quantity, Quality, Time, and Status
 export function evaluateStudentStatus(
   student: Student,
   records: DailySessionRecord[],
   spellingLessons: SpellingLesson[],
-  academicConfig: AcademicYearConfig
+  academicConfig: AcademicYearConfig,
+  opts: StudentStatusEvalOptions = {}
 ): {
   status: StudentStatus;
   statusLabel: string;
@@ -58,9 +70,13 @@ export function evaluateStudentStatus(
   attendanceRate: number;
   totalAttendedDays: number;
   totalAbsentDays: number;
+  totalLateDays: number;
   reason: string;
 } {
-  const studentRecords = records.filter((r) => r.studentId === student.id);
+  const studentRecords =
+    opts.studentRecords ?? records.filter((r) => r.studentId === student.id);
+  const spellingOn = opts.spellingEnabled !== false;
+  const planFloor = opts.planHealth === 'at_risk' || opts.planHealth === 'deficient';
   const currentWeek = academicConfig.currentWeek;
   const expectedLessonNum = getExpectedSpellingLessonForWeek(currentWeek, spellingLessons.length);
 
@@ -78,12 +94,15 @@ export function evaluateStudentStatus(
   const hasSpellingEvaluation = Boolean(latestSpellingRecord);
   const spellingMasteryRate = latestSpellingRecord ? latestSpellingRecord.spelling!.finalScore : 0;
 
-  // Attendance rate
+  // Attendance rate — 'late' counts as attended (arrived, just tardy); only an
+  // explicit 'absent' mark lowers the rate. 'excused' stays neutral in neither.
   const totalDays = studentRecords.length;
-  const presentDays = studentRecords.filter((r) => r.attendance === 'present').length;
-  const totalAbsentDays = Math.max(0, totalDays - presentDays);
-  const totalAttendedDays = presentDays;
-  const attendanceRate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 100;
+  const totalLateDays = studentRecords.filter((r) => r.attendance === 'late').length;
+  const totalAttendedDays = studentRecords.filter(
+    (r) => r.attendance === 'present' || r.attendance === 'late'
+  ).length;
+  const totalAbsentDays = studentRecords.filter((r) => r.attendance === 'absent').length;
+  const attendanceRate = totalDays > 0 ? Math.round((totalAttendedDays / totalDays) * 100) : 100;
 
   // Quran minimum vs actual comparison
   const minSurahForGrade =
@@ -97,6 +116,7 @@ export function evaluateStudentStatus(
   const currentSurahIndex = getSurahIndexInJuzAmma(student.currentSurah);
   const isAdvancedQuran = currentSurahIndex > targetMinIndex;
   const isAdvancedSpelling =
+    spellingOn &&
     hasSpellingEvaluation &&
     differenceFromPlan > 0 &&
     spellingMasteryRate >= academicConfig.spellingPassingThreshold;
@@ -121,12 +141,16 @@ export function evaluateStudentStatus(
       attendanceRate,
       totalAttendedDays,
       totalAbsentDays,
+      totalLateDays,
       reason: 'قرار المعلم بتثبيت الطالب لتمكين المهارة قبل الانتقال',
     };
   }
 
   // Advanced: Exceeded minimum Quran target OR notably ahead in spelling with evaluated high score (>=90%)
-  if (isAdvancedQuran || (differenceFromPlan >= 1 && hasSpellingEvaluation && spellingMasteryRate >= 90)) {
+  // Quran-advanced students are exempt from the plan-health floor (achievement trumps).
+  const advancedBySpelling =
+    spellingOn && differenceFromPlan >= 1 && hasSpellingEvaluation && spellingMasteryRate >= 90;
+  if (isAdvancedQuran || (advancedBySpelling && !planFloor)) {
     return {
       status: 'advanced',
       statusLabel: 'متقدم ⭐',
@@ -141,6 +165,7 @@ export function evaluateStudentStatus(
       attendanceRate,
       totalAttendedDays,
       totalAbsentDays,
+      totalLateDays,
       reason: isAdvancedQuran
         ? `تجاوز الحد الأدنى المقرر للصف (${minSurahForGrade}) ووصل إلى سورة ${student.currentSurah}`
         : `متقدم عن الخطة الزمنية في الهجاء ومتقن بدرجة ${spellingMasteryRate}%`,
@@ -149,8 +174,8 @@ export function evaluateStudentStatus(
 
   // Lagging: Behind plan by 2 or more lessons OR evaluated severely low mastery (<70) OR excessive absences
   if (
-    differenceFromPlan <= -2 ||
-    (hasSpellingEvaluation && differenceFromPlan < 0 && spellingMasteryRate < 70) ||
+    (spellingOn && differenceFromPlan <= -2) ||
+    (spellingOn && hasSpellingEvaluation && differenceFromPlan < 0 && spellingMasteryRate < 70) ||
     attendanceRate < 70
   ) {
     return {
@@ -167,8 +192,9 @@ export function evaluateStudentStatus(
       attendanceRate,
       totalAttendedDays,
       totalAbsentDays,
+      totalLateDays,
       reason:
-        differenceFromPlan <= -2
+        spellingOn && differenceFromPlan <= -2
           ? `متأخر عن الخطة بـ ${Math.abs(differenceFromPlan)} دروس (الأسبوع ${currentWeek}: المتوقع الدرس ${expectedLessonNum})`
           : attendanceRate < 70
           ? `نسبة الحضور منخفضة (${attendanceRate}%)`
@@ -176,10 +202,12 @@ export function evaluateStudentStatus(
     };
   }
 
-  // Needs Support: Behind by 1 lesson OR evaluated score is below passing threshold (70-84%)
+  // Needs Support: Behind by 1 lesson OR evaluated score below passing threshold
+  // OR a plan-health floor (at_risk / target-deficient — same radar the supervisor sees)
   if (
-    differenceFromPlan === -1 ||
-    (hasSpellingEvaluation && spellingMasteryRate < academicConfig.spellingPassingThreshold)
+    (spellingOn && differenceFromPlan === -1) ||
+    (spellingOn && hasSpellingEvaluation && spellingMasteryRate < academicConfig.spellingPassingThreshold) ||
+    planFloor
   ) {
     return {
       status: 'needs_support',
@@ -195,10 +223,14 @@ export function evaluateStudentStatus(
       attendanceRate,
       totalAttendedDays,
       totalAbsentDays,
-      reason:
-        hasSpellingEvaluation && spellingMasteryRate < academicConfig.spellingPassingThreshold
-          ? `درجة الإتقان (${spellingMasteryRate}%) أقل من معيار الاجتياز (${academicConfig.spellingPassingThreshold}%)`
-          : `متأخر عن خطة الأسبوع بدرس واحد (مسجل بالدرس ${actualLessonNum} والمتوقع ${expectedLessonNum})`,
+      totalLateDays,
+      reason: planFloor
+        ? opts.planHealth === 'deficient'
+          ? 'الخطة القرآنية لا تصل لمستهدف الصف — تحتاج مراجعة الخطة'
+          : 'إيقاع الخطة القرآنية متعثر — يحتاج متابعة'
+        : spellingOn && hasSpellingEvaluation && spellingMasteryRate < academicConfig.spellingPassingThreshold
+        ? `درجة الإتقان (${spellingMasteryRate}%) أقل من معيار الاجتياز (${academicConfig.spellingPassingThreshold}%)`
+        : `متأخر عن خطة الأسبوع بدرس واحد (مسجل بالدرس ${actualLessonNum} والمتوقع ${expectedLessonNum})`,
     };
   }
 
@@ -217,7 +249,10 @@ export function evaluateStudentStatus(
     attendanceRate,
     totalAttendedDays,
     totalAbsentDays,
-    reason: hasSpellingEvaluation
+    totalLateDays,
+    reason: !spellingOn
+      ? 'التقدم ضمن النطاق المتوقع (لا مسار هجاء لهذه الحلقة)'
+      : hasSpellingEvaluation
       ? `مطابق للخطة التشغيلية للأسبوع الحالي مع إتقان معتمد (${spellingMasteryRate}%)`
       : `مسجل بالدرس ${actualLessonNum} المتوقع للأسبوع ${currentWeek} (بانتظار رصد التقييم)`,
   };
@@ -258,8 +293,18 @@ export function calculateAggregateMetrics(
   let notMovedYetCount = 0;
   let achievedMinQuranCount = 0;
 
+  // Index records once — O(m) — instead of filtering the whole list per student
+  const recordsByStudent = new Map<string, DailySessionRecord[]>();
+  for (const r of records) {
+    const arr = recordsByStudent.get(r.studentId);
+    if (arr) arr.push(r);
+    else recordsByStudent.set(r.studentId, [r]);
+  }
+
   students.forEach((student) => {
-    const evalResult = evaluateStudentStatus(student, records, spellingLessons, academicConfig);
+    const evalResult = evaluateStudentStatus(student, records, spellingLessons, academicConfig, {
+      studentRecords: recordsByStudent.get(student.id) ?? [],
+    });
     if (evalResult.hasSpellingEvaluation) {
       totalSpellingScore += evalResult.spellingMasteryRate;
       evaluatedSpellingCount++;

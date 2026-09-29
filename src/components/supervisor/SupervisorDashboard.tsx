@@ -18,11 +18,7 @@ import {
 } from '../../lib/studentCategory';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { Student } from '../../types';
-import { findStageConfigForStudent } from '../../quran/models/stageConfig';
-import {
-  resolveStudentGradeTargetPosition,
-  planEndCoversTarget,
-} from '../../quran/services/studentPlanBridge';
+import { planHealthFor as sharedPlanHealthFor } from '../../utils/planHealth';
 import {
   ShieldCheck,
   BookOpen,
@@ -328,50 +324,11 @@ export const SupervisorDashboard: React.FC = () => {
   // Unified plan-health resolver — the single source of truth shared by the
   // students-tab button, the KPI counters, halaqah cards and the radar.
   // States: none > reached > deficient > at_risk > healthy.
-  type PlanHealthState = 'none' | 'reached' | 'deficient' | 'at_risk' | 'healthy';
-  const planHealthFor = (s: Student) => {
-    const plan = quranPlans.find(
-      (p) =>
-        p.studentId === s.id &&
-        (p.status === 'active' ||
-          p.status === 'at_risk' ||
-          p.status === 'paused' ||
-          p.status === 'completed')
-    );
-    if (!plan) {
-      return { plan: undefined, state: 'none' as PlanHealthState };
-    }
-
-    const pos = plan.currentPosition;
-    const tEnd = plan.targetEnd ?? plan.originalTarget?.targetEnd;
-    const dir = plan.direction || 'backward';
-    const covers = (end: typeof pos, req: typeof pos) =>
-      !!end && !!req && planEndCoversTarget(end, req, dir);
-    const passedTarget = covers(pos, tEnd);
-    const reachedTarget = plan.status === 'completed' || passedTarget;
-    const isAtRisk =
-      plan.status === 'at_risk' || plan.targetAtRiskDiagnostic?.isAtRisk === true;
-    const gradeTarget = resolveStudentGradeTargetPosition(
-      s,
-      academicConfig,
-      findStageConfigForStudent(s, quranStageConfigs)
-    );
-    const targetDeficient = !planEndCoversTarget(tEnd, gradeTarget ?? undefined, dir);
-    const passedGradeTarget = covers(pos, gradeTarget ?? undefined);
-
-    // Achievement trumps everything: once the position passed the grade
-    // target the plan's endpoint no longer matters.
-    const state: PlanHealthState = passedGradeTarget
-      ? 'reached'
-      : targetDeficient
-      ? 'deficient'
-      : isAtRisk
-      ? 'at_risk'
-      : reachedTarget
-      ? 'reached'
-      : 'healthy';
-    return { plan, state, isAtRisk, targetDeficient, reachedTarget, passedGradeTarget };
-  };
+  // Shared plan-health semantics (src/utils/planHealth.ts) — same states the
+  // teacher roster consumes so both screens agree on plan viability.
+  const planHealthFor = (s: Student) =>
+    sharedPlanHealthFor(s, quranPlans, academicConfig, quranStageConfigs);
+  type PlanHealthState = ReturnType<typeof planHealthFor>['state'];
 
   const planHealthMap = useMemo(() => {
     const m = new Map<string, ReturnType<typeof planHealthFor>>();

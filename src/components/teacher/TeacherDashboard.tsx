@@ -24,6 +24,7 @@ import {
   Award,
   Activity,
   ChevronLeft,
+  ChevronRight,
   ChevronDown,
   LayoutGrid,
   ListFilter,
@@ -36,6 +37,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { evaluateStudentStatus } from '../../utils/statusCalculator';
+import { planHealthFor } from '../../utils/planHealth';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import { filterHalaqahsByScope } from '../../lib/permissions';
 import { QuickRecordModal } from './QuickRecordModal';
@@ -120,6 +122,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
     stages,
     trackNominations,
     prayerTimesToday,
+    quranPlans,
+    quranStageConfigs,
   } = useApp();
 
   const isLeader =
@@ -246,9 +250,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
     teacherId: '',
   });
 
-  // Attendance bulk state for today (present, late, absent)
+  // Attendance bulk state — working map for the viewed day (present, late, absent)
   const [studentAttendanceMap, setStudentAttendanceMap] = useState<Record<string, 'present' | 'late' | 'absent'>>({});
   const [attendanceSaved, setAttendanceSaved] = useState(false);
+  // Day being viewed in the attendance sheet — defaults to today; ‹ browses
+  // back to yesterday then older days (each loads its saved sheet).
+  const [attendanceViewDate, setAttendanceViewDate] = useState<string>(() =>
+    new Date().toISOString().split('T')[0]
+  );
 
   // Determine strict halaqah ID based on role (Teacher is restricted to their halaqahs)
 
@@ -328,16 +337,76 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
     return students.filter((s) => s.halaqahId === targetId);
   }, [students, rosterHalaqahFilter, rosterScopeIds, activeHalaqah]);
 
-  // Evaluated student list
+  // Session records indexed once per student — O(m) build instead of O(n·m) filtering
+  const recordsByStudent = useMemo(() => {
+    const m = new Map<string, typeof sessionRecords>();
+    for (const r of sessionRecords || []) {
+      const arr = m.get(r.studentId);
+      if (arr) arr.push(r);
+      else m.set(r.studentId, [r]);
+    }
+    return m;
+  }, [sessionRecords]);
+
+  // Students who already have a session record TODAY — they sink to the bottom
+  // of the roster (the queue = who hasn't been recorded yet).
+  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const recordedTodayIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of sessionRecords || []) {
+      if (r.date === todayIso && (r.memorization || r.revision || r.spelling || r.customTracks)) {
+        ids.add(r.studentId);
+      }
+    }
+    return ids;
+  }, [sessionRecords, todayIso]);
+
+  // Attendance coverage for today — students with any attendance mark recorded
+  const todayMarkedCount = useMemo(() => {
+    return halaqahStudents.filter((s) =>
+      sessionRecords.some((r) => r.studentId === s.id && r.date === todayIso && r.attendance)
+    ).length;
+  }, [halaqahStudents, sessionRecords, todayIso]);
+
+  // Shared plan-health map — identical semantics to the supervisor radar
+  const planHealthMap = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof planHealthFor>>();
+    for (const s of students || []) {
+      m.set(s.id, planHealthFor(s, quranPlans || [], academicConfig, quranStageConfigs || []));
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students, quranPlans, academicConfig, quranStageConfigs]);
+
+  // Evaluated student list — spelling signals gated per halaqah track config
   const evaluatedStudents = rosterStudents.map((s) => ({
     student: s,
-    eval: evaluateStudentStatus(s, sessionRecords, spellingLessons, academicConfig),
+    eval: evaluateStudentStatus(s, sessionRecords, spellingLessons, academicConfig, {
+      studentRecords: recordsByStudent.get(s.id) ?? [],
+      spellingEnabled: isHalaqahTrackEnabled(s.halaqahId, 'track_spelling'),
+      planHealth: planHealthMap.get(s.id)?.state,
+    }),
   }));
 
-  // Smart decision support categorization
-  const needingIntervention = evaluatedStudents.filter(
-    (e) => e.eval.status === 'lagging' || e.eval.status === 'needs_support' || e.eval.status === 'not_moved_yet'
-  );
+  // Smart decision support categorization — sorted by real severity so the
+  // 'priority' column is truthful: lagging → needs_support → not_moved_yet,
+  // then deepest spelling gap, then lowest attendance.
+  const severityRank: Record<string, number> = {
+    lagging: 0,
+    needs_support: 1,
+    not_moved_yet: 2,
+  };
+  const needingIntervention = evaluatedStudents
+    .filter(
+      (e) => e.eval.status === 'lagging' || e.eval.status === 'needs_support' || e.eval.status === 'not_moved_yet'
+    )
+    .sort(
+      (a, b) =>
+        (severityRank[a.eval.status] ?? 9) - (severityRank[b.eval.status] ?? 9) ||
+        a.eval.differenceFromPlan - b.eval.differenceFromPlan ||
+        a.eval.attendanceRate - b.eval.attendanceRate ||
+        a.student.fullName.localeCompare(b.student.fullName, 'ar')
+    );
   const advancedStudents = evaluatedStudents.filter((e) => e.eval.status === 'advanced');
 
   // Active halaqah nominations
@@ -345,14 +414,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
     halaqahStudents.some((s) => s.id === n.studentId)
   );
 
-  // Filtered list for display
-  const filteredStudents = evaluatedStudents.filter(({ student, eval: ev }) => {
-    const matchesSearch =
-      student.fullName.includes(searchTerm) ||
-      student.currentSurah.includes(searchTerm);
-    const matchesStatus = statusFilter === 'all' || ev.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Filtered list for display — the roster is a work queue: students whose
+  // achievement was already recorded today sink to the bottom (marked ✓);
+  // the teacher's remaining queue stays on top, alphabetical.
+  const filteredStudents = evaluatedStudents
+    .filter(({ student, eval: ev }) => {
+      const matchesSearch =
+        student.fullName.includes(searchTerm) ||
+        student.currentSurah.includes(searchTerm);
+      const matchesStatus = statusFilter === 'all' || ev.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    .sort(
+      (a, b) =>
+        Number(recordedTodayIds.has(a.student.id)) - Number(recordedTodayIds.has(b.student.id))
+    );
 
   // Cycle attendance status: present -> late -> absent -> present
   const cycleAttendance = (studentId: string) => {
@@ -363,15 +439,73 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
     });
   };
 
-  const handleSaveBulkAttendance = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+  // Seed the working map from the viewed day's saved records — reopening a day
+  // shows its real statuses (absent stays absent, late stays late).
+  const seedAttendanceForDate = (date: string) => {
+    const seeded: Record<string, 'present' | 'late' | 'absent'> = {};
+    halaqahStudents.forEach((s) => {
+      const rec = sessionRecords.find((r) => r.studentId === s.id && r.date === date);
+      seeded[s.id] =
+        rec?.attendance === 'absent' || rec?.attendance === 'excused'
+          ? 'absent'
+          : rec?.attendance === 'late'
+          ? 'late'
+          : 'present';
+    });
+    setStudentAttendanceMap(seeded);
+  };
+
+  const openAttendanceModal = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setAttendanceViewDate(today);
+    seedAttendanceForDate(today);
+    setAttendanceSaved(false);
+    setAttendanceModalOpen(true);
+  };
+
+  const shiftAttendanceView = (days: number) => {
+    const d = new Date(`${attendanceViewDate}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    const iso = d.toISOString().split('T')[0];
+    if (iso > todayIso) return; // never browse into the future
+    setAttendanceViewDate(iso);
+    seedAttendanceForDate(iso);
+  };
+
+  const viewedDayHasRecords = halaqahStudents.some((s) =>
+    sessionRecords.some((r) => r.studentId === s.id && r.date === attendanceViewDate && r.attendance)
+  );
+
+  const attendanceViewLabel = (() => {
+    if (attendanceViewDate === todayIso) return 'اليوم';
+    const d = new Date(`${attendanceViewDate}T00:00:00`);
+    const yesterday = new Date(`${todayIso}T00:00:00`);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.getTime() === yesterday.getTime()) return 'أمس';
+    return d.toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'short' });
+  })();
+
+  const attendanceCounts = halaqahStudents.reduce(
+    (acc, s) => {
+      const st = studentAttendanceMap[s.id] || 'present';
+      acc[st]++;
+      return acc;
+    },
+    { present: 0, late: 0, absent: 0 } as Record<'present' | 'late' | 'absent', number>
+  );
+
+  const handleSaveBulkAttendance = async () => {
     const attendanceMap: Record<string, 'present' | 'late' | 'absent'> = {};
     halaqahStudents.forEach((s) => {
       attendanceMap[s.id] = studentAttendanceMap[s.id] || 'present';
     });
-    bulkMarkAttendance(todayStr, academicConfig.currentWeek, activeHalaqah.id, attendanceMap);
+    await bulkMarkAttendance(attendanceViewDate, academicConfig.currentWeek, activeHalaqah.id, attendanceMap);
     setAttendanceSaved(true);
-    setTimeout(() => setAttendanceSaved(false), 2000);
+    // Save then close — the sheet must not stay pinned open after saving.
+    setTimeout(() => {
+      setAttendanceSaved(false);
+      setAttendanceModalOpen(false);
+    }, 700);
   };
 
   // Open Parent Report
@@ -662,7 +796,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
               const hStudents = students.filter((s) => s.halaqahId === h.id);
               const hStage = stages.find((st) => st.targetGrades?.includes(h.grade as any)) || stages[0];
               const evals = hStudents.map((s) =>
-                evaluateStudentStatus(s, sessionRecords, spellingLessons, academicConfig)
+                evaluateStudentStatus(s, sessionRecords, spellingLessons, academicConfig, {
+                  studentRecords: recordsByStudent.get(s.id) ?? [],
+                  spellingEnabled: isHalaqahTrackEnabled(s.halaqahId, 'track_spelling'),
+                  planHealth: planHealthMap.get(s.id)?.state,
+                })
               );
               const laggingCount = evals.filter(
                 (e) => e.status === 'lagging' || e.status === 'needs_support'
@@ -842,7 +980,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
             {/* HALAQAH TOOLS GRID — 6 tools only */}
             <div className="grid grid-cols-2 gap-2.5">
               <button
-                onClick={() => setAttendanceModalOpen(true)}
+                onClick={openAttendanceModal}
                 className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-white hover:shadow-xs transition-all text-right cursor-pointer"
                 title="رصد حضور طلاب الحلقة لجلسة اليوم وحفظ الكشف"
               >
@@ -852,6 +990,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                 <span className="text-xs font-bold text-slate-800">
                   <span className="hidden sm:inline">تحضير الطلاب</span>
                   <span className="sm:hidden">التحضير</span>
+                </span>
+                <span
+                  className={`ms-auto text-[10px] font-black px-1.5 py-0.5 rounded-full ${
+                    todayMarkedCount >= halaqahStudents.length && halaqahStudents.length > 0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-slate-200 text-slate-600'
+                  }`}
+                  title="عدد الطلاب المرصود حضورهم اليوم من إجمالي طلاب الحلقة"
+                >
+                  {todayMarkedCount}/{halaqahStudents.length}
                 </span>
               </button>
 
@@ -1046,6 +1194,40 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                       <StatusBadge status={ev.status} label={ev.statusLabel} size="sm" />
                       <span className="text-[11px] text-slate-700 font-mono">حضور: {ev.attendanceRate}%</span>
                     </div>
+
+                    {/* Work-queue + plan-health chips (same semantics as supervisor radar) */}
+                    {(recordedTodayIds.has(student.id) ||
+                      planHealthMap.get(student.id)?.state !== 'healthy') && (
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        {recordedTodayIds.has(student.id) && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            رُصد إنجازه اليوم ✓
+                          </span>
+                        )}
+                        {(() => {
+                          const ph = planHealthMap.get(student.id)?.state;
+                          if (ph === 'deficient')
+                            return (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-50 text-rose-800 border border-rose-200">
+                                هدف الخطة ناقص
+                              </span>
+                            );
+                          if (ph === 'at_risk')
+                            return (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-300">
+                                إيقاع الخطة متعثر
+                              </span>
+                            );
+                          if (ph === 'none')
+                            return (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-300">
+                                بلا خطة قرآنية
+                              </span>
+                            );
+                          return null;
+                        })()}
+                      </div>
+                    )}
 
                     {/* Track Nomination Pill if exists */}
                     {studentNomination && (
@@ -1326,8 +1508,49 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
           wide
         >
           <div className="space-y-4">
+            {/* Day navigator — today by default, ‹ goes back to yesterday then older */}
+            <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5">
+              <button
+                onClick={() => shiftAttendanceView(-1)}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-white hover:text-emerald-700 transition-colors cursor-pointer"
+                title="اليوم السابق"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <div className="text-center">
+                <div className="text-xs font-black text-slate-800">{attendanceViewLabel}</div>
+                <div className="text-[10px] text-slate-500 font-mono" dir="ltr">{attendanceViewDate}</div>
+              </div>
+              <button
+                onClick={() => shiftAttendanceView(1)}
+                disabled={attendanceViewDate === todayIso}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-white hover:text-emerald-700 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                title="اليوم التالي"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Counts strip for the viewed day */}
+            <div className="flex items-center gap-2 text-[11px] font-bold">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                حاضر {attendanceCounts.present}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                متأخر {attendanceCounts.late}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-800 border border-rose-200">
+                غائب {attendanceCounts.absent}
+              </span>
+              {attendanceViewDate !== todayIso && !viewedDayHasRecords && (
+                <span className="ms-auto text-slate-500 font-semibold">لا يوجد كشف محفوظ لهذا اليوم</span>
+              )}
+            </div>
+
             <p className="text-xs text-slate-600">
-              الافتراضي: جميع الطلاب حاضرون. انقر على اسم الطالب لتبديل حالته (حاضر ← متأخر ← غائب) ثم احفظ.
+              {attendanceViewDate === todayIso
+                ? 'الافتراضي: جميع الطلاب حاضرون. انقر على اسم الطالب لتبديل حالته (حاضر ← متأخر ← غائب) ثم احفظ.'
+                : 'كشف يوم سابق — انقر على اسم الطالب لتصحيح حالته ثم احفظ.'}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {halaqahStudents.map((s) => {

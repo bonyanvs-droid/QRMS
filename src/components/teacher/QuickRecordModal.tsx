@@ -226,16 +226,25 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   // Quran Planning Engine Integration — plan determines which tracks today's session needs
   const activeQuranPlan = getActiveStudentQuranPlan(student.id);
   const todayIso = new Date().toISOString().split('T')[0];
-  
+
+  // Update-mode: if a session record already exists for today, reopening must show
+  // THAT recorded achievement (editable) — never the next milestone's prefilled range.
+  const todayRecord = useMemo(
+    () => (sessionRecords || []).find((r) => r.studentId === student.id && r.date === todayIso),
+    [sessionRecords, student.id, todayIso]
+  );
+
   // Intelligent Floating Milestone: Look for today's date first; if absent/past or student was away,
   // find the first uncompleted (pending) milestone so the student resumes from their exact stopping point!
   const todayDailyItem = useMemo(() => {
     const dailyPlans = activeQuranPlan?.generatedPlan?.dailyPlans;
     if (!dailyPlans || dailyPlans.length === 0) return undefined;
-    
-    // 1. Direct match with today's calendar date if still pending
+
+    // 1. Direct match with today's calendar date if still pending — or when a record
+    //    exists for today (update-mode keeps today's milestone so saving UPDATES it
+    //    and rebuilds the future plan, instead of silently consuming tomorrow's).
     const exactToday = dailyPlans.find((d) => d.date === todayIso);
-    if (exactToday && exactToday.status === 'pending') {
+    if (exactToday && (exactToday.status === 'pending' || todayRecord)) {
       return exactToday;
     }
 
@@ -247,7 +256,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
     // 3. Fallback to today or the last item
     return exactToday || dailyPlans[dailyPlans.length - 1];
-  }, [activeQuranPlan, todayIso]);
+  }, [activeQuranPlan, todayIso, todayRecord]);
 
   // Auto Minor Revision: engine-determined range, teacher only records the actual result
   const isRevisionPlan = activeQuranPlan?.planType === 'revision';
@@ -274,9 +283,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     );
   }, [planUnit]);
 
-  // Spelling Track State
+  // Spelling Track State — in update-mode prefill from today's recorded entry
   const initialLesson =
-    spellingLessons.find((l) => l.id === student.currentSpellingLessonId) || spellingLessons[0];
+    spellingLessons.find((l) => l.id === (todayRecord?.spelling?.lessonId || student.currentSpellingLessonId)) ||
+    spellingLessons[0];
   const [selectedLessonId, setSelectedLessonId] = useState<string>(initialLesson?.id || '');
   const selectedLesson = spellingLessons.find((l) => l.id === selectedLessonId) || initialLesson;
 
@@ -286,23 +296,35 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     selectedLesson?.subLessons?.forEach((sub) => {
       map[sub.id] = 85; // Default good score
     });
+    if (todayRecord?.spelling?.subLessonScores) {
+      Object.assign(map, todayRecord.spelling.subLessonScores);
+    }
     return map;
   });
 
-  const [spellingFinalScore, setSpellingFinalScore] = useState<number>(student.currentSpellingScore || 85);
-  const [spellingStatusTag, setSpellingStatusTag] = useState<'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة'>('أتقن');
-  const [spellingNotes, setSpellingNotes] = useState('');
+  const [spellingFinalScore, setSpellingFinalScore] = useState<number>(
+    todayRecord?.spelling?.finalScore || student.currentSpellingScore || 85
+  );
+  const [spellingStatusTag, setSpellingStatusTag] = useState<'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة'>(
+    (['أتقن', 'يحتاج تثبيت', 'لم ينتقل بعد', 'يحتاج مراجعة'] as const).includes(
+      todayRecord?.spelling?.statusTag as never
+    )
+      ? (todayRecord!.spelling!.statusTag as 'أتقن' | 'يحتاج تثبيت' | 'لم ينتقل بعد' | 'يحتاج مراجعة')
+      : 'أتقن'
+  );
+  const [spellingNotes, setSpellingNotes] = useState(todayRecord?.spelling?.notes || '');
 
-  // Memorization Track State — prefilled from the Quran plan when available
-  const [surahFrom, setSurahFrom] = useState<string>(planStartSurah || student.currentSurah);
-  const [ayahFrom, setAyahFrom] = useState<number>(planUnit?.start?.ayahNumber || 1);
-  const [surahTo, setSurahTo] = useState<string>(planEndSurah || student.currentSurah);
-  const [ayahTo, setAyahTo] = useState<number>(planUnit?.end?.ayahNumber || student.currentAyah || 10);
-  const [memScore, setMemScore] = useState<number>(100);
-  const [memNotes, setMemNotes] = useState('');
+  // Memorization Track State — prefilled from today's record (update-mode) else the Quran plan
+  const [surahFrom, setSurahFrom] = useState<string>(todayRecord?.memorization?.surahFrom || planStartSurah || student.currentSurah);
+  const [ayahFrom, setAyahFrom] = useState<number>(todayRecord?.memorization?.ayahFrom || planUnit?.start?.ayahNumber || 1);
+  const [surahTo, setSurahTo] = useState<string>(todayRecord?.memorization?.surahTo || planEndSurah || student.currentSurah);
+  const [ayahTo, setAyahTo] = useState<number>(todayRecord?.memorization?.ayahTo || planUnit?.end?.ayahNumber || student.currentAyah || 10);
+  const [memScore, setMemScore] = useState<number>(todayRecord?.memorization?.score || 100);
+  const [memNotes, setMemNotes] = useState(todayRecord?.memorization?.notes || '');
 
-  // Revision Track State — prefilled from revision target when plan is revision-only
+  // Revision Track State — prefilled from today's record (update-mode) else the plan target
   const [revSurahFrom, setRevSurahFrom] = useState<string>(() => {
+    if (todayRecord?.revision?.surahFrom) return todayRecord.revision.surahFrom;
     if (isRevisionPlan && planStartSurah) return planStartSurah;
     return 'الناس';
   });
@@ -311,6 +333,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     return 1;
   });
   const [revSurahTo, setRevSurahTo] = useState<string>(() => {
+    if (todayRecord?.revision?.surahTo) return todayRecord.revision.surahTo;
     if (isRevisionPlan && planEndSurah) return planEndSurah;
     return student.currentSurah || 'الفاتحة';
   });
@@ -318,21 +341,35 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     if (isRevisionPlan && planUnit?.end?.ayahNumber) return planUnit.end.ayahNumber;
     return student.currentAyah || 1;
   });
-  const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>('قريبة');
-  const [revScore, setRevScore] = useState<number>(100);
+  const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>(todayRecord?.revision?.type || 'قريبة');
+  const [revScore, setRevScore] = useState<number>(todayRecord?.revision?.score || 100);
   const [revManualOverride, setRevManualOverride] = useState(false);
 
   // Custom (admin-defined) tracks — generic score + notes per track, saved to customTracks
-  const [customTrackScores, setCustomTrackScores] = useState<Record<string, number>>({});
-  const [customTrackNotes, setCustomTrackNotes] = useState<Record<string, string>>({});
+  const [customTrackScores, setCustomTrackScores] = useState<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    for (const [tid, t] of Object.entries(todayRecord?.customTracks || {})) {
+      out[tid] = t?.score ?? 85;
+    }
+    return out;
+  });
+  const [customTrackNotes, setCustomTrackNotes] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const [tid, t] of Object.entries(todayRecord?.customTracks || {})) {
+      if (t?.notes) out[tid] = t.notes;
+    }
+    return out;
+  });
 
-  const [generalNotes, setGeneralNotes] = useState('');
+  const [generalNotes, setGeneralNotes] = useState(todayRecord?.teacherRemarks || '');
   const [isSaved, setIsSaved] = useState(false);
 
-  // ── Track debt detection from student's historical sessions ──
+  // ── Track debt detection from student's sessions BEFORE today ──
+  // (today's own record is handled by update-mode prefill; an "unachieved" flag
+  // recorded today stays reversible here, while older debts stay locked in.)
   const studentPreviousSessions = useMemo(() => {
     return (sessionRecords || [])
-      .filter((r) => r.studentId === student.id && r.date <= todayIso)
+      .filter((r) => r.studentId === student.id && r.date < todayIso)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [sessionRecords, student.id, todayIso]);
 
@@ -361,8 +398,17 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     return Boolean(lastSpellingRecord?.spelling?.unachieved);
   }, [lastSpellingRecord]);
 
-  // Teacher selections for unachieved tracks today
-  const [unachievedTracks, setUnachievedTracks] = useState<Record<string, boolean>>({});
+  // Teacher selections for unachieved tracks today — restored from today's record in update-mode
+  const [unachievedTracks, setUnachievedTracks] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    if (todayRecord?.spelling?.unachieved) init.spelling = true;
+    if (todayRecord?.memorization?.unachieved) init.memorization = true;
+    if (todayRecord?.revision?.unachieved) init.revision = true;
+    for (const [tid, t] of Object.entries(todayRecord?.customTracks || {})) {
+      if ((t as { unachieved?: boolean })?.unachieved) init[tid] = true;
+    }
+    return init;
+  });
 
   const toggleTrackUnachieved = (trackKey: string) => {
     setUnachievedTracks((prev) => ({
@@ -379,7 +425,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const isSpellingTrackEnabled = enabledTrackIds.includes('track_spelling');
   const isQuranTrackEnabled = enabledTrackIds.includes('track_quran');
 
-  const steps = useMemo<SessionTrack[]>(() => {
+  const planSteps = useMemo<SessionTrack[]>(() => {
     const list: SessionTrack[] = [];
     if (isSpellingTrackEnabled || spellingHasPendingDebt) list.push('spelling');
     if (!isQuranTrackEnabled) {
@@ -439,6 +485,28 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLesson?.id, todayDailyItem?.id, isSpellingTrackEnabled, isQuranTrackEnabled, memHasPendingDebt, revHasPendingDebt, spellingHasPendingDebt, isRevisionPlan, isMemOnlyPlan, enabledTrackIds]);
+
+  // Update-mode: today's record may hold tracks the floating milestone no longer
+  // proposes (e.g. next day is revision-only). Surface every recorded track so
+  // re-saving updates it instead of silently dropping it.
+  const steps = useMemo<SessionTrack[]>(() => {
+    const list = [...planSteps];
+    if (todayRecord) {
+      if (todayRecord.spelling && !list.includes('spelling')) list.push('spelling');
+      if (todayRecord.memorization && !list.includes('memorization')) list.push('memorization');
+      if (todayRecord.revision && !list.includes('revision')) list.push('revision');
+      for (const tid of Object.keys(todayRecord.customTracks || {})) {
+        if (!list.includes(tid)) list.push(tid);
+      }
+      const order = ['spelling', 'memorization', 'revision'];
+      list.sort((a, b) => {
+        const ia = order.indexOf(a);
+        const ib = order.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+    }
+    return list;
+  }, [planSteps, todayRecord]);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -676,6 +744,14 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200">
                   {student.grade}
                 </span>
+                {todayRecord && (
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 font-bold border border-amber-300 whitespace-nowrap"
+                    title="يوجد إنجاز مسجّل لهذا اليوم — التعديل هنا يحدّث سجل اليوم ويعيد بناء الخطة المستقبلية"
+                  >
+                    تحديث إنجاز اليوم
+                  </span>
+                )}
               </div>
               <p className="text-[10px] sm:text-xs text-slate-700">
                 المستهدف: سورة {student.minimumTargetSurah}<span className="hidden sm:inline"> • الموضع الحالي: سورة {student.currentSurah}</span>
