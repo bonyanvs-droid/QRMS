@@ -35,6 +35,11 @@ import {
   getStudentPreferredWorkingDays,
 } from '../utils/studentSchedule';
 import { isDateWorkingDay, addDaysToDate } from '../utils/dateUtils';
+import {
+  TermHorizonWindow,
+  buildTermHorizonWindows,
+  expandHolidayDates,
+} from '../utils/termHorizon';
 import { assignSpellingLessonsToPlan } from '../utils/spellingDistribution';
 
 /** Default track subscription — mirrors the `halaqahs.active_track_ids` DB default */
@@ -350,6 +355,8 @@ export interface ResolvedPlanConfiguration {
   schedule: WorkingDaysSchedule;
   startDate: string;
   endDate: string;
+  /** Union of academic term windows — used ONLY to measure at_risk headroom */
+  termWindows: TermHorizonWindow[];
   // Tracks
   activeTrackIds: string[];
   spellingEnabled: boolean;
@@ -365,30 +372,53 @@ function resolveGradeTargetKeys(
   stageConfig: StageQuranConfig
 ): string[] {
   const keys: string[] = [];
-  if (student.stageId) keys.push(student.stageId);
-  if (stageConfig.id) keys.push(stageConfig.id);
-  if (stageConfig.code) keys.push(stageConfig.code);
+  // Grade-specific keys first — the grade's own target (grade1→الضحى) is more
+  // specific than the stage target (baraem→الغاشية) and must win when both
+  // exist in the academic year's gradeTargets map.
   const g = (student.grade || '').trim();
   const gradeMap: Record<string, string> = {
     'تمهيدي': 'tamheedi',
+    'التمهيدي': 'tamheedi',
     'تحضيري': 'tamheedi',
+    'التحضيري': 'tamheedi',
     'صف أول': 'grade1',
     'الصف الأول': 'grade1',
     'أول': 'grade1',
+    'الأول ابتدائي': 'grade1',
+    'الأول الابتدائي': 'grade1',
+    'أول ابتدائي': 'grade1',
+    'الصف الأول ابتدائي': 'grade1',
+    'الصف الأول الابتدائي': 'grade1',
     'صف ثاني': 'grade2',
     'الصف الثاني': 'grade2',
     'ثاني': 'grade2',
+    'الثاني ابتدائي': 'grade2',
+    'الثاني الابتدائي': 'grade2',
+    'ثاني ابتدائي': 'grade2',
+    'الصف الثاني ابتدائي': 'grade2',
+    'الصف الثاني الابتدائي': 'grade2',
     'صف ثالث': 'grade3',
     'الصف الثالث': 'grade3',
+    'الثالث ابتدائي': 'grade3',
+    'الثالث الابتدائي': 'grade3',
     'صف رابع': 'grade4',
     'الصف الرابع': 'grade4',
+    'الرابع ابتدائي': 'grade4',
+    'الرابع الابتدائي': 'grade4',
     'صف خامس': 'grade5',
     'الصف الخامس': 'grade5',
+    'الخامس ابتدائي': 'grade5',
+    'الخامس الابتدائي': 'grade5',
     'صف سادس': 'grade6',
     'الصف السادس': 'grade6',
+    'السادس ابتدائي': 'grade6',
+    'السادس الابتدائي': 'grade6',
   };
   if (gradeMap[g]) keys.push(gradeMap[g]);
   if (g) keys.push(g);
+  if (student.stageId) keys.push(student.stageId);
+  if (stageConfig.id) keys.push(stageConfig.id);
+  if (stageConfig.code) keys.push(stageConfig.code);
   return [...new Set(keys)];
 }
 
@@ -576,7 +606,12 @@ export function resolveQuranPlanConfiguration(
     getStudentPreferredWorkingDays(student),
     halaqahWorkingDays
   ).days;
-  const holidays = academicConfig?.holidays || [];
+  const holidays = [
+    ...new Set([
+      ...expandHolidayDates(academicConfig?.holidays as any[]),
+      ...expandHolidayDates(academicConfig?.officialHolidays as any[]),
+    ]),
+  ];
 
   // 7. Dates
   const now = new Date();
@@ -635,6 +670,7 @@ export function resolveQuranPlanConfiguration(
     schedule: { workingDays, holidays },
     startDate,
     endDate,
+    termWindows: buildTermHorizonWindows(academicConfig),
     activeTrackIds,
     spellingEnabled,
     savingOffset,
@@ -699,6 +735,7 @@ export async function createRealStudentPlan(
       revisionMode: resolved.revisionMode,
       savingOffset: resolved.savingOffset,
       revisionOffset: resolved.revisionOffset,
+      academicTerms: resolved.termWindows,
     });
   }
 
@@ -722,7 +759,7 @@ export async function createRealStudentPlan(
     teacherId: student.teacherId,
     tenantId: student.tenantId,
     planType: effectivePlanType,
-    status: 'active',
+    status: basePlan.status === 'at_risk' ? 'at_risk' : 'active',
     targetSource: resolved.targetSource,
     activeTrackIds: resolved.activeTrackIds,
     savingOffset: resolved.savingOffset,

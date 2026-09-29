@@ -32,8 +32,13 @@ import {
   computeWeekNumber,
   computeMonthNumber,
 } from '../utils/dateUtils';
+import {
+  buildTermHorizonWindows,
+  countWorkingDaysInHorizon,
+  expandHolidayDates,
+} from '../utils/termHorizon';
 import { redistributeSpellingForFutureDays } from '../utils/spellingDistribution';
-import { SpellingLesson, DailySessionRecord } from '../../types';
+import { SpellingLesson, DailySessionRecord, AcademicYearConfig } from '../../types';
 
 export interface RecordAchievementParams {
   plan: StudentQuranPlan;
@@ -47,6 +52,12 @@ export interface RecordAchievementParams {
   spellingLessons?: SpellingLesson[];
   /** Student session records — used to resume spelling after the last recorded lesson */
   sessionRecords?: DailySessionRecord[];
+  /**
+   * Academic-year configuration — supplies the term windows used to measure
+   * at_risk headroom across ALL terms (grade targets span both terms). When
+   * absent, the check falls back to the plan's own remaining days.
+   */
+  academicConfig?: AcademicYearConfig;
 }
 
 export interface ApplyTeacherOverrideParams {
@@ -209,6 +220,10 @@ export class PlanRecalculationService {
     // plan creation: cumulative per-surah pacing + consolidation days + rolling
     // minor revision seeded from the accumulated memorized content.
     let remainingUnits: PlanningUnit[] = [];
+    // Units strictly required to reach the target end — excludes the
+    // post-target continuation extension that merely fills spare days. This is
+    // the honest numerator for the at_risk check.
+    let remainingTargetUnitsCount = 0;
     let repartitionDone = false;
 
     const futureDaysNeeded = dailyPlans.filter(
@@ -229,7 +244,7 @@ export class PlanRecalculationService {
     }
 
     if (nextFutureStart && !isTargetComplete) {
-      remainingUnits = await this.buildRemainingUnits(
+      const rebuilt = await this.buildRemainingUnits(
         planClone,
         nextFutureStart,
         newCurrentPosition,
@@ -238,6 +253,8 @@ export class PlanRecalculationService {
           : achievedEnd,
         futureDaysNeeded
       );
+      remainingUnits = rebuilt.units;
+      remainingTargetUnitsCount = rebuilt.targetUnitsCount;
       repartitionDone = true;
     } else if (isTargetComplete) {
       repartitionDone = true;
@@ -288,11 +305,24 @@ export class PlanRecalculationService {
     }
 
     // 7. Check if target has become AT_RISK
+    // The plan document only spans the current term, but grade targets are
+    // distributed across ALL terms — so the headroom is measured against the
+    // remaining working days through the LAST term's end when the academic
+    // configuration is available. Without it, fall back to the plan horizon.
     const futureActiveDays = dailyPlans.filter(
       (d) => d.date > dayDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
     );
-    const remainingUnitsCount = remainingUnits.length;
-    const isAtRisk = remainingUnitsCount > futureActiveDays.length;
+    const termWindows = buildTermHorizonWindows(params.academicConfig);
+    const remainingWorkingDaysCount = termWindows.length
+      ? countWorkingDaysInHorizon(
+          dayDate,
+          termWindows,
+          planClone.schedule.workingDays,
+          expandHolidayDates(planClone.schedule.holidays as any[])
+        )
+      : futureActiveDays.length;
+    const remainingUnitsCount = remainingTargetUnitsCount;
+    const isAtRisk = remainingUnitsCount > remainingWorkingDaysCount;
 
     // 6. Append Recalculation Event for Auditing
     const event: RecalculationEvent = {
@@ -322,10 +352,10 @@ export class PlanRecalculationService {
 
 
     if (isAtRisk) {
-      const deficitUnits = remainingUnitsCount - futureActiveDays.length;
+      const deficitUnits = remainingUnitsCount - remainingWorkingDaysCount;
       const requiredDailyAmount =
-        futureActiveDays.length > 0
-          ? Math.ceil(remainingUnitsCount / futureActiveDays.length)
+        remainingWorkingDaysCount > 0
+          ? Math.ceil(remainingUnitsCount / remainingWorkingDaysCount)
           : remainingUnitsCount;
 
       const diagnostic: TargetAtRiskDiagnostic = {
@@ -336,12 +366,12 @@ export class PlanRecalculationService {
           (d) => d.status === 'completed' || d.status === 'overachieved'
         ).length,
         remainingUnits: remainingUnitsCount,
-        remainingWorkingDays: futureActiveDays.length,
+        remainingWorkingDays: remainingWorkingDaysCount,
         requiredDailyAmount,
         currentDailyAmount: planClone.dailyAmount,
         deficitUnits,
         projectedDeficitDays: deficitUnits,
-        warningMessage: `تنبيه: نظراً للغياب أو التأخر، سيتبقى عجز بمقدار ${deficitUnits} حصة في نهاية الفصل الدراسي.`,
+        warningMessage: `تنبيه: نظراً للغياب أو التأخر، سيتبقى عجز بمقدار ${deficitUnits} حصة بنهاية العام الدراسي.`,
         actionableRecommendations: [
           `زيادة معدل الحفظ اليومي إلى ${requiredDailyAmount} لتدارك التأخر.`,
           `إضافة أيام دراسية إضافية لتعويض الـ ${deficitUnits} يوماً دراسياً المفقود.`,
@@ -424,15 +454,17 @@ export class PlanRecalculationService {
       (await this.nextPositionAfter(lastAchievedPosition, planClone)) ||
       lastAchievedPosition;
 
-    const remainingUnits = await this.buildRemainingUnits(
-      planClone,
-      startForRemaining,
-      lastAchievedPosition,
-      null,
-      dailyPlans.filter(
-        (d) => d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
-      ).length
-    );
+    const remainingUnits = (
+      await this.buildRemainingUnits(
+        planClone,
+        startForRemaining,
+        lastAchievedPosition,
+        null,
+        dailyPlans.filter(
+          (d) => d.date >= effectiveFromDate && !d.isHistorical && !d.isLocked && d.dayType !== 'holiday'
+        ).length
+      )
+    ).units;
 
     let cursor = 0;
     for (const d of dailyPlans) {
@@ -518,7 +550,7 @@ export class PlanRecalculationService {
     achievedPositionForSeed: QuranPosition,
     justCompletedEnd: QuranPosition | null,
     neededUnits = 0
-  ): Promise<PlanningUnit[]> {
+  ): Promise<{ units: PlanningUnit[]; targetUnitsCount: number }> {
     const revisionDirection = this.resolveRevisionDirection(plan);
     const revisionPages = plan.revisionDailyPages ?? 1;
     const revisionUnitKind = plan.revisionSettings?.unitType || 'page';
@@ -550,6 +582,9 @@ export class PlanRecalculationService {
         (plan.consolidationDaysPerSurah ?? 3) > 0
       );
     let rawUnits = await repartition(plan.targetEnd);
+    // Honest count of units required to reach the target — captured BEFORE the
+    // continuation extension below inflates the list to fill spare days.
+    const targetUnitsBase = rawUnits.length;
 
     // Continue memorization past the academic target when days remain —
     // the target is the stage goal, not a hard stop.
@@ -564,7 +599,7 @@ export class PlanRecalculationService {
     }
 
     if (justCompletedEnd) {
-      return await this.prependCompletedSurahConsolidation(
+      const withConsolidation = await this.prependCompletedSurahConsolidation(
         rawUnits,
         justCompletedEnd,
         plan,
@@ -574,9 +609,13 @@ export class PlanRecalculationService {
         revisionUnitKind,
         revisionUnitsPerWindow
       );
+      // Prepended consolidation days are genuine units consumed on the way to
+      // the target — count them, unlike the continuation extension.
+      const prepended = withConsolidation.length - rawUnits.length;
+      return { units: withConsolidation, targetUnitsCount: targetUnitsBase + prepended };
     }
 
-    return rawUnits;
+    return { units: rawUnits, targetUnitsCount: targetUnitsBase };
   }
 
   private async prependCompletedSurahConsolidation(

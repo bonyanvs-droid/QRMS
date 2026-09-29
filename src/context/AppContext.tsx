@@ -4523,6 +4523,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notes: params.notes,
         spellingLessons,
         sessionRecords,
+        academicConfig,
       });
 
       // 3. Persist to Firestore and local state

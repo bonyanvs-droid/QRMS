@@ -26,7 +26,12 @@ import {
   getArabicDayName,
   computeWeekNumber,
   computeMonthNumber,
+  addDaysToDate,
 } from '../utils/dateUtils';
+import {
+  TermHorizonWindow,
+  countWorkingDaysInHorizon,
+} from '../utils/termHorizon';
 import { formatQuranRange } from '../utils/positionFormatter';
 import { getSurahsByDirection } from '../../utils/quranMetadata';
 
@@ -66,6 +71,12 @@ export interface CreateMemorizationPlanParams {
   savingOffset?: number;
   /** Delay starting revision by N sessions */
   revisionOffset?: number;
+  /**
+   * Academic term windows spanning the whole year — used ONLY to measure the
+   * at_risk headroom (units-to-target vs. remaining study days across all
+   * terms). The generated plan itself still ends at `endDate` (single term).
+   */
+  academicTerms?: TermHorizonWindow[];
 }
 
 export class QuranMemorizationPlanningEngine {
@@ -175,7 +186,17 @@ export class QuranMemorizationPlanningEngine {
     // 4. Calculate pace and check if the ACADEMIC target is at risk
     // (risk is measured against the target units, not the extended filler range)
     const totalUnits = targetUnitsCount;
-    const availableWorkingDays = workingDates.length;
+    // Grade targets are distributed across ALL terms of the academic year, so
+    // the headroom must be measured against the remaining working days through
+    // the LAST term's end — not just the days inside this single-term plan.
+    const availableWorkingDays = params.academicTerms?.length
+      ? countWorkingDaysInHorizon(
+          addDaysToDate(params.startDate, -1),
+          params.academicTerms,
+          params.schedule.workingDays,
+          params.schedule.holidays
+        )
+      : workingDates.length;
     const isAtRisk = totalUnits > availableWorkingDays;
     let targetAtRiskDiagnostic: TargetAtRiskDiagnostic | undefined = undefined;
 
