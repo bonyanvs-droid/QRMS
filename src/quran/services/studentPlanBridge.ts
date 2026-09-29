@@ -11,6 +11,7 @@ import { QuranPosition, Surah, IQuranDataProvider } from '../types';
 import {
   getSurahAyahsCount,
   getSurahsByDirection,
+  findSurahMetadata,
 } from '../../utils/quranMetadata';
 import {
   StudentQuranPlan,
@@ -420,6 +421,51 @@ function resolveGradeTargetKeys(
   if (stageConfig.id) keys.push(stageConfig.id);
   if (stageConfig.code) keys.push(stageConfig.code);
   return [...new Set(keys)];
+}
+
+/**
+ * Resolves ONLY the student's grade/stage academic target position — the
+ * "مستهدف الصف" reference used to judge whether an existing plan's own
+ * targetEnd actually reaches the required grade target. Independent of
+ * personal/explicit overrides on purpose: the caller wants the academic
+ * benchmark, not what the plan happened to be configured with.
+ */
+export function resolveStudentGradeTargetPosition(
+  student: { grade?: string; stageId?: string },
+  academicConfig: AcademicYearConfig | undefined,
+  stageConfig?: StageQuranConfig
+): QuranPosition | null {
+  const gradeTargets = academicConfig?.gradeTargets || {};
+  for (const key of resolveGradeTargetKeys(student, stageConfig || ({} as StageQuranConfig))) {
+    const minSurah = gradeTargets[key]?.minSurah;
+    if (!minSurah) continue;
+    const meta = findSurahMetadata(minSurah);
+    if (meta) return { surahNumber: meta.number, ayahNumber: meta.ayahsCount };
+  }
+  return null;
+}
+
+/**
+ * Whether a plan endpoint reaches/covers a required target position along
+ * the plan's traversal direction. Backward plans descend surah numbers, so
+ * an endpoint at or below the target surah covers it.
+ */
+export function planEndCoversTarget(
+  planEnd: QuranPosition | undefined,
+  required: QuranPosition | undefined,
+  direction: PlanDirection
+): boolean {
+  if (!planEnd || !required) return true; // unverifiable → don't flag
+  if (direction === 'backward') {
+    return (
+      planEnd.surahNumber < required.surahNumber ||
+      (planEnd.surahNumber === required.surahNumber && planEnd.ayahNumber >= required.ayahNumber)
+    );
+  }
+  return (
+    planEnd.surahNumber > required.surahNumber ||
+    (planEnd.surahNumber === required.surahNumber && planEnd.ayahNumber >= required.ayahNumber)
+  );
 }
 
 /**

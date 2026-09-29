@@ -18,6 +18,11 @@ import {
 } from '../../lib/studentCategory';
 import { ComprehensiveQuranPlanModal } from '../common/ComprehensiveQuranPlanModal';
 import { Student } from '../../types';
+import { findStageConfigForStudent } from '../../quran/models/stageConfig';
+import {
+  resolveStudentGradeTargetPosition,
+  planEndCoversTarget,
+} from '../../quran/services/studentPlanBridge';
 import {
   ShieldCheck,
   BookOpen,
@@ -63,6 +68,7 @@ export const SupervisorDashboard: React.FC = () => {
     admissionsRequests,
     seasonalParticipations,
     getActiveStudentQuranPlan,
+    quranStageConfigs,
   } = useApp();
 
   // Active Scope State (Role + Scope Architecture)
@@ -213,7 +219,25 @@ export const SupervisorDashboard: React.FC = () => {
         : pos.surahNumber > tEnd.surahNumber ||
           (pos.surahNumber === tEnd.surahNumber && pos.ayahNumber >= tEnd.ayahNumber));
     const reachedTarget = hasPlan && (plan!.status === 'completed' || passedTarget);
-    const isAtRisk = plan?.status === 'at_risk';
+    const isAtRisk =
+      plan?.status === 'at_risk' || plan?.targetAtRiskDiagnostic?.isAtRisk === true;
+    // "متابعة الخطة" carries the precise meaning: the student HAS a plan but
+    // the plan does NOT take him to his grade target — either the endpoint is
+    // below the required grade target, or the pace is infeasible (at_risk).
+    // A healthy in-progress plan gets a neutral "خطة جارية" instead.
+    const gradeTarget = resolveStudentGradeTargetPosition(
+      s,
+      academicConfig,
+      findStageConfigForStudent(s, quranStageConfigs)
+    );
+    const targetDeficient =
+      hasPlan &&
+      !planEndCoversTarget(
+        tEnd,
+        gradeTarget ?? undefined,
+        plan!.direction || 'backward'
+      );
+    const needsFollowUp = hasPlan && (targetDeficient || isAtRisk);
 
     return (
       <button
@@ -223,28 +247,34 @@ export const SupervisorDashboard: React.FC = () => {
             ? canEdit
               ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 shadow-2xs'
               : 'bg-slate-100 text-slate-600 border-slate-300'
+            : needsFollowUp
+            ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
             : reachedTarget
             ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-            : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+            : 'bg-teal-50 hover:bg-teal-100 text-teal-900 border-teal-300'
         }`}
         title={
           canEdit
             ? !hasPlan
               ? 'تأسيس واعتماد الخطة القرآنية للطالب'
-              : reachedTarget
-              ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
+              : targetDeficient
+              ? 'الخطة لا تصل إلى مستهدف الصف — تحتاج تعديل النطاق'
               : isAtRisk
               ? 'الخطة متعثرة عن المستهدف — تحتاج مراجعة وتحديثاً'
-              : 'خطة جارية لم تبلغ المستهدف بعد — متابعة الخطة'
+              : reachedTarget
+              ? 'بلغ المستهدف — إدارة وتعديل الخطة القرآنية الشاملة'
+              : 'خطة سليمة جارية تغطي مستهدف الصف — عرض الخطة'
             : 'عرض محددات الخطة القرآنية'
         }
       >
         {!hasPlan ? (
           <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+        ) : needsFollowUp ? (
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
         ) : reachedTarget ? (
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
         ) : (
-          <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+          <BookOpen className="w-3.5 h-3.5 text-teal-700" />
         )}
         <span>
           {!hasPlan
@@ -253,11 +283,13 @@ export const SupervisorDashboard: React.FC = () => {
               : 'بانتظار الخطة'
             : !canEdit
             ? 'الخطة القرآنية'
+            : needsFollowUp
+            ? 'متابعة الخطة'
             : reachedTarget
             ? 'إدارة الخطة'
-            : 'متابعة الخطة'}
+            : 'الخطة جارية'}
         </span>
-        {((!hasPlan && canEdit) || isAtRisk) && (
+        {((!hasPlan && canEdit) || needsFollowUp) && (
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
         )}
       </button>
