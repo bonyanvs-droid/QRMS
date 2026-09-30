@@ -1420,13 +1420,25 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     )}
                                     {(() => {
                                       // Show the actually-achieved range when it differs from
-                                      // the planned assignment — prefer the recalculated unit,
-                                      // fall back to the teacher-entered session record.
-                                      const actualLabel =
-                                        day.actualAchieved?.unit?.displayLabel ||
-                                        (rec?.memorization?.surahFrom && rec.memorization.surahTo
+                                      // the planned assignment. Compare POSITIONS (not labels):
+                                      // older rows inherited the target's displayLabel even when
+                                      // the achieved end moved beyond it.
+                                      const au = day.actualAchieved?.unit;
+                                      const posDiffers = Boolean(
+                                        au &&
+                                        (au.end?.surahNumber !== day.targetUnit?.end?.surahNumber ||
+                                          au.end?.ayahNumber !== day.targetUnit?.end?.ayahNumber ||
+                                          au.start?.surahNumber !== day.targetUnit?.start?.surahNumber ||
+                                          au.start?.ayahNumber !== day.targetUnit?.start?.ayahNumber)
+                                      );
+                                      const actualLabel = posDiffers
+                                        ? au!.displayLabel &&
+                                          au!.displayLabel !== day.targetUnit.displayLabel
+                                          ? au!.displayLabel
+                                          : `سورة ${surahName(au!.start?.surahNumber)} (الآيات ${au!.start?.ayahNumber} - ${au!.end?.ayahNumber})`
+                                        : rec?.memorization?.surahFrom && rec.memorization.surahTo
                                           ? `${resolveSurahName(rec.memorization.surahFrom)} ${rec.memorization.ayahFrom} – ${resolveSurahName(rec.memorization.surahTo)} ${rec.memorization.ayahTo}`
-                                          : undefined);
+                                          : undefined;
                                       if (!actualLabel || actualLabel === day.targetUnit.displayLabel) return null;
                                       return (
                                         <div className="mt-1 flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 w-fit">

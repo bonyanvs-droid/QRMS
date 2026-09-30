@@ -38,6 +38,7 @@ import {
   expandHolidayDates,
 } from '../utils/termHorizon';
 import { redistributeSpellingForFutureDays } from '../utils/spellingDistribution';
+import { formatQuranRange } from '../utils/positionFormatter';
 import { SpellingLesson, DailySessionRecord, AcademicYearConfig } from '../../types';
 
 export interface RecordAchievementParams {
@@ -132,6 +133,13 @@ export class PlanRecalculationService {
         ...targetDay.targetUnit,
         end: actualEndPosition,
         totalAyahs: verses.length,
+        // Regenerate the label for the ACTUAL range — inheriting the target's
+        // displayLabel hid overachievement in the comprehensive plan view.
+        displayLabel: formatQuranRange(
+          targetDay.targetUnit.start,
+          actualEndPosition,
+          { includeSurahWord: true }
+        ),
       };
     }
 
