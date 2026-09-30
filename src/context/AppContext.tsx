@@ -361,7 +361,7 @@ export interface AppContextType {
   restoreHalaqah: (id: string) => Promise<void>;
   permanentlyDeleteArchivedHalaqah: (id: string) => Promise<void>;
   // Record logging methods
-  recordDailySession: (record: Omit<DailySessionRecord, 'id' | 'createdAt'>) => void;
+  recordDailySession: (record: Omit<DailySessionRecord, 'id' | 'createdAt'>, opts?: { fillGapsOnly?: boolean }) => void;
   bulkMarkAttendance: (date: string, weekNumber: number, halaqahId: string, attendanceMapOrPresent: Record<string, 'present' | 'late' | 'absent'> | string[], absentStudentIds?: string[]) => void;
   // Academic & Plan config methods
   updateAcademicConfig: (updates: Partial<AcademicYearConfig>) => void;
@@ -1013,6 +1013,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [sessionRecords, setSessionRecords] = useState<DailySessionRecord[]>([]);
+  // Live mirror of sessionRecords — lets sequential same-tick writes (session
+  // save → plan-sync write) see rows that were just optimistically inserted,
+  // instead of merging against a stale render-time snapshot and duplicating/
+  // clobbering rows.
+  const sessionRecordsRef = useRef<DailySessionRecord[]>(sessionRecords);
+  useEffect(() => {
+    sessionRecordsRef.current = sessionRecords;
+  }, [sessionRecords]);
 
   const [educationalPlan, setEducationalPlan] = useState<EducationalPlanWeek[]>(() => {
     const stored = safeStorageGet<EducationalPlanWeek[]>(STORAGE_KEYS.PLAN, INITIAL_EDUCATIONAL_PLAN);
@@ -2955,18 +2963,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // -------------------------------------------------------------
   // Session Records Recording (Instant Offline Cache + Cloud Sync)
   // -------------------------------------------------------------
-  const recordDailySession = useCallback(async (record: Omit<DailySessionRecord, 'id' | 'createdAt'>) => {
+  const recordDailySession = useCallback(async (
+    record: Omit<DailySessionRecord, 'id' | 'createdAt'>,
+    opts?: { fillGapsOnly?: boolean }
+  ) => {
     if (guardDemoWrite('تسجيل حلقة يومية وتقييم طالب')) return;
     // One record per student per day: merge into today's existing record when
     // present. Recording an achievement marks attendance as present — even if
     // the student was marked absent earlier (achieving proves presence).
-    const existing = sessionRecords.find(
+    // fillGapsOnly: secondary writers (plan-sync) never overwrite track data
+    // the teacher actually entered — they only fill fields still empty.
+    const existing = sessionRecordsRef.current.find(
       (r) => r.studentId === record.studentId && r.date === record.date
     );
+    const merged = existing && opts?.fillGapsOnly
+      ? {
+          ...record,
+          memorization: existing.memorization ?? record.memorization,
+          revision: existing.revision ?? record.revision,
+          spelling: existing.spelling ?? record.spelling,
+          customTracks: { ...(record.customTracks || {}), ...(existing.customTracks || {}) },
+          teacherRemarks: existing.teacherRemarks ?? record.teacherRemarks,
+        }
+      : record;
     const newRecord: DailySessionRecord = existing
       ? {
           ...existing,
-          ...record,
+          ...merged,
           id: existing.id,
           createdAt: existing.createdAt,
           // Achievement proves presence: flip 'absent' → 'present', but keep an
@@ -2974,13 +2997,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           attendance: existing.attendance === 'absent' ? 'present' : (existing.attendance ?? 'present'),
         }
       : {
-          ...record,
+          ...merged,
           id: `rec_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
           createdAt: new Date().toISOString(),
         };
     setSessionRecords((prev) =>
       existing ? prev.map((r) => (r.id === existing.id ? newRecord : r)) : [newRecord, ...prev]
     );
+    sessionRecordsRef.current = existing
+      ? sessionRecordsRef.current.map((r) => (r.id === existing.id ? newRecord : r))
+      : [newRecord, ...sessionRecordsRef.current];
 
     // Update student's fast progress pointer
     let updatedStudent: Student | null = null;
@@ -3028,7 +3054,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Existing today's records get their `attendance` field updated in place;
     // new rows are created only for students with no record today.
     const buildAttendanceRecord = (sid: string, status: 'present' | 'late' | 'absent'): DailySessionRecord => {
-      const existing = sessionRecords.find((r) => r.studentId === sid && r.date === date);
+      const existing = sessionRecordsRef.current.find((r) => r.studentId === sid && r.date === date);
       if (existing) {
         return { ...existing, attendance: status as any };
       }
@@ -3070,6 +3096,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...newRecords,
       ...prev.filter((r) => !updatedIds.has(r.id)),
     ]);
+    sessionRecordsRef.current = [
+      ...newRecords,
+      ...sessionRecordsRef.current.filter((r) => !updatedIds.has(r.id)),
+    ];
     await dbSaveBulkAttendance(newRecords, currentActor);
   }, [halaqahs, sessionRecords, currentActor, guardDemoWrite]);
 
@@ -4651,7 +4681,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
           revision: revisionRecord,
           customTracks: { _quranPlanId: targetPlan.id },
-        });
+        }, { fillGapsOnly: true });
       }
 
       return updatedPlan;

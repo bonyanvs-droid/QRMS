@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle } from 'lucide-react';
+import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -237,8 +237,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       Boolean(
         r.memorization ||
           r.revision ||
-          r.spelling ||
-          (r.customTracks && Object.keys(r.customTracks).length > 0)
+          // spelling stub written for absent marks (lessonId:'', tag 'غياب') is not an achievement
+          (r.spelling && r.spelling.lessonId) ||
+          (r.customTracks && Object.keys(r.customTracks).some((k) => !k.startsWith('_')))
       );
     return (sessionRecords || [])
       .filter((r) => r.studentId === student.id && r.date === todayIso && hasTrackData(r))
@@ -355,7 +356,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   });
   const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>(todayRecord?.revision?.type || 'قريبة');
   const [revScore, setRevScore] = useState<number>(todayRecord?.revision?.score || 100);
-  const [revManualOverride, setRevManualOverride] = useState(false);
 
   // Custom (admin-defined) tracks — generic score + notes per track, saved to customTracks
   const [customTrackScores, setCustomTrackScores] = useState<Record<string, number>>(() => {
@@ -375,6 +375,8 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
   const [generalNotes, setGeneralNotes] = useState(todayRecord?.teacherRemarks || '');
   const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // ── Track debt detection from student's sessions BEFORE today ──
   // (today's own record is handled by update-mode prefill; an "unachieved" flag
@@ -568,6 +570,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const handlePrevStep = () => setStepIndex((i) => Math.max(i - 1, 0));
 
   const handleSave = async (andSendReport = false) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
     const todayStr = toLocalIso(new Date());
 
     const isSpellingUnachieved = Boolean(unachievedTracks['spelling']);
@@ -625,9 +630,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             surahTo: revSurahTo,
             type: revType,
             score: isRevUnachieved ? 0 : revScore,
-            ...(autoRevision && autoRevLabel && !revManualOverride
-              ? { isAutoRange: true, autoRangeLabel: autoRevLabel }
-              : {}),
             notes: isRevUnachieved ? 'لم يُنجز اليوم (مؤجل)' : undefined,
             unachieved: isRevUnachieved,
           }
@@ -635,6 +637,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       teacherRemarks: generalNotes,
     };
 
+    try {
     await recordDailySession(recordData);
 
     // Sync with Quran Planning Engine if plan is active and memorization was achieved — record the ACTUAL
@@ -739,11 +742,21 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
         onClose();
       }, 600);
     }
+    } catch (err) {
+      console.error('Session save failed:', err);
+      setSaveError('تعذّر حفظ الإنجاز — تحقق من الاتصال ثم أعد المحاولة');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 md:p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-2xl w-full p-5 md:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150 my-auto max-h-[92vh] overflow-y-auto">
+      <div
+        className={`bg-white rounded-2xl max-w-2xl w-full p-5 md:p-6 shadow-2xl border animate-in fade-in zoom-in duration-150 my-auto max-h-[92vh] overflow-y-auto ${
+          todayRecord ? 'border-amber-300 ring-2 ring-amber-100' : 'border-slate-200'
+        }`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-100">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -778,6 +791,21 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Update-mode banner — today's recorded achievement is being edited */}
+        {todayRecord && (
+          <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2">
+            <div className="w-7 h-7 rounded-lg bg-amber-400/90 text-white flex items-center justify-center shrink-0">
+              <PencilLine className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black text-amber-900">تحديث إنجاز اليوم المسجّل</p>
+              <p className="text-[10px] text-amber-800 leading-snug">
+                الحقول معبأة بإنجاز اليوم الحالي — أي تعديل يُحدّث سجل اليوم ويعيد بناء الخطة المستقبلية
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Step Indicator — one track at a time, no "التقييم الشامل" */}
         {!singleStep && (
@@ -1165,48 +1193,14 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               )}
 
-              {/* Auto Minor Revision — engine-determined range */}
-              {autoRevision && autoRevLabel && !revManualOverride ? (
-                <div className="bg-white p-3 rounded-xl border border-amber-200 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
-                      المراجعة التلقائية
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setRevManualOverride(true)}
-                      className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer"
-                    >
-                      تعديل النطاق يدويًا
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                    <span className="font-bold text-slate-900">{autoRevLabel}</span>
-                    {autoRevPages !== undefined && (
-                      <span className="text-slate-600">
-                        المقدار اليومي: <strong className="text-amber-900">{autoRevPages} صفحة</strong>
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-slate-600">نوع المراجعة:</span>
-                    {(['قريبة', 'بعيدة'] as const).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setRevType(t)}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg border ${
-                          revType === t
-                            ? 'bg-amber-500 text-slate-950 border-amber-600'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
+              {/* Auto Minor Revision — engine-suggested range shown as info;
+                  fields stay editable directly (no manual-unlock step). */}
+              {autoRevision && autoRevLabel && revHasPendingDebt && (
+                <p className="mb-2 text-[10px] font-bold text-amber-800">
+                  مقرر المراجعة التلقائي: {autoRevLabel}
+                  {autoRevPages !== undefined ? ` — ${autoRevPages} صفحة` : ''}
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Rev From */}
                 <div className="bg-white p-2.5 rounded-xl border border-amber-200">
@@ -1297,7 +1291,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                   </div>
                 </div>
               </div>
-              )}
 
               {/* Revision mastery — 5-star interactive rating */}
               <FiveStarRating
@@ -1429,10 +1422,14 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {saveError && (
+              <span className="text-xs font-bold text-rose-600">{saveError}</span>
+            )}
             {steps.length > 0 && isLastStep && onOpenReportModal && (
               <button
                 onClick={() => handleSave(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors disabled:opacity-50"
                 title="حفظ الجلسة ثم فتح تقرير واتساب لولي الأمر"
               >
                 <Send className="w-3.5 h-3.5" />
@@ -1444,15 +1441,21 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             {steps.length > 0 && (singleStep || isLastStep) ? (
               <button
                 onClick={() => handleSave(false)}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors disabled:opacity-60"
               >
-                {isSaved ? <Check className="w-4 h-4 text-emerald-200" /> : null}
-                <span>حفظ</span>
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : isSaved ? (
+                  <Check className="w-4 h-4 text-emerald-200" />
+                ) : null}
+                <span>{isSaving ? 'جارٍ الحفظ…' : 'حفظ'}</span>
               </button>
             ) : steps.length > 0 ? (
               <button
                 onClick={handleNextStep}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors disabled:opacity-60"
               >
                 <span>التالي</span>
                 <ChevronLeft className="w-4 h-4" />
