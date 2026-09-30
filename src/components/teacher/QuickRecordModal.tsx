@@ -1147,7 +1147,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
-                      {s.number}. {s.name} ({s.ayahsCount} آية)
+                      {s.name}
                     </option>
                   ))}
                 </select>
@@ -1159,6 +1159,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     onChange={setAyahFrom}
                     compact
                     selectClassName="h-9"
+                    showEndIndicator={false}
                   />
                 </div>
                 </div>
@@ -1180,7 +1181,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
-                      {s.number}. {s.name} ({s.ayahsCount} آية)
+                      {s.name}
                     </option>
                   ))}
                 </select>
@@ -1192,6 +1193,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     onChange={setAyahTo}
                     compact
                     selectClassName="h-9"
+                    showEndIndicator={false}
                   />
                 </div>
                 </div>
@@ -1267,6 +1269,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     onChange={setRevAyahFrom}
                     compact
                     selectClassName="h-9"
+                    showEndIndicator={false}
                   />
                 </div>
                 </div>
@@ -1300,6 +1303,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     onChange={setRevAyahTo}
                     compact
                     selectClassName="h-9"
+                    showEndIndicator={false}
                   />
                 </div>
                 </div>
