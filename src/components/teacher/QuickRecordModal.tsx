@@ -395,8 +395,13 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   // Update-mode opens on a LOCKED read-only summary of today's recorded
   // achievement; pressing «تحديث إنجاز اليوم» reveals the editable wizard.
+  // Excluded while saving/saved — recordDailySession flips todayRecord to true
+  // mid-save, which would otherwise flash the locked view (with a clickable
+  // update button) over the wizard for the whole plan-sync duration and hide
+  // a saveError behind it.
   const [isEditingToday, setIsEditingToday] = useState(false);
-  const isLockedUpdateView = Boolean(todayRecord) && !isEditingToday;
+  const isLockedUpdateView =
+    Boolean(todayRecord) && !isEditingToday && !isSaving && !isSaved && !saveError;
 
   // ── Track debt detection from student's sessions BEFORE today ──
   // (today's own record is handled by update-mode prefill; an "unachieved" flag
