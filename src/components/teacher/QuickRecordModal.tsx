@@ -4,7 +4,7 @@ import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QURAN_SURAHS } from '../../quran/data/quranMeta';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
+import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -84,7 +84,7 @@ const STAR_LEVELS = [
   { stars: 1, score: 20, label: 'غير متقن / إعادة التسميع', desc: 'لم يستحضر الآيات والمطلوب حفظه', color: 'text-rose-600', bg: 'bg-rose-50 border-rose-200' },
 ];
 
-/** 5-Star interactive rating component with unachieved toggle and debt guard */
+/** Percentage-chip rating (20→100%) with unachieved toggle and debt guard */
 const FiveStarRating: React.FC<{
   value: number; // 0-100 percentage (20, 40, 60, 80, 100)
   onChange: (v: number) => void;
@@ -113,52 +113,27 @@ const FiveStarRating: React.FC<{
 
   const activeLevel = STAR_LEVELS.find((l) => l.stars === currentStars) || STAR_LEVELS[1];
 
+  const accent =
+    theme === 'blue'
+      ? 'bg-blue-600 border-blue-600 text-white'
+      : 'bg-amber-500 border-amber-500 text-slate-950';
   return (
-    <div className="mt-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+    <div className="mt-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-xs font-bold text-slate-800">{label}</span>
-
-        <div className="flex items-center gap-2">
-          {hasPendingDebt ? (
-            <span
-              className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs"
-              title="الطالب لديه واجب غير منجز من الجلسة السابقة — يلزم إثباته اليوم ولا يمكن تأجيله ليومين"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-              <span>واجب متراكم — يلزم الإنجاز اليوم</span>
-            </span>
-          ) : onToggleUnachieved ? (
-            <button
-              type="button"
-              onClick={onToggleUnachieved}
-              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                isUnachieved
-                  ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
-              }`}
-              title={isUnachieved ? 'إلغاء وسم عدم الإنجاز وتفعيل التقييم' : 'وسم هذا المسار كغير منجز لهذا اليوم'}
-            >
-              {isUnachieved ? (
-                <>
-                  <X className="w-3.5 h-3.5" />
-                  <span>تم الوسم: لم يُنجز</span>
-                </>
-              ) : (
-                <span>لم يُنجز اليوم ✕</span>
-              )}
-            </button>
-          ) : null}
-
-          {!isUnachieved && (
-            <span className="text-xs font-black text-slate-700 font-mono bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-              {value}%
-            </span>
-          )}
-        </div>
+        {hasPendingDebt && (
+          <span
+            className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5"
+            title="الطالب لديه واجب غير منجز من الجلسة السابقة — يلزم إثباته اليوم ولا يمكن تأجيله ليومين"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+            <span>واجب متراكم — يلزم الإنجاز اليوم</span>
+          </span>
+        )}
       </div>
 
       {isUnachieved ? (
-        <div className="p-3 bg-rose-50/90 border border-rose-200 rounded-lg text-center my-1.5 animate-fadeIn">
+        <div className="p-3 bg-rose-50/90 border border-rose-200 rounded-lg text-center mt-2 animate-fadeIn">
           <p className="text-xs font-bold text-rose-800">
             تم استثناء هذا المسار لجلسة اليوم (لن تُسجل له درجات، وسيبقى واجباً متراكماً للجلسة القادمة).
           </p>
@@ -168,45 +143,43 @@ const FiveStarRating: React.FC<{
               onClick={onToggleUnachieved}
               className="mt-1.5 text-[11px] text-rose-700 underline font-semibold cursor-pointer hover:text-rose-900"
             >
-              تراجع وتفعيل التقييم بالنجوم
+              تراجع وتفعيل التقييم
             </button>
           )}
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-1 py-1">
-            {[1, 2, 3, 4, 5].map((s) => {
-              const isSelected = s <= currentStars;
-              const levelInfo = STAR_LEVELS.find((l) => l.stars === s);
+          <div className="flex items-center gap-1.5 mt-2">
+            {STAR_LEVELS.map((level) => {
+              const selected = level.stars === currentStars;
               return (
                 <button
-                  key={s}
+                  key={level.score}
                   type="button"
-                  onClick={() => onChange(levelInfo?.score || 90)}
-                  className="flex-1 flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-slate-50 transition-all cursor-pointer group"
-                  title={`${levelInfo?.stars} نجوم: ${levelInfo?.label}`}
+                  onClick={() => onChange(level.score)}
+                  title={level.label}
+                  className={`flex-1 py-1.5 rounded-lg border text-xs font-black transition-all cursor-pointer ${
+                    selected
+                      ? accent + ' shadow-xs'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                  }`}
                 >
-                  <Star
-                    className={`w-6 h-6 transition-transform group-hover:scale-110 ${
-                      isSelected
-                        ? theme === 'blue'
-                          ? 'fill-amber-400 text-amber-500'
-                          : 'fill-amber-400 text-amber-500'
-                        : 'text-slate-300 fill-slate-100'
-                    }`}
-                  />
-                  <span className="text-[10px] text-slate-400 mt-1 font-mono font-bold group-hover:text-slate-700">
-                    {s}
-                  </span>
+                  {level.score}%
                 </button>
               );
             })}
           </div>
-
-          {/* Dynamic pedagogical description badge */}
-          <div className={`mt-2 px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between ${activeLevel.bg}`}>
-            <span className={`font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
-            <span className="text-[11px] text-slate-500">{activeLevel.desc}</span>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className={`text-[11px] font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
+            {onToggleUnachieved && (
+              <button
+                type="button"
+                onClick={onToggleUnachieved}
+                className="text-[10px] font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+              >
+                لم يُنجز اليوم
+              </button>
+            )}
           </div>
         </>
       )}
@@ -820,9 +793,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-[10px] sm:text-xs text-slate-700">
-                المستهدف: سورة {student.minimumTargetSurah}<span className="hidden sm:inline"> • الموضع الحالي: سورة {student.currentSurah}</span>
-              </p>
             </div>
           </div>
 
@@ -949,48 +919,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
         {!isLockedUpdateView && (<>
 
-        {/* Step Indicator — one track at a time, no "التقييم الشامل" */}
-        {!singleStep && (
-          <div className="flex items-center gap-1.5 mt-4">
-            {steps.map((st, i) => {
-              const done = completedSteps.has(i);
-              const active = i === safeIndex;
-              const isUnach = Boolean(unachievedTracks[st]);
-              const meta = TRACK_META[st] || {
-                label: trackShortLabel(
-                  tracks.find((tr) => tr.id === st)?.name || st
-                ),
-                icon: <BookOpen className="w-3.5 h-3.5" />,
-              };
-              return (
-                <div
-                  key={st}
-                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
-                    active
-                      ? isUnach
-                        ? 'bg-rose-700 text-white shadow-xs'
-                        : 'bg-emerald-700 text-white shadow-xs'
-                      : isUnach
-                      ? 'bg-rose-50 text-rose-800 border border-rose-300'
-                      : done
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  {isUnach ? (
-                    <X className="w-3.5 h-3.5 text-rose-500" />
-                  ) : done && !active ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    meta.icon
-                  )}
-                  <span className="truncate">{meta.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
         {/* Content Body — single active track */}
         <div className="mt-4 space-y-4 max-h-[60vh] overflow-y-auto pl-1">
           {steps.length === 0 && (
@@ -1005,16 +933,13 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             </div>
           )}
           {currentStep === 'spelling' && selectedLesson && (
-            <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200">
-              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-emerald-700" />
-                  <h4 className="text-xs font-bold text-emerald-950">✏️ الهجاء القرآني</h4>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-800">الهجاء القرآني</span>
                 <div className="flex items-center gap-2">
                   {spellingHasPendingDebt ? (
                     <span
-                      className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs"
+                      className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5"
                       title="الطالب لديه درس هجاء متراكم من الجلسة السابقة — يلزم إثباته اليوم ولا يمكن تأجيله"
                     >
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
@@ -1027,7 +952,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                       className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
                         unachievedTracks['spelling']
                           ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+                          : 'bg-white text-slate-500 border-slate-200 hover:text-rose-600'
                       }`}
                       title={unachievedTracks['spelling'] ? 'إلغاء وسم عدم الإنجاز' : 'وسم الهجاء كغير منجز لهذا اليوم'}
                     >
@@ -1037,15 +962,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                           <span>تم الوسم: لم يُنجز</span>
                         </>
                       ) : (
-                        <span>لم يُنجز اليوم ✕</span>
+                        <span>لم يُنجز اليوم</span>
                       )}
                     </button>
-                  )}
-
-                  {!unachievedTracks['spelling'] && (
-                    <span className="text-base font-black text-emerald-800 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-300">
-                      {spellingFinalScore}%
-                    </span>
                   )}
                 </div>
               </div>
@@ -1157,23 +1076,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
           {/* STEP: MEMORIZATION */}
           {currentStep === 'memorization' && (
-            <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-blue-700" />
-                  <h4 className="text-xs font-bold text-blue-950">📖 الحفظ الجديد</h4>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-700 font-medium">درجة الحفظ:</span>
-                  <span className="text-base font-black text-blue-800 bg-white px-2.5 py-0.5 rounded-lg border border-blue-300">
-                    {memScore}%
-                  </span>
-                </div>
-              </div>
-
+            <div className="space-y-3">
               {/* Pending Debt Banner if previous session memorization was unachieved */}
               {memHasPendingDebt && (
-                <div className="mb-3 bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                <div className="bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0" />
                     <div>
@@ -1189,95 +1095,68 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               )}
 
-              {/* Quran Plan Daily Unit Banner */}
-              {todayDailyItem && !memHasPendingDebt && (
-                <div className="mb-3 bg-white p-2.5 rounded-xl border border-blue-200 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[10px] text-blue-600 font-bold block">مقرر ورد اليوم بالخطة القرآنية:</span>
-                    <span className="font-bold text-slate-900 font-['Amiri',serif]">
-                      {todayDailyItem.targetUnit?.displayLabel}
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-100 text-blue-800">
-                    مربوط تلقائياً
-                  </span>
+              {/* حفظ من — بداية المقطع المسموع */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">حفظ من</span>
+                <select
+                  value={surahFrom}
+                  onChange={(e) => {
+                    const newSurah = e.target.value;
+                    setSurahFrom(newSurah);
+                    const maxA = getSurahAyahsCount(newSurah);
+                    if (ayahFrom > maxA) setAyahFrom(maxA);
+                  }}
+                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                >
+                  {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
+                    <option key={s.number} value={s.name}>
+                      {s.number}. {s.name} ({s.ayahsCount} آية)
+                    </option>
+                  ))}
+                </select>
+                <div className="w-28 shrink-0">
+                  <QuranAyahSelect
+                    id="quick_mem_ayah_from"
+                    surah={surahFrom}
+                    value={ayahFrom}
+                    onChange={setAyahFrom}
+                    compact
+                  />
                 </div>
-              )}
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* From Surah & Ayah */}
-                <div className="bg-white p-2.5 rounded-xl border border-blue-200">
-                  <span className="text-[10px] font-bold text-blue-900 block mb-1.5">من (البداية)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] text-slate-500 mb-0.5">السورة</label>
-                      <select
-                        value={surahFrom}
-                        onChange={(e) => {
-                          const newSurah = e.target.value;
-                          setSurahFrom(newSurah);
-                          const maxA = getSurahAyahsCount(newSurah);
-                          if (ayahFrom > maxA) setAyahFrom(maxA);
-                        }}
-                        className="w-full text-xs px-2 py-1.5 bg-white rounded-lg border border-slate-300"
-                      >
-                        {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
-                          <option key={s.number} value={s.name}>
-                            {s.number}. {s.name} ({s.ayahsCount} آية)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <QuranAyahSelect
-                        id="quick_mem_ayah_from"
-                        surah={surahFrom}
-                        value={ayahFrom}
-                        onChange={setAyahFrom}
-                        label="الآية"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* To Surah & Ayah */}
-                <div className="bg-white p-2.5 rounded-xl border border-blue-200">
-                  <span className="text-[10px] font-bold text-blue-900 block mb-1.5">إلى (النهاية)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] text-slate-500 mb-0.5">السورة</label>
-                      <select
-                        value={surahTo}
-                        onChange={(e) => {
-                          const newSurah = e.target.value;
-                          setSurahTo(newSurah);
-                          const maxA = getSurahAyahsCount(newSurah);
-                          if (ayahTo > maxA) setAyahTo(maxA);
-                        }}
-                        className="w-full text-xs px-2 py-1.5 bg-white rounded-lg border border-slate-300"
-                      >
-                        {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
-                          <option key={s.number} value={s.name}>
-                            {s.number}. {s.name} ({s.ayahsCount} آية)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <QuranAyahSelect
-                        id="quick_mem_ayah_to"
-                        surah={surahTo}
-                        value={ayahTo}
-                        onChange={setAyahTo}
-                        label="الآية"
-                      />
-                    </div>
-                  </div>
+              {/* حفظ إلى — نهاية المقطع المسموع */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">حفظ إلى</span>
+                <select
+                  value={surahTo}
+                  onChange={(e) => {
+                    const newSurah = e.target.value;
+                    setSurahTo(newSurah);
+                    const maxA = getSurahAyahsCount(newSurah);
+                    if (ayahTo > maxA) setAyahTo(maxA);
+                  }}
+                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                >
+                  {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
+                    <option key={s.number} value={s.name}>
+                      {s.number}. {s.name} ({s.ayahsCount} آية)
+                    </option>
+                  ))}
+                </select>
+                <div className="w-28 shrink-0">
+                  <QuranAyahSelect
+                    id="quick_mem_ayah_to"
+                    surah={surahTo}
+                    value={ayahTo}
+                    onChange={setAyahTo}
+                    compact
+                  />
                 </div>
               </div>
 
               <FiveStarRating
-                label="تقييم إتقان التسميع والتجويد (بالنجوم):"
+                label="التقييم"
                 value={memScore}
                 onChange={setMemScore}
                 theme="blue"
@@ -1290,23 +1169,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
           {/* STEP: REVISION */}
           {currentStep === 'revision' && (
-            <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4 text-amber-700" />
-                  <h4 className="text-xs font-bold text-amber-950">🔄 المراجعة والتثبيت</h4>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-700 font-medium">الدرجة:</span>
-                  <span className="text-base font-black text-amber-900 bg-white px-2.5 py-0.5 rounded-lg border border-amber-300">
-                    {revScore}%
-                  </span>
-                </div>
-              </div>
-
+            <div className="space-y-3">
               {/* Pending Debt Banner if previous session revision was unachieved */}
               {revHasPendingDebt && (
-                <div className="mb-3 bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                <div className="bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0" />
                     <div>
@@ -1322,121 +1188,99 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               )}
 
-              {/* Plan-driven daily revision banner */}
-              {todayDailyItem?.revisionDisplayLabel && !revHasPendingDebt && (
-                <div className="mb-3 bg-white p-2.5 rounded-xl border border-amber-200 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[10px] text-amber-700 font-bold block">مقرر مراجعة اليوم بالخطة:</span>
-                    <span className="font-bold text-slate-900">{todayDailyItem.revisionDisplayLabel}</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800">
-                    مربوط تلقائياً
-                  </span>
-                </div>
-              )}
-
               {/* Auto Minor Revision — engine-suggested range shown as info;
                   fields stay editable directly (no manual-unlock step). */}
               {autoRevision && autoRevLabel && revHasPendingDebt && (
-                <p className="mb-2 text-[10px] font-bold text-amber-800">
+                <p className="text-[10px] font-bold text-amber-800">
                   مقرر المراجعة التلقائي: {autoRevLabel}
                   {autoRevPages !== undefined ? ` — ${autoRevPages} صفحة` : ''}
                 </p>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Rev From */}
-                <div className="bg-white p-2.5 rounded-xl border border-amber-200">
-                  <span className="text-[10px] font-bold text-amber-900 block mb-1.5">من سورة وآية</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <select
-                        value={revSurahFrom}
-                        onChange={(e) => {
-                          const newSurah = e.target.value;
-                          setRevSurahFrom(newSurah);
-                          const maxA = getSurahAyahsCount(newSurah);
-                          if (revAyahFrom > maxA) setRevAyahFrom(maxA);
-                        }}
-                        className="w-full text-xs px-2 py-1.5 bg-white rounded-lg border border-slate-300"
-                      >
-                        {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
-                          <option key={s.number} value={s.name}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <QuranAyahSelect
-                        id="quick_rev_ayah_from"
-                        surah={revSurahFrom}
-                        value={revAyahFrom}
-                        onChange={setRevAyahFrom}
-                        compact
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                {/* Rev To */}
-                <div className="bg-white p-2.5 rounded-xl border border-amber-200">
-                  <span className="text-[10px] font-bold text-amber-900 block mb-1.5">إلى سورة وآية</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <select
-                        value={revSurahTo}
-                        onChange={(e) => {
-                          const newSurah = e.target.value;
-                          setRevSurahTo(newSurah);
-                          const maxA = getSurahAyahsCount(newSurah);
-                          if (revAyahTo > maxA) setRevAyahTo(maxA);
-                        }}
-                        className="w-full text-xs px-2 py-1.5 bg-white rounded-lg border border-slate-300"
-                      >
-                        {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
-                          <option key={s.number} value={s.name}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <QuranAyahSelect
-                        id="quick_rev_ayah_to"
-                        surah={revSurahTo}
-                        value={revAyahTo}
-                        onChange={setRevAyahTo}
-                        compact
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Rev Type */}
-                <div className="bg-white p-2.5 rounded-xl border border-amber-200 flex flex-col justify-center">
-                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5">نوع المراجعة</label>
-                  <div className="flex gap-1">
-                    {(['قريبة', 'بعيدة'] as const).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setRevType(t)}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg border ${
-                          revType === t
-                            ? 'bg-amber-500 text-slate-950 border-amber-600'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
+              {/* مراجعة من — بداية مقطع المراجعة */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">مراجعة من</span>
+                <select
+                  value={revSurahFrom}
+                  onChange={(e) => {
+                    const newSurah = e.target.value;
+                    setRevSurahFrom(newSurah);
+                    const maxA = getSurahAyahsCount(newSurah);
+                    if (revAyahFrom > maxA) setRevAyahFrom(maxA);
+                  }}
+                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                >
+                  {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
+                    <option key={s.number} value={s.name}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="w-28 shrink-0">
+                  <QuranAyahSelect
+                    id="quick_rev_ayah_from"
+                    surah={revSurahFrom}
+                    value={revAyahFrom}
+                    onChange={setRevAyahFrom}
+                    compact
+                  />
                 </div>
               </div>
 
-              {/* Revision mastery — 5-star interactive rating */}
+              {/* مراجعة إلى — نهاية مقطع المراجعة */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">مراجعة إلى</span>
+                <select
+                  value={revSurahTo}
+                  onChange={(e) => {
+                    const newSurah = e.target.value;
+                    setRevSurahTo(newSurah);
+                    const maxA = getSurahAyahsCount(newSurah);
+                    if (revAyahTo > maxA) setRevAyahTo(maxA);
+                  }}
+                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                >
+                  {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
+                    <option key={s.number} value={s.name}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="w-28 shrink-0">
+                  <QuranAyahSelect
+                    id="quick_rev_ayah_to"
+                    surah={revSurahTo}
+                    value={revAyahTo}
+                    onChange={setRevAyahTo}
+                    compact
+                  />
+                </div>
+              </div>
+
+              {/* نوع المراجعة */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">النوع</span>
+                <div className="flex-1 flex gap-1.5">
+                  {(['قريبة', 'بعيدة'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setRevType(t)}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition-colors ${
+                        revType === t
+                          ? 'bg-amber-500 text-slate-950 border-amber-600'
+                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Revision mastery — percentage-chip rating */}
               <FiveStarRating
-                label="تقييم إتقان المراجعة والتثبيت (بالنجوم):"
+                label="التقييم"
                 value={revScore}
                 onChange={setRevScore}
                 theme="amber"
@@ -1449,40 +1293,29 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
           {/* STEP: DYNAMIC / CUSTOM TRACK */}
           {!BUILTIN_STEP_IDS.includes(currentStep) && (
-            <div className="p-4 rounded-xl bg-purple-50/50 border border-purple-200">
-              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-700" />
-                  <h4 className="text-xs font-bold text-purple-950">
-                    {tracks.find((t) => t.id === currentStep)?.name || currentStep}
-                  </h4>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleTrackUnachieved(currentStep)}
-                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                      unachievedTracks[currentStep]
-                        ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
-                    }`}
-                  >
-                    {unachievedTracks[currentStep] ? (
-                      <>
-                        <X className="w-3.5 h-3.5" />
-                        <span>تم الوسم: لم يُنجز</span>
-                      </>
-                    ) : (
-                      <span>لم يُنجز اليوم ✕</span>
-                    )}
-                  </button>
-
-                  {!unachievedTracks[currentStep] && (
-                    <span className="text-base font-black text-purple-900 bg-white px-2.5 py-0.5 rounded-lg border border-purple-300">
-                      {customTrackScores[currentStep] ?? 85}%
-                    </span>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-800">
+                  {tracks.find((t) => t.id === currentStep)?.name || currentStep}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleTrackUnachieved(currentStep)}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                    unachievedTracks[currentStep]
+                      ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                      : 'bg-white text-slate-500 border-slate-200 hover:text-rose-600'
+                  }`}
+                >
+                  {unachievedTracks[currentStep] ? (
+                    <>
+                      <X className="w-3.5 h-3.5" />
+                      <span>تم الوسم: لم يُنجز</span>
+                    </>
+                  ) : (
+                    <span>لم يُنجز اليوم</span>
                   )}
-                </div>
+                </button>
               </div>
 
               {unachievedTracks[currentStep] ? (
@@ -1501,7 +1334,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               ) : (
                 <>
                   <FiveStarRating
-                    label="تقييم إتقان المسار (بالنجوم):"
+                    label="التقييم"
                     value={customTrackScores[currentStep] ?? 85}
                     onChange={(sc) =>
                       setCustomTrackScores((prev) => ({ ...prev, [currentStep]: sc }))
@@ -1543,8 +1376,52 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </div>
         </div>
 
+        {/* Track strip — jump between tracks; the active one feeds the form above */}
+        {!singleStep && steps.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-1.5">
+            {steps.map((st, i) => {
+              const done = completedSteps.has(i);
+              const active = i === safeIndex;
+              const isUnach = Boolean(unachievedTracks[st]);
+              const meta = TRACK_META[st] || {
+                label: trackShortLabel(
+                  tracks.find((tr) => tr.id === st)?.name || st
+                ),
+                icon: <BookOpen className="w-3.5 h-3.5" />,
+              };
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStepIndex(i)}
+                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    active
+                      ? isUnach
+                        ? 'bg-rose-700 text-white shadow-xs'
+                        : 'bg-emerald-700 text-white shadow-xs'
+                      : isUnach
+                      ? 'bg-rose-50 text-rose-800 border border-rose-300'
+                      : done
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {isUnach ? (
+                    <X className="w-3.5 h-3.5 text-rose-500" />
+                  ) : done && !active ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    meta.icon
+                  )}
+                  <span className="truncate">{meta.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Wizard Footer */}
-        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
