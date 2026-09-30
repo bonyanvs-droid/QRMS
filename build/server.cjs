@@ -135,10 +135,13 @@ function snakeToCamelCase(obj, parentKey) {
       return "";
     }
     const iso = obj.toISOString();
-    const isPureDateKey = parentKey && /(?:^|[a-z])(Date|date)$/.test(parentKey);
+    const isPureDateKey = parentKey && /(?:^|[a-z])(Dates?|dates?)$/.test(parentKey);
     const isMidnight = iso.endsWith("T00:00:00.000Z");
     if (isPureDateKey || isMidnight) {
-      return iso.split("T")[0];
+      const y = obj.getFullYear();
+      const m = String(obj.getMonth() + 1).padStart(2, "0");
+      const d = String(obj.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
     }
     return iso;
   }

@@ -7,17 +7,17 @@ import {
   StudentStatus,
 } from '../types';
 import { SURAHS_LIST } from '../data/initialData';
+import { findSurahMetadata } from './quranMetadata';
 
 // Order of Surahs in descending chronological memorization order for Juz Amma:
 // 114 (الناس), 113 (الفلق), 112 (الإخلاص) ... 88 (الغاشية) ... 78 (النبأ)
+// Rank increases as the student descends: الناس=1, الغاشية=27, النبأ=37, and
+// continues past Juz Amma for surahs below 78. 'Al-Maa'un'-style English names
+// resolve through findSurahMetadata.
 export function getSurahIndexInJuzAmma(surahName: string): number {
-  if (surahName === 'الفاتحة') return 0;
-  const found = SURAHS_LIST.find((s) => s.name === surahName);
-  if (!found) return 0;
-  // Let's rank from 114 (index 1) to 78 (index 37)
-  const ammaList = SURAHS_LIST.filter((s) => s.number !== 1);
-  const idx = ammaList.findIndex((s) => s.name === surahName);
-  return idx >= 0 ? idx + 1 : 0;
+  const meta = findSurahMetadata(surahName);
+  if (!meta || meta.number === 1) return 0;
+  return 115 - meta.number;
 }
 
 export function getSurahMeta(surahName: string) {
