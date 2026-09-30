@@ -1469,65 +1469,73 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     )}
                                   </td>
 
-                                  {/* Target Memorization Unit (+ actual achieved when it differs) */}
+                                  {/* Target Memorization Unit (+ actual achieved inline when it differs) */}
                                   <td className="py-2.5 px-3">
-                                    {day.isConsolidationDay ? (
-                                      <div className="flex items-center gap-1.5 text-amber-800 font-bold">
-                                        <RotateCcw className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                        <span>{day.targetUnit.displayLabel}</span>
-                                      </div>
-                                    ) : (
-                                      <div className="text-slate-900 font-bold">
-                                        {day.targetUnit.displayLabel || (
-                                          <span className="text-slate-400 font-normal">—</span>
-                                        )}
-                                      </div>
-                                    )}
-                                    {(() => {
-                                      // Show the actually-achieved range when it differs from
-                                      // the planned assignment. Compare POSITIONS (not labels):
-                                      // older rows inherited the target's displayLabel even when
-                                      // the achieved end moved beyond it.
-                                      const au = day.actualAchieved?.unit;
-                                      const posDiffers = Boolean(
-                                        au &&
-                                        (au.end?.surahNumber !== day.targetUnit?.end?.surahNumber ||
-                                          au.end?.ayahNumber !== day.targetUnit?.end?.ayahNumber ||
-                                          au.start?.surahNumber !== day.targetUnit?.start?.surahNumber ||
-                                          au.start?.ayahNumber !== day.targetUnit?.start?.ayahNumber)
-                                      );
-                                      const actualLabel = posDiffers
-                                        ? au!.displayLabel &&
-                                          au!.displayLabel !== day.targetUnit.displayLabel
-                                          ? au!.displayLabel
-                                          : `سورة ${surahName(au!.start?.surahNumber)} (الآيات ${au!.start?.ayahNumber} - ${au!.end?.ayahNumber})`
-                                        : rec?.memorization?.surahFrom && rec.memorization.surahTo
-                                          ? `${resolveSurahName(rec.memorization.surahFrom)} ${rec.memorization.ayahFrom} – ${resolveSurahName(rec.memorization.surahTo)} ${rec.memorization.ayahTo}`
-                                          : undefined;
-                                      if (!actualLabel || actualLabel === day.targetUnit.displayLabel) return null;
-                                      return (
-                                        <div className="mt-1 flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 w-fit">
-                                          <Check className="w-3 h-3" />
-                                          <span>المنجز فعلياً: {actualLabel}</span>
-                                        </div>
-                                      );
-                                    })()}
+                                    <div className="flex items-center gap-1.5 flex-wrap text-slate-900 font-bold">
+                                      {day.isConsolidationDay ? (
+                                        <span className="inline-flex items-center gap-1.5 text-amber-800">
+                                          <RotateCcw className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                          <span>{day.targetUnit.displayLabel}</span>
+                                        </span>
+                                      ) : (
+                                        <span>
+                                          {day.targetUnit.displayLabel || (
+                                            <span className="text-slate-400 font-normal">—</span>
+                                          )}
+                                        </span>
+                                      )}
+                                      {(() => {
+                                        // Show the actually-achieved range when it differs from
+                                        // the planned assignment. Compare POSITIONS (not labels):
+                                        // older rows inherited the target's displayLabel even when
+                                        // the achieved end moved beyond it.
+                                        const au = day.actualAchieved?.unit;
+                                        const posDiffers = Boolean(
+                                          au &&
+                                          (au.end?.surahNumber !== day.targetUnit?.end?.surahNumber ||
+                                            au.end?.ayahNumber !== day.targetUnit?.end?.ayahNumber ||
+                                            au.start?.surahNumber !== day.targetUnit?.start?.surahNumber ||
+                                            au.start?.ayahNumber !== day.targetUnit?.start?.ayahNumber)
+                                        );
+                                        const actualLabel = posDiffers
+                                          ? au!.displayLabel &&
+                                            au!.displayLabel !== day.targetUnit.displayLabel
+                                            ? au!.displayLabel
+                                            : `سورة ${surahName(au!.start?.surahNumber)} (الآيات ${au!.start?.ayahNumber} - ${au!.end?.ayahNumber})`
+                                          : rec?.memorization?.surahFrom && rec.memorization.surahTo
+                                            ? `${resolveSurahName(rec.memorization.surahFrom)} ${rec.memorization.ayahFrom} – ${resolveSurahName(rec.memorization.surahTo)} ${rec.memorization.ayahTo}`
+                                            : undefined;
+                                        if (!actualLabel || actualLabel === day.targetUnit.displayLabel) return null;
+                                        return (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-1.5 py-0.5 whitespace-nowrap">
+                                            <Check className="w-3 h-3" />
+                                            <span>المنجز: {actualLabel}</span>
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
                                   </td>
 
-                                  {/* Revision Assignment — the "(+N سطر)" suffix wraps
-                                      to a second muted line so the cell never distorts */}
+                                  {/* Revision Assignment — condensed label (column already
+                                      says "المراجعة"), "(+N سطر)" suffix on a muted 2nd line */}
                                   {isRevisionActive && (
                                     <td className="py-2.5 px-3 text-slate-700 min-w-[200px]">
                                       {day.revisionDisplayLabel ? (
                                         (() => {
-                                          const m = day.revisionDisplayLabel.match(
+                                          // "مراجعة: من سورة الفاتحة (1) إلى سورة الماعون إلى آخرها"
+                                          // → "من الفاتحة (1) إلى الماعون آخرها"
+                                          const short = day.revisionDisplayLabel
+                                            .replace(/^مراجعة:\s*/, '')
+                                            .replace(/سورة\s+/g, '')
+                                            .replace(/إلى آخرها/g, 'آخرها');
+                                          const m = short.match(
                                             /^(.*?)\s*(\(\+?\d+\s*سطر[^)]*\))\s*$/
                                           );
                                           return (
-                                            <span className="inline-block text-[11px] font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs leading-relaxed">
-                                              {m ? m[1] : day.revisionDisplayLabel}
+                                            <span className="inline-block text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs leading-relaxed">
+                                              {m ? m[1] : short}
                                               {m && (
-                                                <span className="block text-[9px] font-medium text-amber-700/90 mt-0.5">
+                                                <span className="block text-[9px] font-medium text-amber-700/90">
                                                   {m[2]}
                                                 </span>
                                               )}
