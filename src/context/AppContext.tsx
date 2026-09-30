@@ -4609,7 +4609,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const surahMeta = await provider.getSurah(updatedPlan.currentPosition.surahNumber);
         if (surahMeta) {
           updateStudent(targetStudent.id, {
-            currentSurah: surahMeta.name,
+            // arabicName — .name is the English transliteration which breaks
+            // Arabic surah selects and findSurahMetadata on re-save
+            currentSurah: surahMeta.arabicName || surahMeta.name,
             currentAyah: updatedPlan.currentPosition.ayahNumber || 1,
             activeQuranPlanId: updatedPlan.id,
           });
@@ -4637,12 +4639,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           let revToName = '';
           if (targetDayItem.revisionPageStart) {
             const firstAyah = (await provider.getPage(targetDayItem.revisionPageStart))[0];
-            if (firstAyah) revFromName = (await provider.getSurah(firstAyah.surahNumber))?.name || '';
+            if (firstAyah) {
+              const s = await provider.getSurah(firstAyah.surahNumber);
+              revFromName = s?.arabicName || s?.name || '';
+            }
           }
           if (targetDayItem.revisionPageEnd) {
             const pageAyahs = await provider.getPage(targetDayItem.revisionPageEnd);
             const lastAyah = pageAyahs[pageAyahs.length - 1];
-            if (lastAyah) revToName = (await provider.getSurah(lastAyah.surahNumber))?.name || '';
+            if (lastAyah) {
+              const s = await provider.getSurah(lastAyah.surahNumber);
+              revToName = s?.arabicName || s?.name || '';
+            }
           }
           revisionRecord = {
             surahFrom: revFromName,
@@ -4663,9 +4671,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           attendance: isAbsent ? 'absent' : isExcused ? 'excused' : 'present',
           teacherRemarks: params.notes || targetDayItem.targetUnit.displayLabel,
           memorization: {
-            surahFrom: surahFromMeta?.name || '',
+            surahFrom: surahFromMeta?.arabicName || surahFromMeta?.name || '',
             ayahFrom: targetDayItem.targetUnit.start.ayahNumber,
-            surahTo: surahToMeta?.name || '',
+            surahTo: surahToMeta?.arabicName || surahToMeta?.name || '',
             ayahTo: params.actualEndPosition
               ? params.actualEndPosition.ayahNumber
               : targetDayItem.targetUnit.end.ayahNumber,

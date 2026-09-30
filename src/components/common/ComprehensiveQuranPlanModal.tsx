@@ -50,6 +50,7 @@ import {
   findSurahMetadata,
 } from '../../utils/quranMetadata';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
+import { QURAN_SURAHS } from '../../quran/data/quranMeta';
 import { StageConfigModal } from '../quran/StageConfigModal';
 import { hasPermission } from '../../lib/permissions';
 
@@ -482,12 +483,30 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     return SURAHS_LIST.find((s) => s.number === n)?.name || `${n}`;
   };
 
+  // Older session records may store the English provider name (e.g.
+  // 'Al-Faatiha') — normalize to Arabic before rendering.
+  const resolveSurahName = (v?: string): string => {
+    if (!v) return '';
+    if (findSurahMetadata(v)) return findSurahMetadata(v)!.name;
+    return QURAN_SURAHS.find((s) => s.name === v)?.arabicName || v;
+  };
+
   const recordsByDate = useMemo(() => {
     const map = new Map<string, DailySessionRecord>();
     for (const r of sessionRecords) {
       if (r.studentId !== student.id) continue;
       const prev = map.get(r.date);
-      if (!prev || new Date(r.id) > new Date(prev.id)) map.set(r.date, r);
+      // r.id is opaque (e.g. 'rec_…') — a record carrying real track data
+      // wins over an attendance-only one; ties resolve to the latest createdAt
+      const hasData = (x: DailySessionRecord) =>
+        Boolean(x.memorization?.surahFrom || x.revision?.surahFrom || x.spelling?.lessonId);
+      if (
+        !prev ||
+        (hasData(r) && !hasData(prev)) ||
+        (hasData(r) === hasData(prev) && new Date(r.createdAt || 0) >= new Date(prev.createdAt || 0))
+      ) {
+        map.set(r.date, r);
+      }
     }
     return map;
   }, [sessionRecords, student.id]);
@@ -1380,7 +1399,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     )}
                                   </td>
 
-                                  {/* Target Memorization Unit */}
+                                  {/* Target Memorization Unit (+ actual achieved when it differs) */}
                                   <td className="py-2.5 px-3">
                                     {day.isConsolidationDay ? (
                                       <div className="flex items-center gap-1.5 text-amber-800 font-bold">
@@ -1394,6 +1413,23 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                         )}
                                       </div>
                                     )}
+                                    {(() => {
+                                      // Show the actually-achieved range when it differs from
+                                      // the planned assignment — prefer the recalculated unit,
+                                      // fall back to the teacher-entered session record.
+                                      const actualLabel =
+                                        day.actualAchieved?.unit?.displayLabel ||
+                                        (rec?.memorization?.surahFrom && rec.memorization.surahTo
+                                          ? `${resolveSurahName(rec.memorization.surahFrom)} ${rec.memorization.ayahFrom} – ${resolveSurahName(rec.memorization.surahTo)} ${rec.memorization.ayahTo}`
+                                          : undefined);
+                                      if (!actualLabel || actualLabel === day.targetUnit.displayLabel) return null;
+                                      return (
+                                        <div className="mt-1 flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 w-fit">
+                                          <Check className="w-3 h-3" />
+                                          <span>المنجز فعلياً: {actualLabel}</span>
+                                        </div>
+                                      );
+                                    })()}
                                   </td>
 
                                   {/* Revision Assignment */}

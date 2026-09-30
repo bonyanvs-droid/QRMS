@@ -2,8 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
+import { QURAN_SURAHS } from '../../quran/data/quranMeta';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, RotateCcw, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
+import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -51,6 +52,19 @@ const trackShortLabel = (name: string): string => {
   return meaningful[0] || words[words.length - 1];
 };
 const BUILTIN_STEP_IDS = ['spelling', 'memorization', 'revision'];
+
+// Meta keys written by the Quran-plan sync into customTracks (e.g. _quranPlanId,
+// camelized as QuranPlanId) — internal bookkeeping, never a teacher-facing track.
+const isMetaTrackKey = (k: string) => k.startsWith('_') || k.toLowerCase() === 'quranplanid';
+
+// Older session records may store the English transliteration (e.g. 'Al-Faatiha')
+// written by the plan-sync path — normalize to the Arabic name so selects,
+// prefills and findSurahMetadata-based saving all resolve it.
+const resolveSurahArabicName = (v?: string): string | undefined => {
+  if (!v) return v;
+  if (findSurahMetadata(v)) return findSurahMetadata(v)!.name;
+  return QURAN_SURAHS.find((s) => s.name === v)?.arabicName || v;
+};
 // Halaqah track ids that map to builtin wizard steps — every other enabled track
 // (custom or builtin like virtues/tilawah) gets a generic wizard step
 const NON_SESSION_TRACK_IDS = ['track_quran', 'track_spelling'];
@@ -239,7 +253,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           r.revision ||
           // spelling stub written for absent marks (lessonId:'', tag 'غياب') is not an achievement
           (r.spelling && r.spelling.lessonId) ||
-          (r.customTracks && Object.keys(r.customTracks).some((k) => !k.startsWith('_')))
+          (r.customTracks && Object.keys(r.customTracks).some((k) => !isMetaTrackKey(k)))
       );
     return (sessionRecords || [])
       .filter((r) => r.studentId === student.id && r.date === todayIso && hasTrackData(r))
@@ -328,16 +342,17 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [spellingNotes, setSpellingNotes] = useState(todayRecord?.spelling?.notes || '');
 
   // Memorization Track State — prefilled from today's record (update-mode) else the Quran plan
-  const [surahFrom, setSurahFrom] = useState<string>(todayRecord?.memorization?.surahFrom || planStartSurah || student.currentSurah);
+  const [surahFrom, setSurahFrom] = useState<string>(resolveSurahArabicName(todayRecord?.memorization?.surahFrom) || planStartSurah || student.currentSurah);
   const [ayahFrom, setAyahFrom] = useState<number>(todayRecord?.memorization?.ayahFrom || planUnit?.start?.ayahNumber || 1);
-  const [surahTo, setSurahTo] = useState<string>(todayRecord?.memorization?.surahTo || planEndSurah || student.currentSurah);
+  const [surahTo, setSurahTo] = useState<string>(resolveSurahArabicName(todayRecord?.memorization?.surahTo) || planEndSurah || student.currentSurah);
   const [ayahTo, setAyahTo] = useState<number>(todayRecord?.memorization?.ayahTo || planUnit?.end?.ayahNumber || student.currentAyah || 10);
   const [memScore, setMemScore] = useState<number>(todayRecord?.memorization?.score || 100);
   const [memNotes, setMemNotes] = useState(todayRecord?.memorization?.notes || '');
 
   // Revision Track State — prefilled from today's record (update-mode) else the plan target
   const [revSurahFrom, setRevSurahFrom] = useState<string>(() => {
-    if (todayRecord?.revision?.surahFrom) return todayRecord.revision.surahFrom;
+    const recName = resolveSurahArabicName(todayRecord?.revision?.surahFrom);
+    if (recName) return recName;
     if (isRevisionPlan && planStartSurah) return planStartSurah;
     return 'الناس';
   });
@@ -346,7 +361,8 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     return 1;
   });
   const [revSurahTo, setRevSurahTo] = useState<string>(() => {
-    if (todayRecord?.revision?.surahTo) return todayRecord.revision.surahTo;
+    const recName = resolveSurahArabicName(todayRecord?.revision?.surahTo);
+    if (recName) return recName;
     if (isRevisionPlan && planEndSurah) return planEndSurah;
     return student.currentSurah || 'الفاتحة';
   });
@@ -361,14 +377,14 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [customTrackScores, setCustomTrackScores] = useState<Record<string, number>>(() => {
     const out: Record<string, number> = {};
     for (const [tid, t] of Object.entries(todayRecord?.customTracks || {})) {
-      out[tid] = t?.score ?? 85;
+      if (!isMetaTrackKey(tid)) out[tid] = t?.score ?? 85;
     }
     return out;
   });
   const [customTrackNotes, setCustomTrackNotes] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const [tid, t] of Object.entries(todayRecord?.customTracks || {})) {
-      if (t?.notes) out[tid] = t.notes;
+      if (!isMetaTrackKey(tid) && t?.notes) out[tid] = t.notes;
     }
     return out;
   });
@@ -377,6 +393,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Update-mode opens on a LOCKED read-only summary of today's recorded
+  // achievement; pressing «تحديث إنجاز اليوم» reveals the editable wizard.
+  const [isEditingToday, setIsEditingToday] = useState(false);
+  const isLockedUpdateView = Boolean(todayRecord) && !isEditingToday;
 
   // ── Track debt detection from student's sessions BEFORE today ──
   // (today's own record is handled by update-mode prefill; an "unachieved" flag
@@ -510,7 +530,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       if (todayRecord.memorization && !list.includes('memorization')) list.push('memorization');
       if (todayRecord.revision && !list.includes('revision')) list.push('revision');
       for (const tid of Object.keys(todayRecord.customTracks || {})) {
-        if (!list.includes(tid)) list.push(tid);
+        if (!isMetaTrackKey(tid) && !list.includes(tid)) list.push(tid);
       }
       const order = ['spelling', 'memorization', 'revision'];
       list.sort((a, b) => {
@@ -588,7 +608,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       weekNumber: academicConfig.currentWeek,
       attendance: 'present',
       customTracks: (() => {
-        const ids = steps.filter((t) => !BUILTIN_STEP_IDS.includes(t));
+        const ids = steps.filter((t) => !BUILTIN_STEP_IDS.includes(t) && !isMetaTrackKey(t));
         if (ids.length === 0) return undefined;
         const out: Record<string, { score: number; notes?: string; unachieved?: boolean }> = {};
         for (const id of ids) {
@@ -799,13 +819,113 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               <PencilLine className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-black text-amber-900">تحديث إنجاز اليوم المسجّل</p>
+              <p className="text-xs font-black text-amber-900">إنجاز اليوم مسجّل</p>
               <p className="text-[10px] text-amber-800 leading-snug">
-                الحقول معبأة بإنجاز اليوم الحالي — أي تعديل يُحدّث سجل اليوم ويعيد بناء الخطة المستقبلية
+                {isLockedUpdateView
+                  ? 'المسجَّل معروض للاطلاع — اضغط «تحديث إنجاز اليوم» أسفل الملخص للتعديل'
+                  : 'الحقول معبأة بإنجاز اليوم الحالي — أي تعديل يُحدّث سجل اليوم ويعيد بناء الخطة المستقبلية'}
               </p>
             </div>
           </div>
         )}
+
+        {/* Locked read-only summary of today's recorded achievement */}
+        {isLockedUpdateView && todayRecord && (
+          <div className="mt-4 space-y-3">
+            {todayRecord.memorization && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-emerald-900 flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5" />
+                    الحفظ الجديد
+                  </span>
+                  {todayRecord.memorization.unachieved ? (
+                    <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">لم يُنجَز</span>
+                  ) : (
+                    <span className="text-sm font-black text-emerald-800">{todayRecord.memorization.score}%</span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs font-bold text-slate-800">
+                  سورة {resolveSurahArabicName(todayRecord.memorization.surahFrom) || todayRecord.memorization.surahFrom} — آية {todayRecord.memorization.ayahFrom} ← سورة {resolveSurahArabicName(todayRecord.memorization.surahTo) || todayRecord.memorization.surahTo} — آية {todayRecord.memorization.ayahTo}
+                </p>
+                {todayRecord.memorization.notes && (
+                  <p className="mt-1 text-[10px] text-slate-600">{todayRecord.memorization.notes}</p>
+                )}
+              </div>
+            )}
+            {todayRecord.revision && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-amber-900 flex items-center gap-1.5">
+                    <Repeat className="w-3.5 h-3.5" />
+                    المراجعة{todayRecord.revision.type ? ` (${todayRecord.revision.type})` : ''}
+                  </span>
+                  {todayRecord.revision.unachieved ? (
+                    <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">لم تُنجَز</span>
+                  ) : (
+                    <span className="text-sm font-black text-amber-800">{todayRecord.revision.score}%</span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs font-bold text-slate-800">
+                  {todayRecord.revision.surahFrom || todayRecord.revision.surahTo
+                    ? `من ${resolveSurahArabicName(todayRecord.revision.surahFrom) || todayRecord.revision.surahFrom || '—'} إلى ${resolveSurahArabicName(todayRecord.revision.surahTo) || todayRecord.revision.surahTo || '—'}`
+                    : todayRecord.revision.autoRangeLabel || '—'}
+                </p>
+              </div>
+            )}
+            {todayRecord.spelling && todayRecord.spelling.lessonId && (
+              <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-teal-900 flex items-center gap-1.5">
+                    <BookType className="w-3.5 h-3.5" />
+                    الهجاء — درس {todayRecord.spelling.lessonNumber || '؟'}
+                  </span>
+                  {todayRecord.spelling.unachieved ? (
+                    <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">لم يُنجَز</span>
+                  ) : (
+                    <span className="text-sm font-black text-teal-800">{todayRecord.spelling.finalScore}%</span>
+                  )}
+                </div>
+                {todayRecord.spelling.statusTag && (
+                  <p className="mt-1.5 text-[10px] font-bold text-slate-700">{todayRecord.spelling.statusTag}</p>
+                )}
+              </div>
+            )}
+            {Object.entries(todayRecord.customTracks || {})
+              .filter(([tid]) => !isMetaTrackKey(tid))
+              .map(([tid, t]) => (
+                <div key={tid} className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {tracks.find((tr) => tr.id === tid)?.name || tid}
+                    </span>
+                    {t?.unachieved ? (
+                      <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">لم يُنجَز</span>
+                    ) : (
+                      <span className="text-sm font-black text-slate-800">{t?.score}%</span>
+                    )}
+                  </div>
+                  {t?.notes && <p className="mt-1.5 text-[10px] text-slate-600">{t.notes}</p>}
+                </div>
+              ))}
+            {todayRecord.teacherRemarks && (
+              <p className="text-[11px] font-bold text-slate-600 px-1">
+                ملاحظات: <span className="font-semibold">{todayRecord.teacherRemarks}</span>
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsEditingToday(true)}
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-sm shadow-amber-200 transition-all active:scale-[0.99]"
+            >
+              <PencilLine className="w-4 h-4" />
+              تحديث إنجاز اليوم
+            </button>
+          </div>
+        )}
+
+        {!isLockedUpdateView && (<>
 
         {/* Step Indicator — one track at a time, no "التقييم الشامل" */}
         {!singleStep && (
@@ -1463,6 +1583,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             ) : null}
           </div>
         </div>
+        </>)}
       </div>
     </div>
   );
