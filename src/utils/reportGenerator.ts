@@ -21,12 +21,33 @@ export function generateParentWeeklyReport(
   halaqahs: Halaqah[],
   teachers: Teacher[],
   academicConfig: AcademicYearConfig,
-  options?: { tenantName?: string; gradeTargetSurahName?: string }
+  options?: {
+    tenantName?: string;
+    gradeTargetSurahName?: string;
+    /** Halaqah track gates — the report only mentions tracks the student actually has. */
+    spellingEnabled?: boolean;
+    quranEnabled?: boolean;
+    customTracks?: { name: string; score?: number }[];
+    planHealth?: 'none' | 'reached' | 'deficient' | 'at_risk' | 'healthy';
+  }
 ): string {
   const halaqah = halaqahs.find((h) => h.id === student.halaqahId);
   const teacher = teachers.find((t) => t.id === student.teacherId);
   const currentLesson = spellingLessons.find((l) => l.id === student.currentSpellingLessonId);
-  const evalResult = evaluateStudentStatus(student, records, spellingLessons, academicConfig);
+  // Gate precedence: explicit caller flags → inferred from the student's own
+  // recorded data — so every call site stays truthful about active tracks.
+  const spellingOn =
+    options?.spellingEnabled ??
+    (records.some((r) => r.studentId === student.id && r.spelling) ||
+      Boolean(student.currentSpellingLessonId));
+  const quranOn =
+    options?.quranEnabled ??
+    (records.some((r) => r.studentId === student.id && (r.memorization || r.revision)) ||
+      Boolean(student.currentSurah));
+  const evalResult = evaluateStudentStatus(student, records, spellingLessons, academicConfig, {
+    spellingEnabled: spellingOn,
+    planHealth: options?.planHealth,
+  });
   const gradeTarget = options?.gradeTargetSurahName || student.minimumTargetSurah;
 
   const studentRecords = records
@@ -57,6 +78,24 @@ export function generateParentWeeklyReport(
 
   const tenantName = options?.tenantName || 'مجمع حلقات جامع الغزاوي';
 
+  const trackSections: string[] = [];
+  if (spellingOn) {
+    trackSections.push(`📖 *الهجاء القرآني:*
+الدرس الحالي: ${currentLesson ? `الدرس ${currentLesson.lessonNumber}: ${currentLesson.title}` : 'مسار الهجاء'}
+درجة الإتقان: ${evalResult.spellingMasteryRate}%`);
+  }
+  if (quranOn) {
+    trackSections.push(`✨ *الحفظ القرآني:*
+الموضع المنجز: ${memText}
+مستهدف الصف: سورة ${gradeTarget}${student.personalTargetSurah ? ` | الهدف الشخصي: سورة ${student.personalTargetSurah}` : ''}
+نسبة تحقيق المستهدف: ${evalResult.memorizationProgressRate}%`);
+    trackSections.push(`🔄 *المراجعة والتثبيت:*
+${revText}`);
+  }
+  for (const t of options?.customTracks ?? []) {
+    trackSections.push(`� *${t.name}:*\nأحدث تقييم: ${t.score !== undefined ? `${t.score}%` : 'لم يُقيَّم بعد'}`);
+  }
+
   return `🕌 *${tenantName} – منصة الحلقات القرآنية*
 السلام عليكم ورحمة الله وبركاته،
 المكرم ولي أمر الطالب: *${student.fullName}* حفظه الله
@@ -65,25 +104,15 @@ export function generateParentWeeklyReport(
 
 نشارككم التقرير الأسبوعي لإنجاز ابنكم في الأسبوع التشغيلي (*${academicConfig.currentWeek}*):
 
-📖 *الهجاء القرآني:*
-الدرس الحالي: ${currentLesson ? `الدرس ${currentLesson.lessonNumber}: ${currentLesson.title}` : 'مسار الهجاء'}
-درجة الإتقان: ${evalResult.spellingMasteryRate}%
+${trackSections.join('\n\n')}
 
-✨ *الحفظ القرآني:*
-الموضع المنجز: ${memText}
-مستهدف الصف: سورة ${gradeTarget} ${student.personalTargetSurah ? `| الهدف الشخصي: سورة ${student.personalTargetSurah}` : ''}
-نسبة تحقيق المستهدف: ${evalResult.memorizationProgressRate}%
-
-🔄 *المراجعة والتثبيت:*
-${revText}
-
-📊 *الحضور والانتظام:*
+�📊 *الحضور والانتظام:*
 نسبة الحضور: ${evalResult.attendanceRate}% (${evalResult.attendanceRate >= 90 ? 'ممتاز' : 'يحتاج مواظبة'})
 
 🎯 *الحالة العامة:* ${statusEmoji}
 
 💡 *توصية المعلم:*
-${student.notes || 'الاستمرار في المراجعة المنزلية اليومية لمدة 10 دقائق لترسيخ الهجاء والحفظ.'}
+${student.notes || 'الاستمرار في المراجعة المنزلية اليومية لمدة 10 دقائق لترسيخ الإتقان والحفظ.'}
 
 نسأل الله تعالى أن يجعله من أهل القرآن وخاصته.
 _منصة الحلقات القرآنية – ${tenantName}_`;

@@ -513,6 +513,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
 
   // Open Parent Report
   const handleOpenParentReport = (student: Student) => {
+    const studentTrackIds = getHalaqahActiveTrackIds(
+      halaqahs.find((h) => h.id === student.halaqahId)
+    );
+    const customTracks = studentTrackIds
+      .filter((tid) => !['track_quran', 'track_spelling'].includes(tid))
+      .map((tid) => ({
+        name: (tracks.find((tr) => tr.id === tid)?.name || tid).replace(/^مسار\s*/, ''),
+        score: sessionRecords
+          .filter(
+            (r) =>
+              r.studentId === student.id &&
+              r.customTracks?.[tid] &&
+              typeof r.customTracks[tid].score === 'number'
+          )
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+          ?.customTracks?.[tid]?.score,
+      }));
     const text = generateParentWeeklyReport(
       student,
       sessionRecords,
@@ -520,7 +537,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       halaqahs,
       teachers,
       academicConfig,
-      { gradeTargetSurahName: planHealthMap.get(student.id)?.gradeTargetSurahName }
+      {
+        gradeTargetSurahName: planHealthMap.get(student.id)?.gradeTargetSurahName,
+        spellingEnabled:
+          isSpellingActive && isHalaqahTrackEnabled(student.halaqahId, 'track_spelling'),
+        quranEnabled: studentTrackIds.includes('track_quran'),
+        customTracks,
+        planHealth: planHealthMap.get(student.id)?.state,
+      }
     );
     setReportData({
       title: `تقرير أسبوعي – ${student.fullName}`,
