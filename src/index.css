@@ -349,6 +349,13 @@
     break-after: avoid !important;
     page-break-after: avoid !important;
   }
+
+  /* Compact week-table rows so more weeks fit per page */
+  .week-block td,
+  .week-block th {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+  }
 }
 
 /* QRMS platform-wide responsive guards */

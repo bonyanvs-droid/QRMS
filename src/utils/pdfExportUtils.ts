@@ -42,6 +42,22 @@ function createIsolatedRenderSandbox(
   clonedElement.style.overflow = 'visible';
   clonedElement.style.maxHeight = 'none';
 
+  // Elements marked .pdf-hidden stay on screen but drop out of the PDF
+  clonedElement
+    .querySelectorAll<HTMLElement>('.pdf-hidden')
+    .forEach((el) => {
+      el.style.display = 'none';
+    });
+
+  // Compact week-table rows (mirrors the @media print rule — media queries
+  // don't apply to the html-to-image render sandbox)
+  clonedElement
+    .querySelectorAll<HTMLElement>('.week-block td, .week-block th')
+    .forEach((cell) => {
+      cell.style.paddingTop = '3px';
+      cell.style.paddingBottom = '3px';
+    });
+
   container.appendChild(clonedElement);
   document.body.appendChild(container);
 

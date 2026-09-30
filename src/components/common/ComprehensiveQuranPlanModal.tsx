@@ -1507,7 +1507,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                             : undefined;
                                         if (!actualLabel || actualLabel === day.targetUnit.displayLabel) return null;
                                         return (
-                                          <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="print:hidden pdf-hidden inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-1.5 py-0.5 whitespace-nowrap">
                                             <Check className="w-3 h-3" />
                                             <span>المنجز: {actualLabel}</span>
                                           </span>
@@ -1535,7 +1535,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                             <span className="inline-block text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs leading-relaxed">
                                               {m ? m[1] : short}
                                               {m && (
-                                                <span className="block text-[9px] font-medium text-amber-700/90">
+                                                <span className="print:hidden pdf-hidden block text-[9px] font-medium text-amber-700/90">
                                                   {m[2]}
                                                 </span>
                                               )}
