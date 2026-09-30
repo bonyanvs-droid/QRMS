@@ -4,7 +4,7 @@ import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QURAN_SURAHS } from '../../quran/data/quranMeta';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
+import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
 import { generateParentWeeklyReport } from '../../utils/reportGenerator';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
@@ -150,24 +150,31 @@ const FiveStarRating: React.FC<{
       ) : (
         <>
           <div className="flex items-center gap-1.5 mt-2">
-            {STAR_LEVELS.map((level) => {
-              const selected = level.stars === currentStars;
-              return (
-                <button
-                  key={level.score}
-                  type="button"
-                  onClick={() => onChange(level.score)}
-                  title={level.label}
-                  className={`flex-1 py-1.5 rounded-lg border text-xs font-black transition-all cursor-pointer ${
-                    selected
-                      ? accent + ' shadow-xs'
-                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
-                  }`}
-                >
-                  {level.score}%
-                </button>
-              );
-            })}
+            {STAR_LEVELS.slice()
+              .reverse()
+              .map((level) => {
+                const selected = level.stars === currentStars;
+                return (
+                  <button
+                    key={level.score}
+                    type="button"
+                    onClick={() => onChange(level.score)}
+                    title={level.label}
+                    className={`flex-1 py-1.5 rounded-lg border text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                      selected
+                        ? accent + ' shadow-xs'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300 hover:text-slate-700'
+                    }`}
+                  >
+                    <Star
+                      className={`w-3 h-3 ${
+                        selected ? 'fill-current' : 'fill-amber-400 text-amber-500'
+                      }`}
+                    />
+                    {level.score}%
+                  </button>
+                );
+              })}
           </div>
           <div className="flex items-center justify-between mt-1.5">
             <span className={`text-[11px] font-bold ${activeLevel.color}`}>{activeLevel.label}</span>
@@ -798,7 +805,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -1106,7 +1113,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     const maxA = getSurahAyahsCount(newSurah);
                     if (ayahFrom > maxA) setAyahFrom(maxA);
                   }}
-                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                  className="flex-1 min-w-0 text-xs px-2 h-9 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-colors"
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
@@ -1121,6 +1128,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     value={ayahFrom}
                     onChange={setAyahFrom}
                     compact
+                    selectClassName="h-9"
                   />
                 </div>
               </div>
@@ -1136,7 +1144,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     const maxA = getSurahAyahsCount(newSurah);
                     if (ayahTo > maxA) setAyahTo(maxA);
                   }}
-                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                  className="flex-1 min-w-0 text-xs px-2 h-9 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-colors"
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
@@ -1151,6 +1159,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     value={ayahTo}
                     onChange={setAyahTo}
                     compact
+                    selectClassName="h-9"
                   />
                 </div>
               </div>
@@ -1208,7 +1217,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     const maxA = getSurahAyahsCount(newSurah);
                     if (revAyahFrom > maxA) setRevAyahFrom(maxA);
                   }}
-                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                  className="flex-1 min-w-0 text-xs px-2 h-9 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-colors"
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
@@ -1223,6 +1232,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     value={revAyahFrom}
                     onChange={setRevAyahFrom}
                     compact
+                    selectClassName="h-9"
                   />
                 </div>
               </div>
@@ -1238,7 +1248,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     const maxA = getSurahAyahsCount(newSurah);
                     if (revAyahTo > maxA) setRevAyahTo(maxA);
                   }}
-                  className="flex-1 min-w-0 text-xs px-2 py-2 bg-white rounded-lg border border-slate-300"
+                  className="flex-1 min-w-0 text-xs px-2 h-9 bg-white rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-colors"
                 >
                   {getSurahsByDirection(activeQuranPlan?.direction || 'backward').map((s) => (
                     <option key={s.number} value={s.name}>
@@ -1253,6 +1263,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     value={revAyahTo}
                     onChange={setRevAyahTo}
                     compact
+                    selectClassName="h-9"
                   />
                 </div>
               </div>
@@ -1376,56 +1387,12 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </div>
         </div>
 
-        {/* Track strip — jump between tracks; the active one feeds the form above */}
-        {!singleStep && steps.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-1.5">
-            {steps.map((st, i) => {
-              const done = completedSteps.has(i);
-              const active = i === safeIndex;
-              const isUnach = Boolean(unachievedTracks[st]);
-              const meta = TRACK_META[st] || {
-                label: trackShortLabel(
-                  tracks.find((tr) => tr.id === st)?.name || st
-                ),
-                icon: <BookOpen className="w-3.5 h-3.5" />,
-              };
-              return (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setStepIndex(i)}
-                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                    active
-                      ? isUnach
-                        ? 'bg-rose-700 text-white shadow-xs'
-                        : 'bg-emerald-700 text-white shadow-xs'
-                      : isUnach
-                      ? 'bg-rose-50 text-rose-800 border border-rose-300'
-                      : done
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
-                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                  }`}
-                >
-                  {isUnach ? (
-                    <X className="w-3.5 h-3.5 text-rose-500" />
-                  ) : done && !active ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    meta.icon
-                  )}
-                  <span className="truncate">{meta.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {/* Wizard Footer */}
-        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-medium transition-colors"
+              className="px-4 py-2.5 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-bold transition-colors"
             >
               إلغاء
             </button>
@@ -1439,6 +1406,48 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               </button>
             )}
           </div>
+
+          {/* Track progress — passive indicator between the footer buttons */}
+          {!singleStep && steps.length > 0 && (
+            <div className="flex items-center gap-1 order-none">
+              {steps.map((st, i) => {
+                const done = completedSteps.has(i);
+                const active = i === safeIndex;
+                const isUnach = Boolean(unachievedTracks[st]);
+                const meta = TRACK_META[st] || {
+                  label: trackShortLabel(
+                    tracks.find((tr) => tr.id === st)?.name || st
+                  ),
+                  icon: <BookOpen className="w-3.5 h-3.5" />,
+                };
+                return (
+                  <div
+                    key={st}
+                    className={`py-1 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 select-none ${
+                      active
+                        ? isUnach
+                          ? 'bg-rose-700 text-white'
+                          : 'bg-emerald-700 text-white'
+                        : isUnach
+                        ? 'bg-rose-50 text-rose-800 border border-rose-300'
+                        : done
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {isUnach ? (
+                      <X className="w-3.5 h-3.5 text-rose-500" />
+                    ) : done && !active ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : (
+                      meta.icon
+                    )}
+                    <span className="truncate">{meta.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             {saveError && (
