@@ -1297,7 +1297,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                   <div
                     key={weekNum}
                     id={`quran-plan-week-${weekNum}`}
-                    className={`rounded-xl border transition-all overflow-hidden ${
+                    className={`week-block rounded-xl border transition-all overflow-hidden ${
                       isCurrent
                         ? 'border-emerald-500 shadow-sm'
                         : 'border-slate-200'
@@ -1306,7 +1306,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                     {/* Week Accordion Header */}
                     <div
                       onClick={() => toggleWeek(weekNum)}
-                      className={`px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                      className={`week-block-header px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
                         isCurrent
                           ? 'bg-emerald-50 text-emerald-950'
                           : 'bg-slate-50 hover:bg-slate-100 text-slate-800'

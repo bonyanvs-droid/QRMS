@@ -337,6 +337,18 @@
   #official-printable-report tfoot {
     display: table-footer-group !important;
   }
+
+  /* Weekly plan cards never split mid-week across printed pages */
+  .week-block {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Week header stays glued to its days table if a break is unavoidable */
+  .week-block-header {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
 }
 
 /* QRMS platform-wide responsive guards */
