@@ -1514,13 +1514,26 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                                     })()}
                                   </td>
 
-                                  {/* Revision Assignment */}
+                                  {/* Revision Assignment — the "(+N سطر)" suffix wraps
+                                      to a second muted line so the cell never distorts */}
                                   {isRevisionActive && (
                                     <td className="py-2.5 px-3 text-slate-700 min-w-[200px]">
                                       {day.revisionDisplayLabel ? (
-                                        <span className="inline-block whitespace-nowrap text-[11px] font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs">
-                                          {day.revisionDisplayLabel}
-                                        </span>
+                                        (() => {
+                                          const m = day.revisionDisplayLabel.match(
+                                            /^(.*?)\s*(\(\+?\d+\s*سطر[^)]*\))\s*$/
+                                          );
+                                          return (
+                                            <span className="inline-block text-[11px] font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shadow-2xs leading-relaxed">
+                                              {m ? m[1] : day.revisionDisplayLabel}
+                                              {m && (
+                                                <span className="block text-[9px] font-medium text-amber-700/90 mt-0.5">
+                                                  {m[2]}
+                                                </span>
+                                              )}
+                                            </span>
+                                          );
+                                        })()
                                       ) : (
                                         <span className="text-slate-400">—</span>
                                       )}
