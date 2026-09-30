@@ -24,7 +24,7 @@ import {
   Clock,
   Info,
   RefreshCw,
-  Award,
+  Download,
 } from 'lucide-react';
 import { Student, DailySessionRecord } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -40,7 +40,8 @@ import {
   formatGregorianDate,
   getTodayLocalIso,
 } from '../../utils/hijriDate';
-import { executePrintOrPdfFallback } from '../../utils/pdfExportUtils';
+import { executePrintOrPdfFallback, exportElementToPdf } from '../../utils/pdfExportUtils';
+import { MosqueLogo } from './logos/MosqueLogo';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 import { SURAHS_LIST } from '../../data/initialData';
 import {
@@ -561,16 +562,41 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [currentWeek]);
 
-  // Print & PDF Handler
+  // Print & PDF Handlers — orientation is chosen here, not left to the browser dialog
+  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>('portrait');
+
   const handlePrint = async () => {
     if (!printRef.current || !effectivePlan) return;
     setIsPrinting(true);
     try {
       const fileName = `الخطة_القرآنية_${studentDisplayName.replace(/\s+/g, '_')}`;
       const title = `الخطة القرآنية المعتمدة — ${studentDisplayName}`;
-      await executePrintOrPdfFallback(printRef.current, { fileName, title });
+      await executePrintOrPdfFallback(printRef.current, {
+        fileName,
+        title,
+        orientation: printOrientation,
+      });
     } catch (err) {
       console.error('Print generation failed:', err);
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  // Direct PDF download — skips the browser print dialog entirely, slices at
+  // week boundaries so no week card is ever cut across pages.
+  const handlePdfDownload = async () => {
+    if (!printRef.current || !effectivePlan) return;
+    setIsPrinting(true);
+    try {
+      const fileName = `الخطة_القرآنية_${studentDisplayName.replace(/\s+/g, '_')}`;
+      await exportElementToPdf(printRef.current, {
+        fileName,
+        orientation: printOrientation,
+        blockSelector: '.week-block',
+      });
+    } catch (err) {
+      console.error('PDF download failed:', err);
     } finally {
       setIsPrinting(false);
     }
@@ -639,6 +665,47 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
                 إخفاء التاريخ
               </button>
             </div>
+
+            {/* Page Orientation — applies to print AND PDF download */}
+            <div className="bg-white/15 rounded-lg p-0.5 flex text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setPrintOrientation('portrait')}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  printOrientation === 'portrait' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white hover:bg-white/10'
+                }`}
+                title="صفحة طولية (رأسية) A4"
+              >
+                رأسي
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintOrientation('landscape')}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  printOrientation === 'landscape' ? 'bg-white text-emerald-800 shadow-xs' : 'text-white hover:bg-white/10'
+                }`}
+                title="صفحة عرضية (أفقية) A4"
+              >
+                أفقي
+              </button>
+            </div>
+
+            {/* Direct PDF Download — no print dialog, weeks never split */}
+            {effectivePlan && (
+              <button
+                type="button"
+                onClick={handlePdfDownload}
+                disabled={isPrinting}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isPrinting
+                    ? 'bg-white/10 text-white/50 cursor-not-allowed opacity-60'
+                    : 'bg-amber-400 hover:bg-amber-300 text-amber-950 shadow-xs'
+                }`}
+                title="تنزيل PDF جاهز (بدون حوار الطباعة)"
+              >
+                <Download className={`w-4 h-4 ${isPrinting ? 'animate-pulse' : ''}`} />
+              </button>
+            )}
 
             {/* Print / PDF Button */}
             {effectivePlan && (
@@ -1205,9 +1272,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
             {/* Document Header with Logos & Identification */}
             <div className="flex items-start justify-between border-b pb-4">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-100 text-emerald-900 rounded-2xl">
-                  <Award className="w-7 h-7" />
-                </div>
+                <MosqueLogo size="md" className="shrink-0" />
                 <div>
                   <h2 className="text-lg sm:text-xl font-black text-slate-900">
                     وثيقة الخطة القرآنية المعتمدة

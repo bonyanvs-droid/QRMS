@@ -8,6 +8,8 @@ export interface PdfExportOptions {
   orientation?: PdfOrientation;
   marginMm?: number;
   quality?: number;
+  /** CSS selector for blocks that must never split across pages (e.g. '.week-block') */
+  blockSelector?: string;
 }
 
 /**
@@ -107,6 +109,7 @@ export async function exportElementToPdf(
   );
 
   let canvas: HTMLCanvasElement;
+  let blockRects: { top: number; bottom: number }[] = [];
   try {
     // Wait for any nested images or fonts to stabilize
     const images = Array.from(clonedElement.querySelectorAll('img'));
@@ -123,6 +126,20 @@ export async function exportElementToPdf(
           })
       )
     );
+
+    // Measure breakable blocks AFTER images settle but BEFORE cleanup detaches
+    // the sandbox (rects are zero on detached nodes) — keeps blocks whole.
+    if (options.blockSelector) {
+      const rootRect = clonedElement.getBoundingClientRect();
+      blockRects = Array.from(
+        clonedElement.querySelectorAll<HTMLElement>(options.blockSelector)
+      )
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top - rootRect.top, bottom: r.bottom - rootRect.top };
+        })
+        .sort((a, b) => a.top - b.top);
+    }
 
     const fullHeightPx = Math.max(clonedElement.scrollHeight, clonedElement.offsetHeight, 600);
 
@@ -166,15 +183,49 @@ export async function exportElementToPdf(
     compress: true,
   });
 
-  const totalPages = Math.max(1, Math.ceil(canvasHeightPx / pageHeightPx));
+  // Page slices in DOM px — cut at block tops when blockSelector is given so a
+  // block (e.g. a week card) never splits across pages; uniform slicing otherwise.
+  const domToCanvas = canvasWidthPx / standardRenderWidthPx;
+  const pageDomPx = pageHeightPx / domToCanvas;
+  const totalDomPx = canvasHeightPx / domToCanvas;
+  const cutsDom: number[] = [0];
+  if (blockRects.length > 0) {
+    let pageStart = 0;
+    for (const b of blockRects) {
+      const pageEnd = pageStart + pageDomPx;
+      if (b.bottom > pageEnd + 2 && b.top > pageStart + 2) {
+        cutsDom.push(b.top);
+        pageStart = b.top;
+      }
+    }
+  }
+  cutsDom.push(totalDomPx);
+
+  const slicesDom: [number, number][] = [];
+  for (let i = 0; i < cutsDom.length - 1; i++) {
+    let s = cutsDom[i];
+    const e = cutsDom[i + 1];
+    while (e - s > pageDomPx + 0.5) {
+      slicesDom.push([s, s + pageDomPx]);
+      s += pageDomPx;
+    }
+    if (e - s > 0.5) slicesDom.push([s, e]);
+  }
+
+  const totalPages = Math.max(1, slicesDom.length);
 
   for (let page = 0; page < totalPages; page++) {
     if (page > 0) {
       pdf.addPage('a4', effectiveOrientation);
     }
 
-    const sourceY = page * pageHeightPx;
-    const sourceHeight = Math.min(pageHeightPx, canvasHeightPx - sourceY);
+    const [sDom, eDom] = slicesDom[page] || [0, totalDomPx];
+    const sourceY = Math.round(sDom * domToCanvas);
+    const sourceHeight = Math.min(
+      pageHeightPx,
+      Math.round((eDom - sDom) * domToCanvas),
+      canvasHeightPx - sourceY
+    );
 
     const pageCanvas = document.createElement('canvas');
     pageCanvas.width = canvasWidthPx;
