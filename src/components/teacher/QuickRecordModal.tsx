@@ -367,7 +367,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     if (isRevisionPlan && planUnit?.end?.ayahNumber) return planUnit.end.ayahNumber;
     return student.currentAyah || 1;
   });
-  const [revType, setRevType] = useState<'قريبة' | 'بعيدة'>(todayRecord?.revision?.type || 'قريبة');
   const [revScore, setRevScore] = useState<number>(todayRecord?.revision?.score || 100);
 
   // Custom (admin-defined) tracks — generic score + notes per track, saved to customTracks
@@ -420,6 +419,60 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   const lastSpellingRecord = useMemo(() => {
     return studentPreviousSessions.find((r) => r.spelling !== undefined);
   }, [studentPreviousSessions]);
+
+  // Revision type — auto-derived, never chosen manually: 'قريبة' when the
+  // revised range overlaps memorization recorded within the last 30 days
+  // (or the memorization range entered right now), else 'بعيدة'. A stored
+  // type on today's existing record wins so editing stays faithful.
+  const revType = useMemo((): 'قريبة' | 'بعيدة' => {
+    const recorded = todayRecord?.revision?.type;
+    if (recorded === 'قريبة' || recorded === 'بعيدة') return recorded;
+    const dir = activeQuranPlan?.direction || 'backward';
+    const ord = (name?: string, ayah = 1): number | undefined => {
+      const meta = name ? findSurahMetadata(name) : undefined;
+      return meta ? getSurahSequenceIndex(meta.number, dir) * 1000 + ayah : undefined;
+    };
+    const rLo = ord(revSurahFrom, revAyahFrom);
+    const rHi = ord(revSurahTo, revAyahTo);
+    if (rLo === undefined || rHi === undefined) return 'قريبة';
+    const rMin = Math.min(rLo, rHi);
+    const rMax = Math.max(rLo, rHi);
+    const overlaps = (f?: string, fa = 1, t?: string, ta = 1): boolean => {
+      const fo = ord(f, fa);
+      const to = ord(t, ta);
+      if (fo === undefined || to === undefined) return false;
+      return Math.min(fo, to) <= rMax && Math.max(fo, to) >= rMin;
+    };
+    if (overlaps(surahFrom, ayahFrom, surahTo, ayahTo)) return 'قريبة';
+    const cutoff = new Date(todayIso + 'T00:00:00Z');
+    cutoff.setUTCDate(cutoff.getUTCDate() - 30);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    const recentHit = studentPreviousSessions.find(
+      (r) =>
+        r.memorization &&
+        r.date >= cutoffIso &&
+        overlaps(
+          r.memorization.surahFrom,
+          r.memorization.ayahFrom,
+          r.memorization.surahTo,
+          r.memorization.ayahTo
+        )
+    );
+    return recentHit ? 'قريبة' : 'بعيدة';
+  }, [
+    todayRecord,
+    activeQuranPlan,
+    revSurahFrom,
+    revAyahFrom,
+    revSurahTo,
+    revAyahTo,
+    surahFrom,
+    ayahFrom,
+    surahTo,
+    ayahTo,
+    studentPreviousSessions,
+    todayIso,
+  ]);
 
   // Has pending debt if the last recorded session had the track explicitly unachieved
   const memHasPendingDebt = useMemo(() => {
@@ -805,7 +858,8 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
+            className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs"
+            title="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>
@@ -1103,8 +1157,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               )}
 
               {/* حفظ من — بداية المقطع المسموع */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">حفظ من</span>
+              <div>
+                <p className="text-xs font-bold text-slate-800 mb-1.5">حفظ من:</p>
+                <div className="flex items-center gap-2">
                 <select
                   value={surahFrom}
                   onChange={(e) => {
@@ -1131,11 +1186,13 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     selectClassName="h-9"
                   />
                 </div>
+                </div>
               </div>
 
               {/* حفظ إلى — نهاية المقطع المسموع */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">حفظ إلى</span>
+              <div>
+                <p className="text-xs font-bold text-slate-800 mb-1.5">حفظ إلى:</p>
+                <div className="flex items-center gap-2">
                 <select
                   value={surahTo}
                   onChange={(e) => {
@@ -1161,6 +1218,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     compact
                     selectClassName="h-9"
                   />
+                </div>
                 </div>
               </div>
 
@@ -1207,8 +1265,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
               )}
 
               {/* مراجعة من — بداية مقطع المراجعة */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">مراجعة من</span>
+              <div>
+                <p className="text-xs font-bold text-slate-800 mb-1.5">مراجعة من:</p>
+                <div className="flex items-center gap-2">
                 <select
                   value={revSurahFrom}
                   onChange={(e) => {
@@ -1235,11 +1294,13 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     selectClassName="h-9"
                   />
                 </div>
+                </div>
               </div>
 
               {/* مراجعة إلى — نهاية مقطع المراجعة */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">مراجعة إلى</span>
+              <div>
+                <p className="text-xs font-bold text-slate-800 mb-1.5">مراجعة إلى:</p>
+                <div className="flex items-center gap-2">
                 <select
                   value={revSurahTo}
                   onChange={(e) => {
@@ -1266,35 +1327,22 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                     selectClassName="h-9"
                   />
                 </div>
-              </div>
-
-              {/* نوع المراجعة */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-700 w-16 shrink-0">النوع</span>
-                <div className="flex-1 flex gap-1.5">
-                  {(['قريبة', 'بعيدة'] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setRevType(t)}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition-colors ${
-                        revType === t
-                          ? 'bg-amber-500 text-slate-950 border-amber-600'
-                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
                 </div>
               </div>
+
+              {/* Revision type — auto-derived from memorization recency */}
+              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                النوع: <span className="font-bold text-slate-700">{revType}</span>
+                <span className="text-slate-400">— تُحدَّد تلقائياً حسب حداثة حفظ المقطع</span>
+              </p>
 
               {/* Revision mastery — percentage-chip rating */}
               <FiveStarRating
                 label="التقييم"
                 value={revScore}
                 onChange={setRevScore}
-                theme="amber"
+                theme="blue"
                 isUnachieved={Boolean(unachievedTracks['revision'])}
                 onToggleUnachieved={() => toggleTrackUnachieved('revision')}
                 hasPendingDebt={revHasPendingDebt}
@@ -1387,9 +1435,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           </div>
         </div>
 
-        {/* Wizard Footer */}
-        <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+        {/* Wizard Footer — single row: إلغاء/رجوع | مؤشر المسارات | التالي/حفظ */}
+        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={onClose}
               className="px-4 py-2.5 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-bold transition-colors"
@@ -1407,9 +1455,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             )}
           </div>
 
-          {/* Track progress — passive indicator between the footer buttons */}
-          {!singleStep && steps.length > 0 && (
-            <div className="flex items-center gap-1 order-none">
+          {/* Track progress — passive indicator, flexes to fill center space */}
+          {!singleStep && steps.length > 0 ? (
+            <div className="flex-1 min-w-0 flex items-center justify-center gap-1">
               {steps.map((st, i) => {
                 const done = completedSteps.has(i);
                 const active = i === safeIndex;
@@ -1423,7 +1471,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 return (
                   <div
                     key={st}
-                    className={`py-1 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 select-none ${
+                    className={`min-w-0 py-1 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 select-none ${
                       active
                         ? isUnach
                           ? 'bg-rose-700 text-white'
@@ -1447,9 +1495,11 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 );
               })}
             </div>
+          ) : (
+            <div className="flex-1" />
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             {saveError && (
               <span className="text-xs font-bold text-rose-600">{saveError}</span>
             )}
