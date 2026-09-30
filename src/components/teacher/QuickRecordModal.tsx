@@ -4,22 +4,19 @@ import { DailySessionRecord, SpellingLesson, Student } from '../../types';
 import { ALL_114_SURAHS, getSurahsByDirection, getSurahAyahsCount, findSurahMetadata, getSurahSequenceIndex } from '../../utils/quranMetadata';
 import { QURAN_SURAHS } from '../../quran/data/quranMeta';
 import { QuranAyahSelect } from '../common/QuranAyahSelect';
-import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, Send, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
-import { generateParentWeeklyReport } from '../../utils/reportGenerator';
+import { Sparkles, BookOpen, BookType, RotateCcw, Repeat, Check, X, ChevronLeft, ChevronRight, Star, AlertTriangle, Loader2, PencilLine } from 'lucide-react';
 import { getHalaqahActiveTrackIds } from '../../utils/trackAdapter';
 
 interface QuickRecordModalProps {
   isOpen: boolean;
   onClose: () => void;
   student: Student | null;
-  onOpenReportModal?: (content: string, phone: string, name: string, studentId: string) => void;
 }
 
 export const QuickRecordModal: React.FC<QuickRecordModalProps> = ({
   isOpen,
   onClose,
   student,
-  onOpenReportModal,
 }) => {
   if (!isOpen || !student) return null;
 
@@ -28,7 +25,6 @@ export const QuickRecordModal: React.FC<QuickRecordModalProps> = ({
       key={student.id}
       student={student}
       onClose={onClose}
-      onOpenReportModal={onOpenReportModal}
     />
   );
 };
@@ -36,7 +32,6 @@ export const QuickRecordModal: React.FC<QuickRecordModalProps> = ({
 interface QuickRecordModalContentProps {
   student: Student;
   onClose: () => void;
-  onOpenReportModal?: (content: string, phone: string, name: string, studentId: string) => void;
 }
 
 // Builtin step ids + any custom halaqah track id (dynamic steps)
@@ -203,7 +198,6 @@ const tagForSpellingScore = (
 const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   student,
   onClose,
-  onOpenReportModal,
 }) => {
   const {
     spellingLessons,
@@ -211,7 +205,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
     recordDailySession,
     sessionRecords,
     halaqahs,
-    teachers,
     getActiveStudentQuranPlan,
     recordQuranPlanAchievement,
     tracks,
@@ -644,7 +637,7 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
   };
   const handlePrevStep = () => setStepIndex((i) => Math.max(i - 1, 0));
 
-  const handleSave = async (andSendReport = false) => {
+  const handleSave = async () => {
     if (isSaving) return;
     setIsSaving(true);
     setSaveError(null);
@@ -794,29 +787,10 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
 
     setIsSaved(true);
 
-    if (andSendReport && onOpenReportModal) {
-      const updatedRecords = [
-        ...sessionRecords,
-        { ...recordData, id: 'temp', createdAt: new Date().toISOString() },
-      ];
-      const text = generateParentWeeklyReport(
-        student,
-        updatedRecords,
-        spellingLessons,
-        halaqahs,
-        teachers,
-        academicConfig
-      );
-      setTimeout(() => {
-        onClose();
-        onOpenReportModal(text, student.parentPhone, student.fullName, student.id);
-      }, 300);
-    } else {
-      setTimeout(() => {
-        setIsSaved(false);
-        onClose();
-      }, 600);
-    }
+    setTimeout(() => {
+      setIsSaved(false);
+      onClose();
+    }, 600);
     } catch (err) {
       console.error('Session save failed:', err);
       setSaveError('تعذّر حفظ الإنجاز — تحقق من الاتصال ثم أعد المحاولة');
@@ -1503,22 +1477,9 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
             {saveError && (
               <span className="text-xs font-bold text-rose-600">{saveError}</span>
             )}
-            {steps.length > 0 && isLastStep && onOpenReportModal && (
-              <button
-                onClick={() => handleSave(true)}
-                disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors disabled:opacity-50"
-                title="حفظ الجلسة ثم فتح تقرير واتساب لولي الأمر"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">حفظ وإرسال تقرير</span>
-                <span className="sm:hidden">تقرير</span>
-              </button>
-            )}
-
             {steps.length > 0 && (singleStep || isLastStep) ? (
               <button
-                onClick={() => handleSave(false)}
+                onClick={() => handleSave()}
                 disabled={isSaving}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow-md transition-colors disabled:opacity-60"
               >

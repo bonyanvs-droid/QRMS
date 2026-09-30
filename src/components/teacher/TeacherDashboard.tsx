@@ -1446,19 +1446,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
           isOpen={Boolean(activeStudentRecord)}
           onClose={() => setActiveStudentRecord(null)}
           student={activeStudentRecord}
-          onOpenReportModal={(content, phone, name, studentId) => {
-            setReportData({
-              title: `تقرير إنجاز – ${name}`,
-              content,
-              recipientName: `ولي أمر ${name}`,
-              recipientPhone: phone,
-              recipientType: 'parent',
-              reportType: 'weekly',
-              studentId,
-              teacherId: activeTeacher?.id,
-            });
-            setReportModalOpen(true);
-          }}
         />
       )}
 
