@@ -30,20 +30,20 @@ export const StudentCumulativeHistoryModal: React.FC<StudentCumulativeHistoryMod
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="bg-white rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-start justify-between pb-4 border-b border-slate-100 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-indigo-100 text-indigo-900 shrink-0">
-              <History className="w-4 h-4 sm:w-6 sm:h-6 text-indigo-700" />
+        {/* Header — unified emerald bar matching the platform's modal identity */}
+        <div className="-mx-4 sm:-mx-6 -mt-4 sm:-mt-6 mb-4 px-4 sm:px-6 py-4 bg-gradient-to-r from-emerald-800 to-teal-900 text-white flex items-start justify-between rounded-t-3xl shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+              <History className="w-5 h-5 text-emerald-200" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm sm:text-base font-black text-slate-900 line-clamp-2">{student.name}</h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
+                <h3 className="text-sm sm:text-base font-black text-white line-clamp-1">{student.name}</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/15 text-emerald-50 border border-white/20 font-bold">
                   {student.grade}
                 </span>
               </div>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5">
+              <p className="text-[10px] sm:text-xs text-emerald-100 mt-0.5">
                 السجل التراكمي<span className="hidden sm:inline"> وتاريخ الإنجاز عبر الفصول والسنوات الدراسية</span>
               </p>
             </div>
@@ -51,7 +51,8 @@ export const StudentCumulativeHistoryModal: React.FC<StudentCumulativeHistoryMod
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+            className="p-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors shadow-xs cursor-pointer shrink-0"
+            title="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>

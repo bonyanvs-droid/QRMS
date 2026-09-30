@@ -806,33 +806,34 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
           todayRecord ? 'border-amber-300 ring-2 ring-amber-100' : 'border-slate-200'
         }`}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-100">
+        {/* Header — unified emerald bar matching the platform's modal identity */}
+        <div className="-mx-5 md:-mx-6 -mt-5 md:-mt-6 mb-4 px-4 sm:px-5 py-3.5 bg-gradient-to-r from-emerald-800 to-teal-900 text-white flex items-center justify-between rounded-t-2xl">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-700 text-white font-black text-sm sm:text-base flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-white/10 border border-white/20 text-emerald-50 font-black text-sm sm:text-base flex items-center justify-center shrink-0">
               {(student.fullName || student.name || 'ط').charAt(0)}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm sm:text-base md:text-lg font-bold text-slate-900 line-clamp-2">{student.fullName}</h3>
-                <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200">
+                <h3 className="text-sm sm:text-base md:text-lg font-bold text-white line-clamp-1">{student.fullName}</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-white/15 text-emerald-50 font-bold border border-white/20">
                   {student.grade}
                 </span>
                 {todayRecord && (
                   <span
-                    className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 font-bold border border-amber-300 whitespace-nowrap"
+                    className="text-[10px] px-2 py-0.5 rounded-md bg-amber-400 text-amber-950 font-bold whitespace-nowrap"
                     title="يوجد إنجاز مسجّل لهذا اليوم — التعديل هنا يحدّث سجل اليوم ويعيد بناء الخطة المستقبلية"
                   >
                     تحديث إنجاز اليوم
                   </span>
                 )}
               </div>
+              <p className="text-[11px] text-emerald-100 mt-0.5">رصد إنجاز اليوم — الحفظ والمراجعة والمسارات</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs"
+            className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs shrink-0"
             title="إغلاق"
           >
             <X className="w-5 h-5" />

@@ -74,22 +74,23 @@ export const ReportDispatchModal: React.FC<ReportDispatchModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
       <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-800">
-              <MessageCircle className="w-6 h-6 text-emerald-700" />
+        {/* Header — unified emerald bar matching the platform's modal identity */}
+        <div className="-mx-6 -mt-6 mb-4 px-5 py-4 bg-gradient-to-r from-emerald-800 to-teal-900 text-white rounded-t-2xl flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+              <MessageCircle className="w-5 h-5 text-emerald-200" />
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">{title}</h3>
-              <p className="text-xs text-slate-700">
+            <div className="min-w-0">
+              <h3 className="text-base md:text-lg font-bold text-white line-clamp-1">{title}</h3>
+              <p className="text-[11px] text-emerald-100 mt-0.5 truncate">
                 المستلم: <strong>{recipientName}</strong> {recipientPhone ? `(${recipientPhone})` : ''}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+            className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs shrink-0"
+            title="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>

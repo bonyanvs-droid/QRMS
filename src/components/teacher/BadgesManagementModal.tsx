@@ -183,9 +183,9 @@ export const BadgesManagementModal: React.FC<BadgesManagementModalProps> = ({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
         <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-6 max-h-[90vh]">
           {/* Header */}
-          <div className="px-6 py-5 bg-gradient-to-r from-emerald-900 to-slate-900 text-white flex items-center justify-between">
+          <div className="px-6 py-5 bg-gradient-to-r from-emerald-800 to-teal-900 text-white flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-amber-400 text-slate-950">
+              <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20 text-amber-300">
                 <Crown className="w-6 h-6" />
               </div>
               <div>
@@ -193,14 +193,15 @@ export const BadgesManagementModal: React.FC<BadgesManagementModalProps> = ({
                   <span className="hidden sm:inline">منظومة الحوافز والأوسمة الذكية للطلاب</span>
                   <span className="sm:hidden">الأوسمة والحوافز</span>
                 </h3>
-                <p className="hidden sm:block text-xs text-emerald-200">
+                <p className="hidden sm:block text-xs text-emerald-100">
                   تتويج إتقان الهجاء، بلوغ الغاشية، المواظبة، وبث الفرح في نفوس الطلاب وأولياء الأمور
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
+              className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs shrink-0"
+              title="إغلاق"
             >
               <X className="w-5 h-5" />
             </button>

@@ -697,7 +697,7 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors cursor-pointer shadow-xs"
               title="إغلاق"
             >
               <X className="w-4 h-4" />

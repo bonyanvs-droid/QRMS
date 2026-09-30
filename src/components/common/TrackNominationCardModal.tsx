@@ -34,17 +34,20 @@ export const TrackNominationCardModal: React.FC<TrackNominationCardModalProps> =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white">
       <div className="bg-white rounded-3xl max-w-xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 space-y-4 sm:space-y-5 print:shadow-none print:border-none print:p-0 print:max-w-none max-h-[92vh] overflow-y-auto">
-        {/* Header - Screen only */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
-          <div className="flex items-center gap-2">
-            <Award className="w-5 h-5 text-emerald-700" />
-            <h3 className="font-bold text-slate-900 text-sm sm:text-base line-clamp-2">
+        {/* Header - Screen only — unified emerald bar matching the platform's modal identity */}
+        <div className="-mx-4 sm:-mx-6 -mt-4 sm:-mt-6 mb-4 px-4 sm:px-6 py-3.5 bg-gradient-to-r from-emerald-800 to-teal-900 text-white flex items-center justify-between rounded-t-3xl print:hidden">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+              <Award className="w-5 h-5 text-amber-300" />
+            </div>
+            <h3 className="font-bold text-white text-sm sm:text-base line-clamp-1">
               {isPassed ? 'وثيقة الاعتماد والشهادة الرسمية' : 'بطاقة دخول اختبار المسار الرسمي'}
             </h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+            className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs shrink-0 cursor-pointer"
+            title="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>

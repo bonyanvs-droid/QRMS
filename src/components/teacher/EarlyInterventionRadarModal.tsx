@@ -167,19 +167,19 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
         ? 'bg-white w-full rounded-3xl border border-slate-200 overflow-hidden flex flex-col shadow-xs'
         : 'bg-white w-full max-w-5xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-6 max-h-[90vh]'}>
         {/* Header */}
-        <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white flex items-center justify-between">
+        <div className="px-6 py-5 bg-gradient-to-r from-emerald-800 to-teal-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-rose-500 text-white shadow-xs shrink-0">
+            <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-white/10 border border-white/20 text-emerald-200 shrink-0">
               <Activity className="w-4 h-4 sm:w-6 sm:h-6 animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-black text-sm sm:text-lg line-clamp-2">رادار المتابعة الذكي والتدخل المبكر</h3>
-                <span className="text-xs bg-rose-500/30 text-rose-200 border border-rose-400/30 px-2.5 py-0.5 rounded-full font-bold">
+                <span className="text-xs bg-white/10 text-emerald-100 border border-white/20 px-2.5 py-0.5 rounded-full font-bold">
                   {riskAnalyses.length} طلاب بحاجة لمساندة
                 </span>
               </div>
-              <p className="text-[10px] sm:text-xs text-rose-200/80 mt-0.5">
+              <p className="text-[10px] sm:text-xs text-emerald-100/90 mt-0.5">
                 اكتشاف الفجوات الأكاديمية مبكراً<span className="hidden sm:inline"> ونقاط الضعف في الهجاء والحفظ قبل أن تتراكم، واقتراح خطط علاجية فورية</span>
               </p>
             </div>
@@ -187,7 +187,8 @@ export const EarlyInterventionRadarModal: React.FC<EarlyInterventionRadarModalPr
           {!embedded && (
             <button
               onClick={onClose}
-              className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
+              className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors shadow-xs shrink-0"
+              title="إغلاق"
             >
               <X className="w-5 h-5" />
             </button>
