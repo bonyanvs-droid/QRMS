@@ -1305,13 +1305,6 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
                 </div>
               </div>
 
-              {/* Revision type — auto-derived from memorization recency */}
-              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                النوع: <span className="font-bold text-slate-700">{revType}</span>
-                <span className="text-slate-400">— تُحدَّد تلقائياً حسب حداثة حفظ المقطع</span>
-              </p>
-
               {/* Revision mastery — percentage-chip rating */}
               <FiveStarRating
                 label="التقييم"
