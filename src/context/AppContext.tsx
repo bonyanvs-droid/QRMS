@@ -4405,7 +4405,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const student = students.find((st) => st.id === plan.studentId);
       if (student) {
         const updates: Partial<Student> = {};
-        if (student.activeQuranPlanId === plan.id) updates.activeQuranPlanId = undefined;
+        // `undefined` keys are dropped by JSON.stringify before reaching the
+        // server — null actually clears the column.
+        if (student.activeQuranPlanId === plan.id) updates.activeQuranPlanId = null;
         if (params.archiveMode === 'plan_and_achievements') {
           updates.currentSurah = '';
           updates.currentAyah = 0;

@@ -251,7 +251,12 @@ export const ComprehensiveQuranPlanModal: React.FC<Props> = ({
         .filter((r) => r.studentId === student.id && r.memorization?.surahTo)
         .sort((a, b) => b.date.localeCompare(a.date))[0];
 
-      let recordedSurah = latestMemRec?.memorization?.surahTo || student.currentSurah;
+      // Older records/student pointer may store the English provider name
+      // (e.g. 'Al-Faatiha') — normalize so the select matches an option and
+      // findSurahMetadata resolves the position.
+      let recordedSurah =
+        resolveSurahName(latestMemRec?.memorization?.surahTo) ||
+        resolveSurahName(student.currentSurah);
       let recordedAyah = latestMemRec?.memorization?.ayahTo || student.currentAyah || 1;
 
       if (recordedSurah) {

@@ -1,4 +1,5 @@
 import { SurahMeta } from '../types';
+import { QURAN_SURAHS } from '../quran/data/quranMeta';
 
 export interface QuranSurahEntry extends SurahMeta {
   number: number;
@@ -169,10 +170,24 @@ export function findSurahMetadata(identifier: string | number | undefined | null
   if (exact) return exact;
 
   // Prefix / contains match
-  return ALL_114_SURAHS.find((s) => {
+  const fuzzy = ALL_114_SURAHS.find((s) => {
     const sClean = normalizeSurahSearchText(s.name);
     return sClean.includes(cleanInput) || cleanInput.includes(sClean);
   });
+  if (fuzzy) return fuzzy;
+
+  // English/transliteration fallback — legacy session records and provider
+  // payloads store names like 'Al-Faatiha'; map the provider catalog entry
+  // back onto the canonical Arabic metadata so selects/prefills/plan math
+  // all resolve. Separators/case/apostrophes are ignored.
+  const translit = String(identifier).trim().toLowerCase().replace(/[\s\-_'`]+/g, '');
+  if (translit && /^[a-z]+$/.test(translit)) {
+    const hit = QURAN_SURAHS.find(
+      (s) => String(s.name).toLowerCase().replace(/[\s\-_'`]+/g, '') === translit
+    );
+    if (hit) return ALL_114_SURAHS.find((s) => s.number === hit.surahNumber);
+  }
+  return undefined;
 }
 
 /**

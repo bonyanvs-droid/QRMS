@@ -292,7 +292,7 @@ export interface Student {
   notes?: string;
   username?: string;
   quranPlan?: IndividualQuranPlan;
-  activeQuranPlanId?: string;
+  activeQuranPlanId?: string | null;
   attendanceStreak?: number;
   createdAt?: string;
   isActive?: boolean;
