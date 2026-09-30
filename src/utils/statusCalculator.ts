@@ -8,6 +8,8 @@ import {
 } from '../types';
 import { SURAHS_LIST } from '../data/initialData';
 import { findSurahMetadata } from './quranMetadata';
+import { resolveGradeTargetKeys } from '../quran/services/studentPlanBridge';
+import type { StageQuranConfig } from '../quran/models/stageConfig';
 
 // Order of Surahs in descending chronological memorization order for Juz Amma:
 // 114 (الناس), 113 (الفلق), 112 (الإخلاص) ... 88 (الغاشية) ... 78 (النبأ)
@@ -104,13 +106,14 @@ export function evaluateStudentStatus(
   const totalAbsentDays = studentRecords.filter((r) => r.attendance === 'absent').length;
   const attendanceRate = totalDays > 0 ? Math.round((totalAttendedDays / totalDays) * 100) : 100;
 
-  // Quran minimum vs actual comparison
+  // Quran minimum vs actual comparison — resolve through the shared grade→key
+  // chain (grade key first, then stage) so the same target the plan-health
+  // radar uses also drives the progress percentage.
+  const gradeTargetsMap = academicConfig.gradeTargets as Record<string, { minSurah?: string }>;
   const minSurahForGrade =
-    student.grade === 'تمهيدي'
-      ? academicConfig.gradeTargets.tamheedi.minSurah
-      : student.grade === 'صف أول'
-      ? academicConfig.gradeTargets.grade1.minSurah
-      : academicConfig.gradeTargets.grade2.minSurah;
+    resolveGradeTargetKeys(student, {} as StageQuranConfig)
+      .map((k) => gradeTargetsMap[k]?.minSurah)
+      .find((v): v is string => Boolean(v)) ?? student.minimumTargetSurah;
 
   const targetMinIndex = getSurahIndexInJuzAmma(minSurahForGrade);
   const currentSurahIndex = getSurahIndexInJuzAmma(student.currentSurah);

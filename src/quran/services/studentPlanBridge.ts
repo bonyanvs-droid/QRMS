@@ -368,7 +368,7 @@ export interface ResolvedPlanConfiguration {
  * Maps a student's grade/stage to the matching `gradeTargets` key written by
  * the admin academic-year settings (tamheedi/grade1/grade2/stage keys…).
  */
-function resolveGradeTargetKeys(
+export function resolveGradeTargetKeys(
   student: { grade?: string; stageId?: string },
   stageConfig: StageQuranConfig
 ): string[] {

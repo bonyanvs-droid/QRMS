@@ -1,6 +1,7 @@
 import { AcademicYearConfig, Student } from '../types';
 import { StudentQuranPlan } from '../quran/types/plan';
 import { findStageConfigForStudent, StageQuranConfig } from '../quran/models/stageConfig';
+import { findSurahMetadata } from './quranMetadata';
 import {
   planEndCoversTarget,
   resolveStudentGradeTargetPosition,
@@ -17,6 +18,8 @@ export interface PlanHealth {
   targetDeficient?: boolean;
   reachedTarget?: boolean;
   passedGradeTarget?: boolean;
+  /** Arabic name of the student's grade/stage target surah (الغاشية, الضحى…) */
+  gradeTargetSurahName?: string;
 }
 
 export function planHealthFor(
@@ -53,6 +56,9 @@ export function planHealthFor(
   );
   const targetDeficient = !planEndCoversTarget(tEnd, gradeTarget ?? undefined, dir);
   const passedGradeTarget = covers(pos, gradeTarget ?? undefined);
+  const gradeTargetSurahName = gradeTarget
+    ? findSurahMetadata(gradeTarget.surahNumber)?.arabicName
+    : undefined;
 
   // Achievement trumps everything: once the position passed the grade
   // target the plan's endpoint no longer matters.
@@ -65,5 +71,5 @@ export function planHealthFor(
     : reachedTarget
     ? 'reached'
     : 'healthy';
-  return { plan, state, isAtRisk, targetDeficient, reachedTarget, passedGradeTarget };
+  return { plan, state, isAtRisk, targetDeficient, reachedTarget, passedGradeTarget, gradeTargetSurahName };
 }

@@ -8,6 +8,11 @@ import {
   Teacher,
 } from '../types';
 import { evaluateStudentStatus } from './statusCalculator';
+import { findSurahMetadata } from './quranMetadata';
+
+// Defensive: older session records may carry transliterated names — render Arabic.
+const arSurah = (name?: string) =>
+  (name && findSurahMetadata(name)?.arabicName) || name || '';
 
 export function generateParentWeeklyReport(
   student: Student,
@@ -16,26 +21,27 @@ export function generateParentWeeklyReport(
   halaqahs: Halaqah[],
   teachers: Teacher[],
   academicConfig: AcademicYearConfig,
-  options?: { tenantName?: string }
+  options?: { tenantName?: string; gradeTargetSurahName?: string }
 ): string {
   const halaqah = halaqahs.find((h) => h.id === student.halaqahId);
   const teacher = teachers.find((t) => t.id === student.teacherId);
   const currentLesson = spellingLessons.find((l) => l.id === student.currentSpellingLessonId);
   const evalResult = evaluateStudentStatus(student, records, spellingLessons, academicConfig);
+  const gradeTarget = options?.gradeTargetSurahName || student.minimumTargetSurah;
 
-  const studentRecords = records.filter(
-    (r) => r.studentId === student.id && r.weekNumber === academicConfig.currentWeek
-  );
+  const studentRecords = records
+    .filter((r) => r.studentId === student.id && r.weekNumber === academicConfig.currentWeek)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const latestMem = studentRecords.find((r) => r.memorization);
   const latestRev = studentRecords.find((r) => r.revision);
 
   const memText = latestMem?.memorization
-    ? `من سورة ${latestMem.memorization.surahFrom} (${latestMem.memorization.ayahFrom}) إلى ${latestMem.memorization.surahTo} (${latestMem.memorization.ayahTo}) بإتقان ${latestMem.memorization.score}%`
-    : `سورة ${student.currentSurah} - آية ${student.currentAyah}`;
+    ? `من سورة ${arSurah(latestMem.memorization.surahFrom)} (${latestMem.memorization.ayahFrom}) إلى ${arSurah(latestMem.memorization.surahTo)} (${latestMem.memorization.ayahTo}) بإتقان ${latestMem.memorization.score}%`
+    : `سورة ${arSurah(student.currentSurah)} - آية ${student.currentAyah}`;
 
   const revText = latestRev?.revision
-    ? `من سورة ${latestRev.revision.surahFrom} إلى ${latestRev.revision.surahTo} (${latestRev.revision.type}) بإتقان ${latestRev.revision.score}%`
+    ? `من سورة ${arSurah(latestRev.revision.surahFrom)} إلى ${arSurah(latestRev.revision.surahTo)} (${latestRev.revision.type}) بإتقان ${latestRev.revision.score}%`
     : `مراجعة قصار السور السابقة`;
 
   const statusEmoji =
@@ -65,7 +71,8 @@ export function generateParentWeeklyReport(
 
 ✨ *الحفظ القرآني:*
 الموضع المنجز: ${memText}
-الحد الأدنى المستهدف: سورة ${student.minimumTargetSurah} ${student.personalTargetSurah ? `| الهدف الشخصي: سورة ${student.personalTargetSurah}` : ''}
+مستهدف الصف: سورة ${gradeTarget} ${student.personalTargetSurah ? `| الهدف الشخصي: سورة ${student.personalTargetSurah}` : ''}
+نسبة تحقيق المستهدف: ${evalResult.memorizationProgressRate}%
 
 🔄 *المراجعة والتثبيت:*
 ${revText}
@@ -101,7 +108,7 @@ export function generateParentMonthlyReport(
 
 ملخص التقدم خلال الشهر المنصرم:
 🌟 متوسط إتقان الهجاء القرآني: ${evalResult.spellingMasteryRate}% (الدرس ${currentLesson?.lessonNumber || 1})
-📖 المحفوظ الحالي: سورة ${student.currentSurah} (آية ${student.currentAyah})
+📖 المحفوظ الحالي: سورة ${arSurah(student.currentSurah)} (آية ${student.currentAyah})
 🎯 نسبة تحقيق المستهدف: ${evalResult.memorizationProgressRate}%
 📈 الاتجاه الزمني: ${evalResult.statusLabel}
 ⚡ نسبة المواظبة والحضور: ${evalResult.attendanceRate}%

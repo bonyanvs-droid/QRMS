@@ -519,7 +519,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
       spellingLessons,
       halaqahs,
       teachers,
-      academicConfig
+      academicConfig,
+      { gradeTargetSurahName: planHealthMap.get(student.id)?.gradeTargetSurahName }
     );
     setReportData({
       title: `تقرير أسبوعي – ${student.fullName}`,
@@ -1186,7 +1187,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onSelectStud
                             <span className="text-[11px] text-slate-700 font-medium">{student.grade}</span>
                             <span className="text-slate-300">•</span>
                             <span className="text-[11px] text-emerald-800 font-semibold">
-                              الهدف: {student.minimumTargetSurah}
+                              الهدف:{' '}
+                              {planHealthMap.get(student.id)?.gradeTargetSurahName ||
+                                student.minimumTargetSurah}
                             </span>
                           </div>
                         </div>
