@@ -275,14 +275,31 @@ const QuickRecordModalContent: React.FC<QuickRecordModalContentProps> = ({
       return exactToday;
     }
 
-    // 2. Floating Milestone Queue: first pending milestone in chronological sequence
+    // 2. Floating Milestone Queue: oldest pending milestone up to today
+    //    (past debt first, today itself when pending) — never a FUTURE day
+    const pendingUpToToday = dailyPlans.find(
+      (d) => !d.isHistorical && d.status === 'pending' && d.date <= todayIso
+    );
+    if (pendingUpToToday) {
+      return pendingUpToToday;
+    }
+
+    // 3. Today's milestone already achieved/locked → an extra achievement
+    //    recorded now MERGES into today (extends its actual end and rebuilds
+    //    the future) — a future-dated milestone is never locked prematurely.
+    if (exactToday) {
+      return exactToday;
+    }
+
+    // 4. No plan day at all today (weekend/holiday) → the next pending
+    //    milestone is the only assignment to record against
     const firstPending = dailyPlans.find((d) => !d.isHistorical && d.status === 'pending');
     if (firstPending) {
       return firstPending;
     }
 
-    // 3. Fallback to today or the last item
-    return exactToday || dailyPlans[dailyPlans.length - 1];
+    // 5. Fallback
+    return dailyPlans[dailyPlans.length - 1];
   }, [activeQuranPlan, todayIso, todayRecord]);
 
   // Auto Minor Revision: engine-determined range, teacher only records the actual result
